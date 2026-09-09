@@ -1,7 +1,9 @@
 package com.hesta.backend.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hesta.backend.dto.request.LoginRequest;
 import com.hesta.backend.dto.request.RegisterRequest;
+import com.hesta.backend.dto.response.AuthResponse;
 import com.hesta.backend.dto.response.UserResponse;
 import com.hesta.backend.enums.AccountStatus;
 import com.hesta.backend.enums.AuthProvider;
@@ -9,6 +11,8 @@ import com.hesta.backend.enums.PlatformRole;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.exception.GlobalExceptionHandler;
+import com.hesta.backend.security.JwtAuthenticationFilter;
+import com.hesta.backend.security.JwtTokenProvider;
 import com.hesta.backend.service.AuthService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +45,12 @@ class AuthControllerTest {
     @MockitoBean
     private AuthService authService;
 
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
+
+    @MockitoBean
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
+
     @Test
     void register_ValidPayload_Returns201Created() throws Exception {
         RegisterRequest request = RegisterRequest.builder()
@@ -71,20 +81,51 @@ class AuthControllerTest {
     }
 
     @Test
-    void register_DuplicateEmail_Returns400BadRequest() throws Exception {
-        RegisterRequest request = RegisterRequest.builder()
-                .fullName("Test User")
-                .email("existed@example.com")
+    void login_ValidCredentials_Returns200OkWithTokens() throws Exception {
+        LoginRequest request = LoginRequest.builder()
+                .email("testuser@example.com")
                 .password("password123")
                 .build();
 
-        when(authService.register(any(RegisterRequest.class))).thenThrow(new AppException(ErrorCode.USER_EXISTED));
+        AuthResponse authResponse = AuthResponse.builder()
+                .accessToken("mockAccessToken")
+                .refreshToken("mockRefreshToken")
+                .tokenType("Bearer")
+                .expiresIn(3600)
+                .user(UserResponse.builder()
+                        .id(UUID.randomUUID())
+                        .email("testuser@example.com")
+                        .fullName("Test User")
+                        .platformRole(PlatformRole.USER)
+                        .status(AccountStatus.ACTIVE)
+                        .build())
+                .build();
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        when(authService.login(any(LoginRequest.class))).thenReturn(authResponse);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1000))
+                .andExpect(jsonPath("$.result.accessToken").value("mockAccessToken"))
+                .andExpect(jsonPath("$.result.refreshToken").value("mockRefreshToken"));
+    }
+
+    @Test
+    void login_InvalidCredentials_Returns400BadRequest() throws Exception {
+        LoginRequest request = LoginRequest.builder()
+                .email("wrong@example.com")
+                .password("wrongpassword")
+                .build();
+
+        when(authService.login(any(LoginRequest.class))).thenThrow(new AppException(ErrorCode.INVALID_CREDENTIALS));
+
+        mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(1002))
-                .andExpect(jsonPath("$.message").value("Tài khoản đã tồn tại"));
+                .andExpect(jsonPath("$.code").value(1006))
+                .andExpect(jsonPath("$.message").value("Email hoặc mật khẩu không chính xác"));
     }
 }

@@ -1,7 +1,9 @@
 package com.hesta.backend.controller;
 
+import com.hesta.backend.dto.request.LoginRequest;
 import com.hesta.backend.dto.request.RegisterRequest;
 import com.hesta.backend.dto.response.ApiResponse;
+import com.hesta.backend.dto.response.AuthResponse;
 import com.hesta.backend.dto.response.UserResponse;
 import com.hesta.backend.service.AuthService;
 import jakarta.validation.Valid;
@@ -23,7 +25,7 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
         UserResponse userResponse = authService.register(request);
-        
+
         ApiResponse<UserResponse> apiResponse = ApiResponse.<UserResponse>builder()
                 .code(1000)
                 .message("Đăng ký tài khoản thành công")
@@ -31,5 +33,18 @@ public class AuthController {
                 .build();
 
         return ResponseEntity.status(HttpStatus.CREATED).body(apiResponse);
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponse<AuthResponse>> login(@Valid @RequestBody LoginRequest request) {
+        AuthResponse authResponse = authService.login(request);
+
+        ApiResponse<AuthResponse> apiResponse = ApiResponse.<AuthResponse>builder()
+                .code(1000)
+                .message("Đăng nhập thành công")
+                .result(authResponse)
+                .build();
+
+        return ResponseEntity.ok(apiResponse);
     }
 }
