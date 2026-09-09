@@ -13,7 +13,15 @@ public enum ErrorCode {
     USER_EXISTED(1002, "Tài khoản đã tồn tại", HttpStatus.BAD_REQUEST),
     USER_NOT_FOUND(1003, "Không tìm thấy tài khoản", HttpStatus.NOT_FOUND),
     UNAUTHENTICATED(1004, "Chưa xác thực hoặc token không hợp lệ", HttpStatus.UNAUTHORIZED),
-    UNAUTHORIZED(1005, "Bạn không có quyền truy cập chức năng này", HttpStatus.FORBIDDEN);
+    UNAUTHORIZED(1005, "Bạn không có quyền truy cập chức năng này", HttpStatus.FORBIDDEN),
+
+    // Các mã lỗi validation & auth bổ sung
+    FULL_NAME_REQUIRED(1017, "Họ và tên không được để trống", HttpStatus.BAD_REQUEST),
+    FULL_NAME_INVALID(1018, "Họ và tên quá dài (tối đa 150 ký tự)", HttpStatus.BAD_REQUEST),
+    EMAIL_REQUIRED(1019, "Email không được để trống", HttpStatus.BAD_REQUEST),
+    INVALID_EMAIL(1020, "Định dạng email không hợp lệ", HttpStatus.BAD_REQUEST),
+    PASSWORD_REQUIRED(1021, "Mật khẩu không được để trống", HttpStatus.BAD_REQUEST),
+    PASSWORD_TOO_SHORT(1022, "Mật khẩu phải có ít nhất 8 ký tự", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;
