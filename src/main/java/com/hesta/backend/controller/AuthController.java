@@ -61,4 +61,40 @@ public class AuthController {
 
         return ResponseEntity.ok(apiResponse);
     }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<Void>> forgotPassword(@Valid @RequestBody com.hesta.backend.dto.request.ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
+
+        ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
+                .code(1000)
+                .message("Mã OTP khôi phục mật khẩu đã được gửi đến email của bạn")
+                .build();
+
+        return ResponseEntity.ok(apiResponse);
+    }
+
+    @PostMapping("/verify-otp")
+    public ResponseEntity<ApiResponse<Void>> verifyOtp(@Valid @RequestBody com.hesta.backend.dto.request.VerifyOtpRequest request) {
+        authService.verifyOtp(request);
+
+        ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
+                .code(1000)
+                .message("Xác thực OTP thành công.")
+                .build();
+
+        return ResponseEntity.ok(apiResponse);
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(@Valid @RequestBody com.hesta.backend.dto.request.ResetPasswordRequest request) {
+        authService.resetPassword(request);
+
+        ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
+                .code(1000)
+                .message("Khôi phục mật khẩu thành công. Vui lòng đăng nhập lại.")
+                .build();
+
+        return ResponseEntity.ok(apiResponse);
+    }
 }
