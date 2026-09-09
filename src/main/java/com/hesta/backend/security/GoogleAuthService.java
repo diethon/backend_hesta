@@ -18,7 +18,7 @@ import java.util.Collections;
 @Slf4j
 public class GoogleAuthService {
 
-    @Value("${app.google.client-id:dummy-google-client-id.apps.googleusercontent.com}")
+    @Value("${app.google.client-id}")
     private String googleClientId;
 
     @Getter
@@ -31,21 +31,6 @@ public class GoogleAuthService {
     }
 
     public GoogleUserInfo verifyGoogleToken(String idTokenString) {
-        // Fallback for mock/demo testing locally when real Google OAuth credentials are not provided
-        if (idTokenString.startsWith("mock-google-token:")) {
-            String[] parts = idTokenString.split(":");
-            String email = parts.length > 1 ? parts[1] : "user.google@example.com";
-            String uid = parts.length > 2 ? parts[2] : "google-uid-" + System.currentTimeMillis();
-            String name = parts.length > 3 ? parts[3] : "Google User";
-
-            return GoogleUserInfo.builder()
-                    .email(email)
-                    .googleUid(uid)
-                    .fullName(name)
-                    .avatarUrl("https://lh3.googleusercontent.com/a/default-avatar")
-                    .build();
-        }
-
         try {
             GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
                     new NetHttpTransport(),
@@ -63,6 +48,8 @@ public class GoogleAuthService {
                 String name = (String) payload.get("name");
                 String pictureUrl = (String) payload.get("picture");
 
+                log.info("Google OAuth verified successfully for email: {}", email);
+
                 return GoogleUserInfo.builder()
                         .email(email)
                         .googleUid(userId)
@@ -70,12 +57,15 @@ public class GoogleAuthService {
                         .avatarUrl(pictureUrl)
                         .build();
             } else {
-                log.error("Invalid Google ID Token verification failure");
+                log.error("Invalid Google ID Token — verification returned null");
                 throw new AppException(ErrorCode.GOOGLE_AUTH_FAILED);
             }
+        } catch (AppException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Lỗi khi xác thực Google ID Token", e);
+            log.error("Error verifying Google ID Token", e);
             throw new AppException(ErrorCode.GOOGLE_AUTH_FAILED);
         }
     }
 }
+
