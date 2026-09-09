@@ -1,5 +1,6 @@
 package com.hesta.backend.controller;
 
+import com.hesta.backend.dto.request.GoogleLoginRequest;
 import com.hesta.backend.dto.request.LoginRequest;
 import com.hesta.backend.dto.request.RegisterRequest;
 import com.hesta.backend.dto.response.ApiResponse;
@@ -42,6 +43,19 @@ public class AuthController {
         ApiResponse<AuthResponse> apiResponse = ApiResponse.<AuthResponse>builder()
                 .code(1000)
                 .message("Đăng nhập thành công")
+                .result(authResponse)
+                .build();
+
+        return ResponseEntity.ok(apiResponse);
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<ApiResponse<AuthResponse>> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request) {
+        AuthResponse authResponse = authService.loginWithGoogle(request);
+
+        ApiResponse<AuthResponse> apiResponse = ApiResponse.<AuthResponse>builder()
+                .code(1000)
+                .message("Đăng nhập Google thành công")
                 .result(authResponse)
                 .build();
 

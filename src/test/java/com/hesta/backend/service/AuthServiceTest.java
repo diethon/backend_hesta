@@ -1,5 +1,6 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.dto.request.GoogleLoginRequest;
 import com.hesta.backend.dto.request.LoginRequest;
 import com.hesta.backend.dto.request.RegisterRequest;
 import com.hesta.backend.dto.response.AuthResponse;
@@ -15,6 +16,7 @@ import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.RefreshTokenRepository;
 import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.repository.UserRepository;
+import com.hesta.backend.security.GoogleAuthService;
 import com.hesta.backend.security.JwtTokenProvider;
 import com.hesta.backend.service.impl.AuthServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,11 +54,15 @@ class AuthServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    @Mock
+    private GoogleAuthService googleAuthService;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
     private RegisterRequest registerRequest;
     private LoginRequest loginRequest;
+    private GoogleLoginRequest googleLoginRequest;
     private User activeUser;
 
     @BeforeEach
@@ -71,6 +77,12 @@ class AuthServiceTest {
         loginRequest = LoginRequest.builder()
                 .email("nguyenvana@example.com")
                 .password("password123")
+                .deviceId("DEV-01")
+                .deviceType("WEB")
+                .build();
+
+        googleLoginRequest = GoogleLoginRequest.builder()
+                .idToken("mock-google-token:googleuser@example.com:sub12345:Google User")
                 .deviceId("DEV-01")
                 .deviceType("WEB")
                 .build();
@@ -156,5 +168,41 @@ class AuthServiceTest {
         assertEquals(AccountStatus.LOCKED, activeUser.getStatus());
         assertNotNull(activeUser.getLockedUntil());
         verify(userRepository, times(1)).save(activeUser);
+    }
+
+    @Test
+    void loginWithGoogle_NewUser_Success() {
+        GoogleAuthService.GoogleUserInfo googleUserInfo = GoogleAuthService.GoogleUserInfo.builder()
+                .email("googleuser@example.com")
+                .googleUid("sub12345")
+                .fullName("Google User")
+                .avatarUrl("http://avatar.url")
+                .build();
+
+        User newGoogleUser = User.builder()
+                .id(UUID.randomUUID())
+                .fullName(googleUserInfo.getFullName())
+                .email(googleUserInfo.getEmail())
+                .googleUid(googleUserInfo.getGoogleUid())
+                .provider(AuthProvider.GOOGLE)
+                .platformRole(PlatformRole.USER)
+                .status(AccountStatus.ACTIVE)
+                .build();
+
+        when(googleAuthService.verifyGoogleToken(anyString())).thenReturn(googleUserInfo);
+        when(userRepository.findByGoogleUid(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenReturn(newGoogleUser);
+
+        when(jwtTokenProvider.generateAccessToken(any(User.class))).thenReturn("mockJwtToken");
+        when(jwtTokenProvider.generateRefreshTokenString()).thenReturn("mockRefreshToken");
+        when(jwtTokenProvider.hashToken(anyString())).thenReturn("hashedRefreshToken");
+
+        AuthResponse response = authService.loginWithGoogle(googleLoginRequest);
+
+        assertNotNull(response);
+        assertEquals("mockJwtToken", response.getAccessToken());
+        assertEquals("googleuser@example.com", response.getUser().getEmail());
+        verify(userPreferenceRepository, times(1)).save(any(UserPreference.class));
     }
 }

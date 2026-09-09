@@ -1,6 +1,7 @@
 package com.hesta.backend.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hesta.backend.dto.request.GoogleLoginRequest;
 import com.hesta.backend.dto.request.LoginRequest;
 import com.hesta.backend.dto.request.RegisterRequest;
 import com.hesta.backend.dto.response.AuthResponse;
@@ -113,19 +114,34 @@ class AuthControllerTest {
     }
 
     @Test
-    void login_InvalidCredentials_Returns400BadRequest() throws Exception {
-        LoginRequest request = LoginRequest.builder()
-                .email("wrong@example.com")
-                .password("wrongpassword")
+    void loginWithGoogle_ValidToken_Returns200Ok() throws Exception {
+        GoogleLoginRequest request = GoogleLoginRequest.builder()
+                .idToken("mock-google-token:googleuser@example.com:sub123")
                 .build();
 
-        when(authService.login(any(LoginRequest.class))).thenThrow(new AppException(ErrorCode.INVALID_CREDENTIALS));
+        AuthResponse authResponse = AuthResponse.builder()
+                .accessToken("mockGoogleJwtToken")
+                .refreshToken("mockGoogleRefreshToken")
+                .tokenType("Bearer")
+                .expiresIn(3600)
+                .user(UserResponse.builder()
+                        .id(UUID.randomUUID())
+                        .email("googleuser@example.com")
+                        .fullName("Google User")
+                        .provider(AuthProvider.GOOGLE)
+                        .platformRole(PlatformRole.USER)
+                        .status(AccountStatus.ACTIVE)
+                        .build())
+                .build();
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        when(authService.loginWithGoogle(any(GoogleLoginRequest.class))).thenReturn(authResponse);
+
+        mockMvc.perform(post("/api/v1/auth/google")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(1006))
-                .andExpect(jsonPath("$.message").value("Email hoặc mật khẩu không chính xác"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1000))
+                .andExpect(jsonPath("$.result.accessToken").value("mockGoogleJwtToken"))
+                .andExpect(jsonPath("$.result.user.provider").value("GOOGLE"));
     }
 }
