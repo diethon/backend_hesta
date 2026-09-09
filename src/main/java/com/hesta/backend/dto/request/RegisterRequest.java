@@ -26,4 +26,6 @@ public class RegisterRequest {
     String password;
 
     String phoneNumber;
+
+    String inviteCode;
 }

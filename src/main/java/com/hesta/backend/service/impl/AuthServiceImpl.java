@@ -20,6 +20,9 @@ import com.hesta.backend.repository.PasswordResetOtpRepository;
 import com.hesta.backend.repository.RefreshTokenRepository;
 import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.repository.UserRepository;
+import com.hesta.backend.repository.HomeRepository;
+import com.hesta.backend.repository.HomeMemberRepository;
+import com.hesta.backend.repository.HomeInvitationRepository;
 import com.hesta.backend.security.GoogleAuthService;
 import com.hesta.backend.security.JwtTokenProvider;
 import com.hesta.backend.service.AuthService;
@@ -48,6 +51,9 @@ public class AuthServiceImpl implements AuthService {
     UserPreferenceRepository userPreferenceRepository;
     RefreshTokenRepository refreshTokenRepository;
     PasswordResetOtpRepository passwordResetOtpRepository;
+    HomeRepository homeRepository;
+    HomeMemberRepository homeMemberRepository;
+    HomeInvitationRepository homeInvitationRepository;
     PasswordEncoder passwordEncoder;
     JwtTokenProvider jwtTokenProvider;
     GoogleAuthService googleAuthService;
@@ -88,6 +94,13 @@ public class AuthServiceImpl implements AuthService {
                 .build();
 
         userPreferenceRepository.save(userPreference);
+
+        // Home Handling (Invite or Auto-create)
+        if (request.getInviteCode() != null && !request.getInviteCode().trim().isEmpty()) {
+            handleInvitationRegistration(savedUser, request.getInviteCode().trim());
+        } else {
+            createDefaultHomeForUser(savedUser);
+        }
 
         return mapToUserResponse(savedUser);
     }
@@ -202,6 +215,7 @@ public class AuthServiceImpl implements AuthService {
                     .build();
 
             userPreferenceRepository.save(userPreference);
+            createDefaultHomeForUser(savedUser);
             user = savedUser;
         }
 
@@ -358,5 +372,52 @@ public class AuthServiceImpl implements AuthService {
                 .createdAt(user.getCreatedAt())
                 .lastActiveAt(user.getLastActiveAt())
                 .build();
+    }
+
+    private void handleInvitationRegistration(User user, String inviteCode) {
+        com.hesta.backend.entity.HomeInvitation invitation = homeInvitationRepository.findByInviteCode(inviteCode)
+                .orElseGet(() -> homeInvitationRepository.findByInviteToken(inviteCode)
+                        .orElseThrow(() -> new AppException(ErrorCode.INVALID_CREDENTIALS)));
+
+        if (invitation.getExpiresAt().isBefore(OffsetDateTime.now())) {
+            invitation.setStatus(com.hesta.backend.enums.InvitationStatus.EXPIRED);
+            homeInvitationRepository.save(invitation);
+            throw new AppException(ErrorCode.INVALID_CREDENTIALS); // EXPIRED
+        }
+
+        if (invitation.getStatus() != com.hesta.backend.enums.InvitationStatus.PENDING) {
+            throw new AppException(ErrorCode.INVALID_CREDENTIALS);
+        }
+
+        com.hesta.backend.entity.HomeMember member = com.hesta.backend.entity.HomeMember.builder()
+                .home(invitation.getHome())
+                .user(user)
+                .role(com.hesta.backend.enums.HomeRole.MEMBER)
+                .status(com.hesta.backend.enums.MemberStatus.ACTIVE)
+                .invitedBy(invitation.getInviter())
+                .build();
+        homeMemberRepository.save(member);
+
+        invitation.setStatus(com.hesta.backend.enums.InvitationStatus.ACCEPTED);
+        homeInvitationRepository.save(invitation);
+    }
+
+    private void createDefaultHomeForUser(User user) {
+        com.hesta.backend.entity.Home home = com.hesta.backend.entity.Home.builder()
+                .name("Nhà của " + user.getFullName())
+                .createdBy(user)
+                .build();
+        com.hesta.backend.entity.Home savedHome = homeRepository.save(home);
+
+        com.hesta.backend.entity.HomeMember owner = com.hesta.backend.entity.HomeMember.builder()
+                .home(savedHome)
+                .user(user)
+                .role(com.hesta.backend.enums.HomeRole.OWNER)
+                .status(com.hesta.backend.enums.MemberStatus.ACTIVE)
+                .allowVoiceOverride(true)
+                .allowSceneCreation(true)
+                .allowRemoteControl(true)
+                .build();
+        homeMemberRepository.save(owner);
     }
 }
