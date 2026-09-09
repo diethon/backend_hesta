@@ -55,16 +55,34 @@ npx supabase db reset
 
 Mở Supabase Studio local tại `http://127.0.0.1:54323` để xem bảng và dữ liệu test local.
 
-### 4. Chạy backend với Supabase local
+### 4. Chạy backend kết nối với Supabase Cloud (Dùng chung cho cả Team)
 
+Để tất cả thành viên cùng làm việc trên một Database (thấy dữ liệu của nhau), chúng ta sẽ trỏ Backend trực tiếp lên Supabase Cloud thay vì dùng Local.
+
+Bạn cần cấu hình các biến môi trường (Environment Variables) trước khi chạy Spring Boot.
+
+**Cách chạy bằng Terminal/PowerShell:**
 ```powershell
 $env:SPRING_PROFILES_ACTIVE="local"
+$env:DATABASE_URL="jdbc:postgresql://aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+$env:DATABASE_USERNAME="postgres.your_project_ref"
+$env:DATABASE_PASSWORD="your_cloud_database_password"
 mvn spring-boot:run
 ```
+*(Thay thế URL, USERNAME và PASSWORD bằng thông tin lấy từ mục **Project Settings -> Database** trên Supabase Dashboard).*
 
-Profile local kết nối PostgreSQL tại `127.0.0.1:54322`. Không đưa password Cloud hoặc Supabase secret key vào Git.
+**Cách chạy bằng IntelliJ IDEA:**
+1. Mở Edit Configurations... của ứng dụng Spring Boot.
+2. Tìm ô **Environment variables**.
+3. Nhập vào: `DATABASE_URL=jdbc:postgresql://[YOUR_URL];DATABASE_USERNAME=[YOUR_USER];DATABASE_PASSWORD=[YOUR_PASSWORD]`
 
-## Thêm hoặc thay đổi schema database
+⚠️ **LƯU Ý QUAN TRỌNG:** Tuyệt đối KHÔNG hardcode password vào file `application-local.properties` và KHÔNG commit password lên Git.
+
+---
+
+## Quản lý cấu trúc Database (Migrations)
+
+Mặc dù chúng ta dùng chung Database Cloud cho dữ liệu, **việc thay đổi cấu trúc bảng** (thêm cột, tạo bảng mới) vẫn phải thông qua Migration để đồng bộ cho toàn Team.
 
 ### 1. Làm việc trên feature branch
 
