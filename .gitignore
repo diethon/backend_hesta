@@ -43,3 +43,4 @@ logs/
 ### Env variables ###
 .env
 .env.*
+src/main/resources/application-local.properties

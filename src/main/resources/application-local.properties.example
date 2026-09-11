@@ -1,0 +1,30 @@
+# Copy this file to application-local.properties and fill in your values.
+# DO NOT commit application-local.properties to Git!
+
+# Database Configuration (Supabase Cloud - ask team lead for credentials)
+spring.datasource.url=jdbc:postgresql://aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+spring.datasource.username=postgres.your_project_ref
+spring.datasource.password=your_database_password
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.open-in-view=false
+
+# Database schema is managed by Supabase CLI migrations.
+spring.flyway.enabled=false
+
+# Google OAuth 2.0 (ask team lead for credentials)
+app.google.client-id=your-google-client-id.apps.googleusercontent.com
+
+# Cloudinary Setup (ask team lead for credentials)
+cloudinary.cloud-name=your_cloud_name
+cloudinary.api-key=your_api_key
+cloudinary.api-secret=your_api_secret
+
+# Email Configuration (Gmail SMTP - ask team lead for credentials)
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=your_email@gmail.com
+spring.mail.password=your_app_password
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
