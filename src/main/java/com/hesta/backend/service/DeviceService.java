@@ -1,0 +1,20 @@
+package com.hesta.backend.service;
+
+import com.hesta.backend.dto.request.DeviceUpdateRequest;
+import com.hesta.backend.dto.response.DeviceResponse;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface DeviceService {
+    
+    List<DeviceResponse> getDevicesByHome(UUID userId, UUID homeId);
+    
+    DeviceResponse getDeviceDetail(UUID userId, UUID deviceId);
+    
+    DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request);
+    
+    void removeDevice(UUID userId, UUID deviceId);
+    
+    List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId);
+}
