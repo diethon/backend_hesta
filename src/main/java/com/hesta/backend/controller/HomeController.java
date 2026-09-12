@@ -79,6 +79,51 @@ public class HomeController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/{homeId}/rooms")
+    public ResponseEntity<ApiResponse<Object>> getHomeRooms(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId) {
+
+        Object result = homeService.getHomeRooms(userDetails.getId(), homeId);
+
+        ApiResponse<Object> response = ApiResponse.builder()
+                .code(1000)
+                .result(result)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{homeId}/rooms")
+    public ResponseEntity<ApiResponse<Object>> createHomeRoom(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId,
+            @RequestBody Map<String, Object> request) {
+
+        String roomName = (String) request.get("name");
+        if (roomName == null || roomName.trim().isEmpty()) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.INVALID_CREDENTIALS);
+        }
+
+        String icon = (String) request.get("icon");
+        java.math.BigDecimal layoutX = null;
+        java.math.BigDecimal layoutY = null;
+        
+        if (request.get("layoutX") != null) {
+            layoutX = new java.math.BigDecimal(request.get("layoutX").toString());
+        }
+        if (request.get("layoutY") != null) {
+            layoutY = new java.math.BigDecimal(request.get("layoutY").toString());
+        }
+
+        homeService.createHomeRoom(userDetails.getId(), homeId, roomName, icon, layoutX, layoutY);
+
+        return ResponseEntity.ok(ApiResponse.builder()
+                .code(1000)
+                .message("Tạo phòng thành công")
+                .build());
+    }
+
     @GetMapping("/{homeId}/members")
     public ResponseEntity<ApiResponse<Object>> getMembers(
             @AuthenticationPrincipal CustomUserDetails userDetails,
