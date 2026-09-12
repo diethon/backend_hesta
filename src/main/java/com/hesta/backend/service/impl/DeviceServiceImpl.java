@@ -74,11 +74,37 @@ public class DeviceServiceImpl implements DeviceService {
 
     @Override
     @Transactional
+    public void updateDeviceStateFromMqtt(String deviceIdStr, java.util.Map<String, Object> payload) {
+        try {
+            UUID deviceId = UUID.fromString(deviceIdStr);
+            Device device = deviceRepository.findById(deviceId)
+                    .orElseThrow(() -> new RuntimeException("Device not found"));
+
+            java.util.List<String> allowedKeys = device.getCapabilities();
+            java.util.Map<String, Object> newState = new java.util.HashMap<>();
+            
+            if (allowedKeys == null || allowedKeys.isEmpty()) {
+                newState.putAll(payload);
+            } else {
+                for (java.util.Map.Entry<String, Object> entry : payload.entrySet()) {
+                    if (allowedKeys.contains(entry.getKey())) {
+                        newState.put(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            device.setCurrentState(newState);
+            deviceRepository.save(device);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Invalid payload or UUID format: " + e.getMessage());
+        }
+    }
+
+    @Override
+    @Transactional
     public DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
         
-        // Cần quyền Owner để cấu hình cơ bản thiết bị, hoặc tuỳ logic team, ở đây check Owner
         checkHomeOwner(userId, device.getHome().getId());
 
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
@@ -117,10 +143,8 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
                 
-        // Only OWNER can remove device
         checkHomeOwner(userId, device.getHome().getId());
         
-        // Soft delete thay vì xoá cứng để bảo toàn device_state_history
         device.setDeleted(true);
         deviceRepository.save(device);
     }

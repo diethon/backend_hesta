@@ -59,6 +59,11 @@ public class Device {
     @Column(name = "current_state", nullable = false, columnDefinition = "jsonb")
     private java.util.Map<String, Object> currentState;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "capabilities", columnDefinition = "jsonb")
+    @Builder.Default
+    private java.util.List<String> capabilities = new java.util.ArrayList<>();
+
     @Column(name = "icon", length = 50)
     private String icon;
 

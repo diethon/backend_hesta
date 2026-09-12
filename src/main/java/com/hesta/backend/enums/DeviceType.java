@@ -1,10 +1,12 @@
 package com.hesta.backend.enums;
 
 public enum DeviceType {
-    LIGHT,
-    FAN,
-    AC,
+    LIGHT, 
+    FAN, 
+    AC, 
     SOCKET,
     SENSOR,
-    LOCK
+    LOCK,
+    CAMERA,
+    MICROPHONE
 }
