@@ -15,7 +15,9 @@ public class DeviceResponse {
     private UUID id;
     private UUID homeId;
     private UUID roomId;
+    private String roomName;
     private UUID nodeId;
+    private String nodeName;
     private String name;
     private String deviceType;
     private Short gpioPin;
@@ -32,9 +34,11 @@ public class DeviceResponse {
                 .id(device.getId())
                 .homeId(device.getHome().getId())
                 .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
+                .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
                 .nodeId(device.getNode() != null ? device.getNode().getId() : null)
+                .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())
-                .deviceType(device.getDeviceType())
+                .deviceType(device.getDeviceType() != null ? device.getDeviceType().name() : null)
                 .gpioPin(device.getGpioPin())
                 .status(device.getStatus().name())
                 .currentState(device.getCurrentState())

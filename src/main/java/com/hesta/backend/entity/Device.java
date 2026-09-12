@@ -40,8 +40,9 @@ public class Device {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "device_type", nullable = false, length = 50)
-    private String deviceType;
+    private com.hesta.backend.enums.DeviceType deviceType;
 
     @Column(name = "gpio_pin")
     private Short gpioPin;
