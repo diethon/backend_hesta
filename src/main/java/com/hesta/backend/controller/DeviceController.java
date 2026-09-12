@@ -34,6 +34,19 @@ public class DeviceController {
                 .build());
     }
 
+    @GetMapping("/rooms/{roomId}/devices")
+    public ResponseEntity<ApiResponse<List<DeviceResponse>>> getDevicesByRoom(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID roomId) {
+
+        List<DeviceResponse> result = deviceService.getDevicesByRoom(userDetails.getId(), roomId);
+
+        return ResponseEntity.ok(ApiResponse.<List<DeviceResponse>>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
     @GetMapping("/devices/{deviceId}")
     public ResponseEntity<ApiResponse<DeviceResponse>> getDeviceDetail(
             @AuthenticationPrincipal CustomUserDetails userDetails,

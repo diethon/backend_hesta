@@ -14,6 +14,7 @@ import java.util.UUID;
 @Table(name = "devices", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
 })
+@org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -80,4 +81,8 @@ public class Device {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
+    
+    @Column(name = "is_deleted", nullable = false)
+    @Builder.Default
+    private boolean isDeleted = false;
 }

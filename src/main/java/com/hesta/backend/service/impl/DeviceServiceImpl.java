@@ -53,6 +53,18 @@ public class DeviceServiceImpl implements DeviceService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<DeviceResponse> getDevicesByRoom(UUID userId, UUID roomId) {
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new RuntimeException("Room not found"));
+        checkHomeAccess(userId, room.getHome().getId());
+        
+        return deviceRepository.findByRoomId(roomId).stream()
+                .map(DeviceResponse::fromEntity)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
@@ -108,7 +120,9 @@ public class DeviceServiceImpl implements DeviceService {
         // Only OWNER can remove device
         checkHomeOwner(userId, device.getHome().getId());
         
-        deviceRepository.delete(device);
+        // Soft delete thay vì xoá cứng để bảo toàn device_state_history
+        device.setDeleted(true);
+        deviceRepository.save(device);
     }
 
     @Override

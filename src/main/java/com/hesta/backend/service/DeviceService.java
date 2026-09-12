@@ -10,6 +10,8 @@ public interface DeviceService {
     
     List<DeviceResponse> getDevicesByHome(UUID userId, UUID homeId);
     
+    List<DeviceResponse> getDevicesByRoom(UUID userId, UUID roomId);
+    
     DeviceResponse getDeviceDetail(UUID userId, UUID deviceId);
     
     DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request);
