@@ -13,6 +13,10 @@ import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.PlatformRole;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
+import com.hesta.backend.repository.HomeInvitationRepository;
+import com.hesta.backend.repository.HomeMemberRepository;
+import com.hesta.backend.repository.HomeRepository;
+import com.hesta.backend.repository.PasswordResetOtpRepository;
 import com.hesta.backend.repository.RefreshTokenRepository;
 import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.repository.UserRepository;
@@ -49,6 +53,18 @@ class AuthServiceTest {
     private RefreshTokenRepository refreshTokenRepository;
 
     @Mock
+    private PasswordResetOtpRepository passwordResetOtpRepository;
+
+    @Mock
+    private HomeRepository homeRepository;
+
+    @Mock
+    private HomeMemberRepository homeMemberRepository;
+
+    @Mock
+    private HomeInvitationRepository homeInvitationRepository;
+
+    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -56,6 +72,9 @@ class AuthServiceTest {
 
     @Mock
     private GoogleAuthService googleAuthService;
+
+    @Mock
+    private EmailService emailService;
 
     @InjectMocks
     private AuthServiceImpl authService;

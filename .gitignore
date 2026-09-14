@@ -43,3 +43,5 @@ logs/
 ### Env variables ###
 .env
 .env.*
+
+/agents
