@@ -1,4 +1,4 @@
-﻿package com.hesta.backend.config.mqtt;
+package com.hesta.backend.config.mqtt;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

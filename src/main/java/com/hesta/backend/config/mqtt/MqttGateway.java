@@ -1,4 +1,4 @@
-﻿package com.hesta.backend.config.mqtt;
+package com.hesta.backend.config.mqtt;
 
 import org.springframework.integration.annotation.MessagingGateway;
 import org.springframework.integration.mqtt.support.MqttHeaders;

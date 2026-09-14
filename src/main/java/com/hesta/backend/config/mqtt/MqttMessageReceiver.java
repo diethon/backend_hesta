@@ -1,4 +1,4 @@
-﻿package com.hesta.backend.config.mqtt;
+package com.hesta.backend.config.mqtt;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.integration.annotation.ServiceActivator;
