@@ -23,6 +23,7 @@ public class HomeServiceImpl implements HomeService {
     private final HomeInvitationRepository homeInvitationRepository;
     private final UserRepository userRepository;
     private final EmailService emailService;
+    private final com.hesta.backend.repository.RoomRepository roomRepository;
 
     @Override
     @Transactional
@@ -119,6 +120,40 @@ public class HomeServiceImpl implements HomeService {
             ));
         }
         return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Object getHomeRooms(UUID userId, UUID homeId) {
+        homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
+                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+
+        List<Room> rooms = roomRepository.findByHomeId(homeId);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Room r : rooms) {
+            result.add(Map.of(
+                    "id", r.getId(),
+                    "name", r.getName()
+            ));
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public void createHomeRoom(UUID userId, UUID homeId, String roomName, String icon, java.math.BigDecimal layoutX, java.math.BigDecimal layoutY) {
+        homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
+                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+        
+        Home home = homeRepository.findById(homeId).orElseThrow();
+        Room room = Room.builder()
+                .home(home)
+                .name(roomName)
+                .icon(icon)
+                .layoutX(layoutX)
+                .layoutY(layoutY)
+                .build();
+        roomRepository.save(room);
     }
 
     @Override

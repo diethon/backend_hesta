@@ -45,3 +45,4 @@ logs/
 .env.*
 
 /agents
+src/main/resources/application-local.properties
