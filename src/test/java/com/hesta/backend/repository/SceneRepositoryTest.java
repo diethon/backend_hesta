@@ -7,6 +7,8 @@ import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.DeviceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -58,7 +61,9 @@ class SceneRepositoryTest {
         device = deviceRepository.save(Device.builder()
                 .home(home)
                 .name("Living room light")
-                .deviceType("LIGHT")
+                .deviceType(DeviceType.LIGHT)
+                .status(DeviceStatus.UNKNOWN)
+                .currentState(Map.of())
                 .build());
     }
 

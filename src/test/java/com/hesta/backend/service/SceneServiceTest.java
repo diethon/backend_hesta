@@ -10,6 +10,7 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
+import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -66,7 +67,7 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).home(home).name("Lamp").deviceType("LIGHT").build();
+        device = Device.builder().id(deviceId).home(home).name("Lamp").deviceType(DeviceType.LIGHT).build();
         scene = Scene.builder()
                 .id(sceneId)
                 .home(home)
@@ -121,7 +122,7 @@ class SceneServiceTest {
                 .id(deviceId)
                 .home(anotherHome)
                 .name("Foreign lamp")
-                .deviceType("LIGHT")
+                .deviceType(DeviceType.LIGHT)
                 .build();
         when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
