@@ -88,3 +88,11 @@ graph TD
 7. ➔ **`Controller`** (Chuyển `Entity` thành `dto/response` để che dữ liệu nhạy cảm)
 8. ➔ Gói vào **`ApiResponse`**
 9. ➔ **Trả cục JSON về cho Frontend**.
+
+---
+
+## 📚 Tài liệu chức năng
+
+- [Shared Realtime Backend](docs/REALTIME.md)
+- [Notification Core Backend](docs/NOTIFICATION_CORE.md)
+- [Local Demo Data](docs/LOCAL_DEMO_DATA.md)
