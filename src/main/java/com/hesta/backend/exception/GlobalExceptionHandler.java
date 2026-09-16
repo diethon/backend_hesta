@@ -3,6 +3,7 @@ package com.hesta.backend.exception;
 import com.hesta.backend.dto.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -46,6 +47,16 @@ public class GlobalExceptionHandler {
                 .message(errorCode.getMessage())
                 .build();
                 
+        return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Object>> handleUnreadableRequest(HttpMessageNotReadableException exception) {
+        ErrorCode errorCode = ErrorCode.INVALID_REQUEST;
+        ApiResponse<Object> apiResponse = ApiResponse.builder()
+                .code(errorCode.getCode())
+                .message(errorCode.getMessage())
+                .build();
         return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
     }
 
