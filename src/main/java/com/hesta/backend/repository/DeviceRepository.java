@@ -13,4 +13,5 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     List<Device> findByHomeId(UUID homeId);
     List<Device> findByRoomId(UUID roomId);
     Optional<Device> findByNodeIdAndGpioPin(UUID nodeId, Short gpioPin);
+    List<Device> findAllByHomeIdOrderByNameAsc(UUID homeId);
 }
