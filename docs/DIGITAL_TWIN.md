@@ -12,8 +12,8 @@ statuses apply: 401 unauthenticated, 403 unauthorized, 404 missing home.
 | --- | --- |
 | TwinHomeSnapshotResponse | UUID homeId, String name, rooms[], unassignedDevices[], unassignedSensors[] |
 | TwinRoomSnapshotResponse | UUID roomId, UUID homeId, String name, String icon, devices[], sensors[] |
-| TwinDeviceSnapshotResponse | UUID deviceId, UUID roomId, String name, DeviceType deviceType, String icon, DeviceStatus status, JsonNode currentState, OffsetDateTime lastSeen |
-| TwinSensorSnapshotResponse | String sensorId, UUID roomId, UUID deviceId, String metricType, BigDecimal latestValue, String unit, OffsetDateTime observedAt |
+| TwinDeviceSnapshotResponse | UUID deviceId, UUID roomId, String name, DeviceType deviceType, String icon, DeviceStatus status, JsonNode currentState, OffsetDateTime lastSeen, TwinHealthStatus healthStatus |
+| TwinSensorSnapshotResponse | String sensorId, UUID roomId, UUID deviceId, String metricType, BigDecimal latestValue, String unit, OffsetDateTime observedAt, TwinHealthStatus healthStatus |
 
 All collections are present, including empty collections. `roomId` is null for
 unassigned nodes, which appear in the home's explicit unassigned collections.
@@ -166,9 +166,10 @@ Modified documentation: `docs/REALTIME.md` links this contract.
 
 ## Boundaries and limitations
 
-- `status`, `lastSeen`, and `observedAt` are the stored raw values. This contract
-  does not calculate ACTIVE/STALE/OFFLINE thresholds or change ingestion's
-  responsibility for maintaining lastSeen/status.
+- `status`, `lastSeen`, and `observedAt` remain stored raw values. The separate
+  [Twin health feature](TWIN_HEALTH.md) now derives `healthStatus` and publishes
+  pure freshness transitions without changing ingestion's responsibility for
+  maintaining lastSeen/status.
 - The shared broker has no durable replay or ordering/version guarantee. Initial
   snapshot/event race reconciliation, reconnects, and out-of-order updates remain
   consumer concerns. Observation time is supplied, but is not a monotonic version.
@@ -177,4 +178,5 @@ Modified documentation: `docs/REALTIME.md` links this contract.
 - The latest-per-metric query uses existing indexes. Large telemetry retention
   volumes may warrant a separately reviewed query/index optimization.
 - No frontend files, React/Redux/TypeScript, new WebSocket/STOMP infrastructure,
-  Digital Twin persistence, layout editor, or health thresholds were added.
+  Digital Twin persistence, or layout editor were added. Health thresholds are
+  defined by the subsequent [Twin health feature](TWIN_HEALTH.md).

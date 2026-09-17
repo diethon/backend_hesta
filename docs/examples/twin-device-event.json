@@ -14,7 +14,8 @@
       "power": "ON",
       "brightness": 80
     },
-    "lastSeen": "2026-09-17T09:00:00Z"
+    "lastSeen": "2026-09-17T09:00:00Z",
+    "healthStatus": "ACTIVE"
   },
   "timestamp": "2026-09-17T09:00:00Z"
 }

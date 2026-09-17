@@ -59,8 +59,8 @@ removes subscriptions on `DISCONNECT` or transport error.
 - `data`: generic, non-null payload
 - `timestamp`: event creation time
 
-The shared event types are `SENSOR_READING_UPDATED`, `DEVICE_STATE_CHANGED`, and
-`NOTIFICATION_CREATED`. Add a value to `RealtimeEventType` for a future event; do not create another
+The shared event types are `SENSOR_READING_UPDATED`, `DEVICE_STATE_CHANGED`,
+`TWIN_HEALTH_STATUS_CHANGED`, and `NOTIFICATION_CREATED`. Add a value to `RealtimeEventType` for a future event; do not create another
 WebSocket infrastructure.
 
 ## Publishing from a future service
@@ -110,3 +110,5 @@ Feature business logic remains outside this layer. Notification Core now integra
 
 The canonical device/sensor node payloads, initial home snapshot endpoint, and
 after-commit feature hooks are documented in [DIGITAL_TWIN.md](DIGITAL_TWIN.md).
+Derived freshness fields and pure single-node health transitions are documented
+in [TWIN_HEALTH.md](TWIN_HEALTH.md).

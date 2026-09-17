@@ -1,5 +1,7 @@
 package com.hesta.backend.mapper;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.response.ApiResponse;
@@ -17,19 +19,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @JsonTest
 class TwinContractSerializationTest {
+    @Test
+    void healthEvent_serialization_matchesSingleNodeExample() throws Exception {
+        var payload = new com.hesta.backend.dto.response.TwinHealthStatusChangedPayload(
+                com.hesta.backend.enums.TwinNodeType.SENSOR, fixture.environment.getId() + ":TEMPERATURE",
+                fixture.environment.getId(), fixture.bedroom.getId(), com.hesta.backend.enums.TwinHealthStatus.ACTIVE,
+                com.hesta.backend.enums.TwinHealthStatus.STALE, TwinFixtures.TIME, TwinFixtures.TIME.plusSeconds(30).toInstant());
+        var event = new RealtimeEvent<>("example-health-event", RealtimeEventType.TWIN_HEALTH_STATUS_CHANGED,
+                fixture.home.getId(), fixture.environment.getId(), payload, TwinFixtures.TIME.plusSeconds(30).toInstant());
+        assertExample("twin-health-event.json", event);
+    }
+
     @Autowired ObjectMapper objectMapper;
     private final TwinFixtures fixture = new TwinFixtures();
 
     @Test
     void snapshot_serialization_matchesPublishedExampleExactly() throws Exception {
-        var mapper = new TwinSnapshotMapper(objectMapper);
+        var mapper = TwinHealthTestSupport.mapper(objectMapper);
         var snapshot = mapper.home(fixture.home, fixture.rooms, fixture.devices, fixture.readings);
         assertExample("twin-snapshot.json", ApiResponse.<TwinHomeSnapshotResponse>builder().result(snapshot).build());
     }
 
     @Test
     void deviceEvent_serialization_matchesPublishedExampleAndContainsOnlyOneNode() throws Exception {
-        var payload = new TwinSnapshotMapper(objectMapper).device(fixture.light);
+        var payload = TwinHealthTestSupport.mapper(objectMapper).device(fixture.light);
         var event = new RealtimeEvent<>("example-device-event", RealtimeEventType.DEVICE_STATE_CHANGED,
                 fixture.home.getId(), fixture.light.getId(), payload, TwinFixtures.TIME.toInstant());
         JsonNode json = assertExample("twin-device-event.json", event);
@@ -39,7 +52,7 @@ class TwinContractSerializationTest {
 
     @Test
     void sensorEvent_serialization_matchesPublishedExampleAndSnapshotNode() throws Exception {
-        var mapper = new TwinSnapshotMapper(objectMapper);
+        var mapper = TwinHealthTestSupport.mapper(objectMapper);
         var payload = mapper.sensor(fixture.readings.getFirst());
         var event = new RealtimeEvent<>("example-sensor-event", RealtimeEventType.SENSOR_READING_UPDATED,
                 fixture.home.getId(), fixture.environment.getId(), payload, TwinFixtures.TIME.toInstant());
@@ -55,7 +68,7 @@ class TwinContractSerializationTest {
     void device_withoutRoomOrObservation_serializesExplicitNulls() throws Exception {
         fixture.light.setRoom(null);
         fixture.light.setLastSeen(null);
-        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsBytes(new TwinSnapshotMapper(objectMapper)
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsBytes(TwinHealthTestSupport.mapper(objectMapper)
                 .device(fixture.light)));
         assertThat(json.has("roomId")).isTrue();
         assertThat(json.path("roomId").isNull()).isTrue();

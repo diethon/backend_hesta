@@ -1,5 +1,7 @@
 package com.hesta.backend.mapper;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.support.TwinFixtures;
@@ -12,8 +14,26 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TwinSnapshotMapperTest {
+    @Test
+    void health_usesIndependentAuthoritativeTimesAndPreservesDeviceStatus() {
+        var clock = new com.hesta.backend.support.MutableClock(TwinFixtures.TIME.toInstant());
+        var mapper = new TwinSnapshotMapper(new ObjectMapper(), TwinHealthTestSupport.resolver(clock), clock);
+        fixture.light.setStatus(com.hesta.backend.enums.DeviceStatus.ERROR);
+        assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.ACTIVE);
+        assertThat(mapper.device(fixture.light).status()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
+        fixture.light.setLastSeen(null);
+        assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
+        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.ACTIVE);
+        clock.advance(java.time.Duration.ofSeconds(30));
+        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.STALE);
+        clock.advance(java.time.Duration.ofSeconds(270));
+        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
+        assertThat(fixture.light.getLastSeen()).isNull();
+        assertThat(fixture.light.getStatus()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
+    }
+
     private final TwinFixtures fixture = new TwinFixtures();
-    private final TwinSnapshotMapper mapper = new TwinSnapshotMapper(new ObjectMapper());
+    private final TwinSnapshotMapper mapper = TwinHealthTestSupport.mapper(new ObjectMapper());
 
     @Test
     void home_withRoomsDevicesAndMetrics_mapsCompleteSnapshot() {

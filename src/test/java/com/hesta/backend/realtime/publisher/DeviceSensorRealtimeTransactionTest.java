@@ -1,5 +1,7 @@
 package com.hesta.backend.realtime.publisher;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.command.SensorReadingUpdatedEvent;
@@ -32,7 +34,7 @@ class DeviceSensorRealtimeTransactionTest {
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean RealtimeEventPublisher publisher;
     private final TwinFixtures fixture = new TwinFixtures();
-    private final TwinSnapshotMapper mapper = new TwinSnapshotMapper(new ObjectMapper());
+    private final TwinSnapshotMapper mapper = TwinHealthTestSupport.mapper(new ObjectMapper());
 
     @BeforeEach
     void resetPublisher() {
@@ -102,6 +104,12 @@ class DeviceSensorRealtimeTransactionTest {
     @EnableTransactionManagement
     @Import(DeviceSensorRealtimeListener.class)
     static class TestConfig {
+        @Bean
+        com.hesta.backend.service.TwinHealthStatusResolver healthResolver() {
+            return com.hesta.backend.support.TwinHealthTestSupport.resolver(
+                    com.hesta.backend.support.TwinHealthTestSupport.FIXED_CLOCK);
+        }
+
         @Bean
         PlatformTransactionManager transactionManager() {
             return new NotificationRealtimeTransactionTest.TestTransactionManager();

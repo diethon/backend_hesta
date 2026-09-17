@@ -1,5 +1,7 @@
 package com.hesta.backend.mapper;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.request.MockSensorReadingRequest;
 import com.hesta.backend.dto.response.ApiResponse;
@@ -30,7 +32,7 @@ class MockSensorExamplesTest {
         var reading = TwinFixtures.reading(500, fixture.environment, request.metricType(),
                 request.value().toPlainString(), request.unit(), request.observedAt());
         var event = new RealtimeEvent<>("example-mock-sensor-event", RealtimeEventType.SENSOR_READING_UPDATED,
-                fixture.home.getId(), request.deviceId(), new TwinSnapshotMapper(mapper).sensor(reading),
+                fixture.home.getId(), request.deviceId(), TwinHealthTestSupport.mapper(mapper).sensor(reading),
                 Instant.parse("2026-09-17T09:00:01Z"));
         assertThat(mapper.readTree(mapper.writeValueAsBytes(event)))
                 .isEqualTo(mapper.readTree(Path.of("docs/examples/mock-sensor-event.json").toFile()));

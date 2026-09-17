@@ -15,6 +15,20 @@ import java.util.UUID;
 
 @Repository
 public interface DeviceRepository extends JpaRepository<Device, UUID> {
+    @Query("""
+            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+                   null as metricType, device.lastSeen as referenceTime
+            from Device device where device.isDeleted = false
+            """)
+    List<TwinHealthReference> findHealthReferences();
+
+    @Query("""
+            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+                   null as metricType, device.lastSeen as referenceTime
+            from Device device where device.id = :id and device.isDeleted = false
+            """)
+    Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);
+
     // Serializes latest-state decisions for concurrent submissions on one device.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select device from Device device where device.id = :id and device.isDeleted = false")

@@ -1,5 +1,7 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.command.SensorReadingInput;
 import com.hesta.backend.dto.command.SensorReadingUpdatedEvent;
@@ -45,7 +47,7 @@ class SensorReadingIngestionServiceTest {
     @BeforeEach
     void setUp() {
         service = new SensorReadingIngestionServiceImpl(devices, readings, authorization,
-                new TwinSnapshotMapper(new ObjectMapper()), events);
+                TwinHealthTestSupport.mapper(new ObjectMapper()), events);
     }
 
     @Test

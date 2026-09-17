@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.hesta.backend.config.SecurityConfig;
+import com.hesta.backend.config.TwinHealthConfig;
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.controller.MockSensorController;
 import com.hesta.backend.controller.TwinSnapshotController;
 import com.hesta.backend.dto.command.SensorReadingInput;
@@ -17,6 +19,7 @@ import com.hesta.backend.realtime.config.RealtimeWebSocketConfig;
 import com.hesta.backend.realtime.publisher.DeviceSensorRealtimeListener;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisherImpl;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
+import com.hesta.backend.realtime.publisher.TwinHealthActivityListener;
 import com.hesta.backend.realtime.model.RealtimeEvent;
 import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.realtime.security.RealtimeWebSocketChannelInterceptor;
@@ -27,6 +30,10 @@ import com.hesta.backend.security.*;
 import com.hesta.backend.service.HomeAuthorizationService;
 import com.hesta.backend.service.SensorReadingIngestionService;
 import com.hesta.backend.service.TwinSnapshotService;
+import com.hesta.backend.service.TwinHealthEvaluationService;
+import com.hesta.backend.service.impl.TwinHealthEvaluationServiceImpl;
+import com.hesta.backend.service.impl.TwinHealthStatusResolverImpl;
+import com.hesta.backend.support.MutableClock;
 import com.hesta.backend.service.impl.RealtimeSubscriptionServiceImpl;
 import com.hesta.backend.service.impl.SensorReadingIngestionServiceImpl;
 import com.hesta.backend.service.impl.TwinSnapshotServiceImpl;
@@ -42,6 +49,8 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -59,6 +68,8 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -70,6 +81,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(classes = MockSensorPipelineIntegrationTest.TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"app.mock-sensors.enabled=true", "app.realtime.websocket.heartbeat=1s",
+                "app.twin.health.stale-after=30s", "app.twin.health.offline-after=5m",
+                "app.twin.health.evaluation-interval=1h", "app.twin.health.scheduling-enabled=false",
                 "spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=false", "spring.jpa.open-in-view=false"})
 @ActiveProfiles("mock-sensors")
 @Slf4j
@@ -90,6 +103,9 @@ class MockSensorPipelineIntegrationTest {
     @Autowired TwinSnapshotService snapshots;
     @Autowired RealtimeEventPublisher realtimePublisher;
     @Autowired TwinSnapshotMapper mapper;
+    @Autowired MutableClock clock;
+    @Autowired TwinHealthEvaluationService health;
+    @Autowired org.springframework.context.ApplicationEventPublisher applicationEvents;
     private User user;
     private Home home;
     private Room room;
@@ -99,6 +115,7 @@ class MockSensorPipelineIntegrationTest {
     private ThreadPoolTaskScheduler scheduler;
     private StompSession session;
     private final BlockingQueue<JsonNode> received = new LinkedBlockingQueue<>();
+    private final BlockingQueue<JsonNode> healthEvents = new LinkedBlockingQueue<>();
 
     @DynamicPropertySource
     static void localDatabase(DynamicPropertyRegistry properties) {
@@ -111,6 +128,7 @@ class MockSensorPipelineIntegrationTest {
 
     @BeforeEach
     void createCommittedFixtureAndSubscribe() throws Exception {
+        clock.set(TIME.toInstant());
         new TransactionTemplate(transactions).executeWithoutResult(status -> {
             user = User.builder().fullName("Mock pipeline test").email(UUID.randomUUID() + "@example.com")
                     .provider(AuthProvider.LOCAL).passwordHash("test-hash").build();
@@ -124,6 +142,7 @@ class MockSensorPipelineIntegrationTest {
                     .status(DeviceStatus.UNKNOWN).currentState(Map.of()).build();
             em.persist(device);
         });
+        health.evaluateAll();
         token = tokens.generateAccessToken(user);
         scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);
@@ -144,6 +163,7 @@ class MockSensorPipelineIntegrationTest {
                 try {
                     JsonNode event = json.readTree((byte[]) payload);
                     if (event.path("type").asText().equals("DEVICE_STATE_CHANGED")) subscribed.countDown();
+                    else if (event.path("type").asText().equals("TWIN_HEALTH_STATUS_CHANGED")) healthEvents.add(event);
                     else received.add(event);
                 }
                 catch (Exception exception) { throw new IllegalStateException(exception); }
@@ -167,6 +187,127 @@ class MockSensorPipelineIntegrationTest {
             if (home != null) jdbc.update("delete from homes where id = ?", home.getId());
             if (user != null) jdbc.update("delete from users where id = ?", user.getId());
         });
+        health.evaluateAll();
+    }
+
+    @Test
+    void healthTimeline_transitionsWithoutActivity_andRecoversOnlyAfterFreshCommit() throws Exception {
+        post(request("TEMPERATURE", "29.4", TIME));
+        assertThat(nextEvent().at("/data/healthStatus").asText()).isEqualTo("ACTIVE");
+        assertThat(healthEvents).isEmpty(); // first observation establishes a baseline
+
+        clock.advance(Duration.ofMillis(29999));
+        health.evaluateAll();
+        assertThat(healthEvents).isEmpty();
+        clock.advance(Duration.ofMillis(1));
+        health.evaluateAll();
+        assertHealthEvent("SENSOR", device.getId() + ":TEMPERATURE", "ACTIVE", "STALE");
+        health.evaluateAll();
+        assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
+        assertThat(snapshots.getSnapshot(user.getId(), home.getId()).rooms().getFirst().sensors().getFirst().healthStatus())
+                .isEqualTo(TwinHealthStatus.STALE);
+
+        clock.advance(Duration.ofMillis(269999));
+        health.evaluateAll();
+        assertThat(healthEvents).isEmpty();
+        clock.advance(Duration.ofMillis(1));
+        health.evaluateAll();
+        assertHealthEvent("SENSOR", device.getId() + ":TEMPERATURE", "STALE", "OFFLINE");
+
+        assertThat(post(request("TEMPERATURE", "10", TIME.minusHours(1))).getBody().at("/result/latest").asBoolean()).isFalse();
+        health.evaluateAll();
+        assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
+        assertThat(received.poll(200, TimeUnit.MILLISECONDS)).isNull();
+
+        OffsetDateTime freshTime = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            ingestion.ingest(user.getId(), new SensorReadingInput(device.getId(), "TEMPERATURE",
+                    new BigDecimal("31"), "°C", freshTime));
+            assertThat(healthEvents).isEmpty();
+            status.setRollbackOnly();
+        });
+        health.evaluateAll();
+        assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
+        assertLatest("TEMPERATURE", "29.4");
+
+        post(request("TEMPERATURE", "32", freshTime));
+        assertThat(nextEvent().at("/data/healthStatus").asText()).isEqualTo("ACTIVE");
+        assertHealthEvent("SENSOR", device.getId() + ":TEMPERATURE", "OFFLINE", "ACTIVE");
+        health.evaluateAll();
+        assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
+        var snapshot = snapshots.getSnapshot(user.getId(), home.getId());
+        assertThat(snapshot.rooms().getFirst().devices().getFirst().healthStatus()).isEqualTo(TwinHealthStatus.OFFLINE);
+        assertThat(snapshot.rooms().getFirst().devices().getFirst().status()).isEqualTo(DeviceStatus.UNKNOWN);
+        assertThat(snapshot.rooms().getFirst().devices().getFirst().lastSeen()).isNull();
+    }
+
+    @Test
+    void committedDeviceActivity_recoversIndependentlyOfSensorHealth() throws Exception {
+        post(request("HUMIDITY", "60", TIME.minusMinutes(10)));
+        assertThat(nextEvent().at("/data/healthStatus").asText()).isEqualTo("OFFLINE");
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            Device managed = em.find(Device.class, device.getId());
+            managed.setLastSeen(TIME);
+            applicationEvents.publishEvent(new DeviceStateChangedEvent(home.getId(), mapper.device(managed)));
+            status.setRollbackOnly();
+        });
+        health.evaluateAll();
+        assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            Device managed = em.find(Device.class, device.getId());
+            managed.setLastSeen(TIME); // simulate an authoritative activity producer, not sensor ingestion
+            applicationEvents.publishEvent(new DeviceStateChangedEvent(home.getId(), mapper.device(managed)));
+            assertThat(healthEvents).isEmpty();
+        });
+        assertHealthEvent("DEVICE", device.getId().toString(), "OFFLINE", "ACTIVE");
+        var snapshot = snapshots.getSnapshot(user.getId(), home.getId());
+        assertThat(snapshot.rooms().getFirst().devices().getFirst().healthStatus()).isEqualTo(TwinHealthStatus.ACTIVE);
+        assertThat(snapshot.rooms().getFirst().devices().getFirst().status()).isEqualTo(DeviceStatus.UNKNOWN);
+        assertThat(snapshot.rooms().getFirst().sensors().getFirst().healthStatus()).isEqualTo(TwinHealthStatus.OFFLINE);
+    }
+
+    @Test
+    void staleSensorRecovery_doesNotRefreshAnotherMetricAndDoesNotDuplicateHealthEvents() throws Exception {
+        post(request("TEMPERATURE", "29", TIME));
+        nextEvent();
+        post(request("HUMIDITY", "60", TIME));
+        nextEvent();
+        clock.advance(Duration.ofSeconds(30));
+        health.evaluateAll();
+        JsonNode first = healthEvents.poll(10, TimeUnit.SECONDS);
+        JsonNode second = healthEvents.poll(10, TimeUnit.SECONDS);
+        assertThat(first).isNotNull();
+        assertThat(second).isNotNull();
+        assertThat(List.of(first, second)).allSatisfy(event -> {
+            assertThat(event.at("/data/previousStatus").asText()).isEqualTo("ACTIVE");
+            assertThat(event.at("/data/healthStatus").asText()).isEqualTo("STALE");
+        });
+        OffsetDateTime freshTime = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        post(request("TEMPERATURE", "30", freshTime));
+        assertThat(nextEvent().at("/data/healthStatus").asText()).isEqualTo("ACTIVE");
+        assertHealthEvent("SENSOR", device.getId() + ":TEMPERATURE", "STALE", "ACTIVE");
+        var nodes = snapshots.getSnapshot(user.getId(), home.getId()).rooms().getFirst().sensors();
+        assertThat(nodes).filteredOn(node -> node.metricType().equals("HUMIDITY"))
+                .singleElement().satisfies(node -> assertThat(node.healthStatus()).isEqualTo(TwinHealthStatus.STALE));
+        post(request("TEMPERATURE", "31", freshTime));
+        nextEvent();
+        health.evaluateAll();
+        assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
+    }
+
+    private void assertHealthEvent(String type, String nodeId, String previous, String current) throws Exception {
+        JsonNode event = healthEvents.poll(10, TimeUnit.SECONDS);
+        assertThat(event).as("health change delivered by existing STOMP broker").isNotNull();
+        assertThat(event.path("type").asText()).isEqualTo("TWIN_HEALTH_STATUS_CHANGED");
+        assertThat(event.path("homeId").asText()).isEqualTo(home.getId().toString());
+        assertThat(event.path("deviceId").asText()).isEqualTo(device.getId().toString());
+        assertThat(event.at("/data/nodeType").asText()).isEqualTo(type);
+        assertThat(event.at("/data/nodeId").asText()).isEqualTo(nodeId);
+        assertThat(event.at("/data/roomId").asText()).isEqualTo(room.getId().toString());
+        assertThat(event.at("/data/previousStatus").asText()).isEqualTo(previous);
+        assertThat(event.at("/data/healthStatus").asText()).isEqualTo(current);
+        assertThat(java.time.Instant.parse(event.at("/data/evaluatedAt").asText())).isEqualTo(clock.instant());
+        log.info("HEALTH DEMO received {}", event);
     }
 
     @Test
@@ -364,11 +505,17 @@ class MockSensorPipelineIntegrationTest {
     @EntityScan(basePackageClasses = Device.class)
     @EnableJpaRepositories(basePackageClasses = DeviceRepository.class)
     @Import({MockSensorController.class, TwinSnapshotController.class, GlobalExceptionHandler.class,
+            TwinHealthConfig.class, TwinHealthStatusResolverImpl.class, TwinHealthEvaluationServiceImpl.class,
+            TwinHealthActivityListener.class,
             MockSensorRequestExceptionHandler.class, SensorReadingIngestionServiceImpl.class, TwinSnapshotMapper.class,
             HomeAuthorizationService.class, TwinSnapshotServiceImpl.class, DeviceSensorRealtimeListener.class,
             RealtimeEventPublisherImpl.class, WebSocketRealtimeTransport.class, RealtimeConfig.class,
             RealtimeWebSocketConfig.class, RealtimeWebSocketChannelInterceptor.class, RealtimeSubscriptionServiceImpl.class,
             SecurityConfig.class, JwtAuthenticationFilter.class, JwtTokenProvider.class, CustomUserDetailsService.class,
             CustomAuthenticationEntryPoint.class, CustomAccessDeniedHandler.class})
-    static class TestApplication { }
+    static class TestApplication {
+        @Bean
+        @Primary
+        MutableClock testClock() { return new MutableClock(TIME.toInstant()); }
+    }
 }

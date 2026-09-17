@@ -73,6 +73,16 @@ class SensorReadingRepositoryTest {
         assertThat(deviceRepository.findByHomeIdOrderByIdAsc(home.getId()))
                 .extracting(Device::getId).containsExactlyInAnyOrder(device.getId(), unassigned.getId());
         assertThat(repository.findLatestByHomeId(UUID.randomUUID())).isEmpty();
+        assertThat(deviceRepository.findHealthReferences()).filteredOn(row -> row.getHomeId().equals(home.getId()))
+                .extracting(TwinHealthReference::getDeviceId).containsExactlyInAnyOrder(device.getId(), unassigned.getId());
+        assertThat(repository.findHealthReferences()).filteredOn(row -> row.getHomeId().equals(home.getId())).hasSize(3);
+        assertThat(repository.findHealthReference(unassigned.getId(), "TEMPERATURE")).get().satisfies(row -> {
+            assertThat(row.getRoomId()).isNull();
+            assertThat(row.getHomeId()).isEqualTo(home.getId());
+            assertThat(row.getReferenceTime().toInstant()).isEqualTo(now.toInstant());
+        });
+        assertThat(deviceRepository.findHealthReference(deleted.getId())).isEmpty();
+        assertThat(repository.findHealthReference(deleted.getId(), "TEMPERATURE")).isEmpty();
     }
 
     private Home home(User user) {

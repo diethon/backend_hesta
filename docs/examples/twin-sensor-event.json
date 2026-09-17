@@ -10,7 +10,8 @@
     "metricType": "TEMPERATURE",
     "latestValue": 26.4,
     "unit": "°C",
-    "observedAt": "2026-09-17T09:00:00Z"
+    "observedAt": "2026-09-17T09:00:00Z",
+    "healthStatus": "ACTIVE"
   },
   "timestamp": "2026-09-17T09:00:00Z"
 }

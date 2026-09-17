@@ -1,5 +1,7 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.mapper.TwinSnapshotMapper;
@@ -34,7 +36,7 @@ class DeviceStateRealtimeTest {
     @BeforeEach
     void setUp() {
         service = new DeviceServiceImpl(devices, members, rooms, history, events,
-                new TwinSnapshotMapper(new ObjectMapper()));
+                TwinHealthTestSupport.mapper(new ObjectMapper()));
     }
 
     @Test

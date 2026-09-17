@@ -1,5 +1,7 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.support.TwinHealthTestSupport;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.enums.HomeRole;
@@ -38,7 +40,7 @@ class TwinSnapshotServiceTest {
     @BeforeEach
     void setUp() {
         service = new TwinSnapshotServiceImpl(new HomeAuthorizationService(homeRepository, homeMemberRepository),
-                roomRepository, deviceRepository, sensorReadingRepository, new TwinSnapshotMapper(new ObjectMapper()));
+                roomRepository, deviceRepository, sensorReadingRepository, TwinHealthTestSupport.mapper(new ObjectMapper()));
     }
 
     @ParameterizedTest

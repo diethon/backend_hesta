@@ -3,7 +3,8 @@
 This development adapter proves the existing Twin/realtime contract before
 hardware ingestion exists. It is not a finalized hardware protocol or production
 ingestion API. There is no MQTT, device provisioning, sensor registry, new table,
-health calculation, or frontend work in this change.
+or frontend work in the mock pipeline. The separate [Twin health feature](TWIN_HEALTH.md)
+now derives freshness from its committed observations without redesigning ingestion.
 
 ## Entry point and access
 
@@ -78,7 +79,8 @@ accepted historical row, not a replacement for the current Twin node. `latest`
 records the transaction's decision; it is not a websocket delivery acknowledgement
 or a promise that no later transaction will supersede it.
 
-The event's `data` is the unchanged `TwinSensorSnapshotResponse`. Its identity is
+The event's `data` uses `TwinSensorSnapshotResponse`, minimally extended by the
+later health feature with `healthStatus`. The sensor identity remains
 `<device UUID>:<exact metricType>`. Its home/device/room context comes from the
 loaded Device relationships. `observedAt` preserves the input observation time;
 the `RealtimeEvent` timestamp is publication time. Only one sensor node is sent.
@@ -225,8 +227,10 @@ Created tests under `src/test/java/com/hesta/backend/`:
 Created this document and its five linked example/evidence files; updated
 `docs/DIGITAL_TWIN.md` to point to the implemented mock producer.
 
-Unchanged and reused: `SensorReading`, `TwinSensorSnapshotResponse`,
+Reused by the original mock-pipeline implementation: `SensorReading`, `TwinSensorSnapshotResponse`,
 `TwinSnapshotMapper`, `SensorReadingUpdatedEvent`, `DeviceSensorRealtimeListener`,
 `RealtimeEventPublisher`, `RealtimeEventType.SENSOR_READING_UPDATED`, and the shared
 WebSocket/STOMP infrastructure. No Sensor entity/table, migration, frontend,
-hardware/MQTT integration, or health threshold was added.
+hardware/MQTT integration, or health threshold was added by that implementation.
+The subsequent [Twin health feature](TWIN_HEALTH.md) extends the node DTOs,
+mapper, and committed listener while retaining this ingestion flow.
