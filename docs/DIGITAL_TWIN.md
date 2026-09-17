@@ -73,18 +73,18 @@ detached payload after saving state. `DeviceSensorRealtimeListener` publishes
 through the existing `RealtimeEventPublisher` only AFTER_COMMIT. Rollback or
 publication outside a transaction does not send an event.
 
-No sensor ingestion producer exists in this checkout. The canonical typed hook
-is `SensorReadingUpdatedEvent`; a future ingestion service should emit this
-inside its persistence transaction when it accepts a new latest reading:
+The development-only [mock sensor pipeline](MOCK_SENSOR_PIPELINE.md) now exercises
+the canonical `SensorReadingUpdatedEvent` hook. No real hardware producer exists.
+The reusable service emits this inside its persistence transaction when it
+accepts a new latest reading:
 
 ```java
 applicationEventPublisher.publishEvent(new SensorReadingUpdatedEvent(
         reading.getDevice().getHome().getId(), twinSnapshotMapper.sensor(reading)));
 ```
 
-That hook is implemented and transaction-tested, but this task does not create
-an ingestion endpoint, a mock sensor pipeline, or MQTT processing. Historical
-backfills must not be emitted as latest-state updates. The event timestamp is
+The mock adapter is opt-in and preserves this contract without MQTT processing.
+Historical backfills must not be emitted as latest-state updates. The event timestamp is
 publication time; `observedAt` is the original observation time.
 
 ## Executable examples and verification

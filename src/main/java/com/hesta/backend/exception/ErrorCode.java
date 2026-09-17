@@ -5,6 +5,13 @@ import org.springframework.http.HttpStatus;
 
 @Getter
 public enum ErrorCode {
+    // Mock sensor input / reusable reading validation
+    SENSOR_DEVICE_REQUIRED(1120, "Device ID is required", HttpStatus.BAD_REQUEST),
+    SENSOR_METRIC_INVALID(1121, "Metric type must be non-blank and at most 50 characters", HttpStatus.BAD_REQUEST),
+    SENSOR_VALUE_INVALID(1122, "Value must fit NUMERIC(10,3) without rounding", HttpStatus.BAD_REQUEST),
+    SENSOR_UNIT_INVALID(1123, "Unit must be at most 20 characters", HttpStatus.BAD_REQUEST),
+    SENSOR_TIME_INVALID(1124, "Observation time is required, with year 1-9999 and at most microsecond precision", HttpStatus.BAD_REQUEST),
+
     // Scene management
     HOME_NOT_FOUND(1100, "Home not found", HttpStatus.NOT_FOUND),
     SCENE_NOT_FOUND(1101, "Scene not found", HttpStatus.NOT_FOUND),

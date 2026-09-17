@@ -6,10 +6,15 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
-/** Read-only access to existing telemetry. Ties use the persisted reading ID. */
+/** Existing telemetry storage. Ties use the persisted reading ID. */
 public interface SensorReadingRepository extends Repository<SensorReading, Long> {
+    <S extends SensorReading> S save(S reading);
+
+    Optional<SensorReading> findFirstByDeviceIdAndMetricTypeOrderByRecordedAtDescIdDesc(UUID deviceId, String metricType);
+
     @Query("""
             select reading from SensorReading reading
             join fetch reading.device device
