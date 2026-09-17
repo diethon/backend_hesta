@@ -1,0 +1,20 @@
+{
+  "eventId": "example-device-event",
+  "type": "DEVICE_STATE_CHANGED",
+  "homeId": "00000000-0000-4000-8000-000000000001",
+  "deviceId": "00000000-0000-4000-8000-000000000021",
+  "data": {
+    "deviceId": "00000000-0000-4000-8000-000000000021",
+    "roomId": "00000000-0000-4000-8000-000000000011",
+    "name": "Ceiling light",
+    "deviceType": "LIGHT",
+    "icon": null,
+    "status": "ONLINE",
+    "currentState": {
+      "power": "ON",
+      "brightness": 80
+    },
+    "lastSeen": "2026-09-17T09:00:00Z"
+  },
+  "timestamp": "2026-09-17T09:00:00Z"
+}

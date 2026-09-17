@@ -107,3 +107,6 @@ The current infrastructure intentionally provides transport, authentication, hom
 authorization, routing, lifecycle cleanup, heartbeat, and future bidirectional capability only.
 Feature business logic remains outside this layer. Notification Core now integrates through
 `RealtimeEventPublisher`; see [NOTIFICATION_CORE.md](NOTIFICATION_CORE.md).
+
+The canonical device/sensor node payloads, initial home snapshot endpoint, and
+after-commit feature hooks are documented in [DIGITAL_TWIN.md](DIGITAL_TWIN.md).

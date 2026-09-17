@@ -1,0 +1,16 @@
+{
+  "eventId": "example-sensor-event",
+  "type": "SENSOR_READING_UPDATED",
+  "homeId": "00000000-0000-4000-8000-000000000001",
+  "deviceId": "00000000-0000-4000-8000-000000000022",
+  "data": {
+    "sensorId": "00000000-0000-4000-8000-000000000022:TEMPERATURE",
+    "roomId": "00000000-0000-4000-8000-000000000012",
+    "deviceId": "00000000-0000-4000-8000-000000000022",
+    "metricType": "TEMPERATURE",
+    "latestValue": 26.4,
+    "unit": "°C",
+    "observedAt": "2026-09-17T09:00:00Z"
+  },
+  "timestamp": "2026-09-17T09:00:00Z"
+}

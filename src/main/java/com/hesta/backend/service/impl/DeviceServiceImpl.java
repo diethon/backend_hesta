@@ -1,5 +1,6 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
 import com.hesta.backend.dto.response.DeviceResponse;
 import com.hesta.backend.entity.Device;
@@ -8,11 +9,13 @@ import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.repository.RoomRepository;
 import com.hesta.backend.service.DeviceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +31,8 @@ public class DeviceServiceImpl implements DeviceService {
     private final HomeMemberRepository homeMemberRepository;
     private final RoomRepository roomRepository;
     private final com.hesta.backend.repository.DeviceStateHistoryRepository deviceStateHistoryRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
+    private final TwinSnapshotMapper twinSnapshotMapper;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
         homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
@@ -94,6 +99,8 @@ public class DeviceServiceImpl implements DeviceService {
             }
             device.setCurrentState(newState);
             deviceRepository.save(device);
+            applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
+                    device.getHome().getId(), twinSnapshotMapper.device(device)));
         } catch (IllegalArgumentException e) {
             System.err.println("Invalid payload or UUID format: " + e.getMessage());
         }
