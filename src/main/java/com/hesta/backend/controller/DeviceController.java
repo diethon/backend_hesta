@@ -119,4 +119,18 @@ public class DeviceController {
         return deviceCommandService.sendCommand(deviceId, action, params, StateChangeSource.MANUAL)
                 .thenApply(result -> ResponseEntity.ok(com.hesta.backend.dto.response.ApiResponse.<CommandResult>builder().result(result).build()));
     }
+
+    @PostMapping("/rooms/{roomId}/command")
+    public CompletableFuture<ResponseEntity<ApiResponse<List<CommandResult>>>> sendRoomCommand(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID roomId,
+            @RequestBody java.util.Map<String, Object> request) {
+        
+        String actionStr = request.getOrDefault("action", "").toString();
+        DeviceAction action = DeviceAction.valueOf(actionStr);
+        java.util.Map<String, Object> params = (java.util.Map<String, Object>) request.get("parameters");
+        
+        return deviceCommandService.sendRoomCommand(roomId, action, params, StateChangeSource.MANUAL)
+                .thenApply(result -> ResponseEntity.ok(com.hesta.backend.dto.response.ApiResponse.<List<CommandResult>>builder().result(result).build()));
+    }
 }

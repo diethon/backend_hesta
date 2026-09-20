@@ -15,6 +15,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,19 +33,33 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private final DeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Value("${mqtt.topic.prefix:hesta/nodes}")
+    private String topicPrefix;
+
+    @org.springframework.beans.factory.annotation.Value("${mqtt.command.timeout-ms:5000}")
+    private long commandTimeoutMs;
+
     public static final ConcurrentHashMap<String, CompletableFuture<CommandResult>> pendingCommands = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
 
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
+        CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
+        if (existing != null && !existing.isDone()) {
+            log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
+            return existing;
+        }
+        
         String commandId = UUID.randomUUID().toString();
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
+        activeDeviceCommands.put(deviceId, future);
         
         try {
             Device device = deviceRepository.findById(deviceId)
                     .orElseThrow(() -> new RuntimeException("Device not found"));
             
             String nodeId = device.getNode() != null ? device.getNode().getId().toString() : "unknown";
-            String topic = String.format("hesta/nodes/%s/devices/%s/command", nodeId, deviceId.toString());
+            String topic = String.format("%s/%s/devices/%s/command", topicPrefix, nodeId, deviceId.toString());
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("commandId", commandId);
@@ -56,7 +73,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             log.info("Publishing MQTT Command to {}: {}", topic, jsonPayload);
             mqttGateway.sendToMqtt(topic, 1, jsonPayload);
             
-            return future.orTimeout(5, TimeUnit.SECONDS)
+            return future.orTimeout(commandTimeoutMs, TimeUnit.MILLISECONDS)
+                    .whenComplete((res, ex) -> activeDeviceCommands.remove(deviceId))
                     .exceptionally(ex -> {
                         pendingCommands.remove(commandId);
                         log.warn("Command {} to device {} timed out", commandId, deviceId);
@@ -65,11 +83,12 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                                 .success(false)
                                 .status("TIMEOUT")
                                 .errorCode("TIMEOUT_NO_ACK")
-                                .message("Device did not acknowledge within 5 seconds")
+                                .message("Device did not acknowledge within " + commandTimeoutMs + " ms")
                                 .build();
                     });
 
         } catch (Exception e) {
+            activeDeviceCommands.remove(deviceId);
             log.error("Failed to send command to device {}", deviceId, e);
             future.complete(CommandResult.builder()
                     .commandId(commandId)
@@ -81,5 +100,21 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         }
         
         return future;
+    }
+
+    @Override
+    public CompletableFuture<List<CommandResult>> sendRoomCommand(UUID roomId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
+        List<Device> devices = deviceRepository.findByRoomId(roomId);
+        if (devices.isEmpty()) {
+            return CompletableFuture.completedFuture(new ArrayList<>());
+        }
+        
+        List<CompletableFuture<CommandResult>> futures = new ArrayList<>();
+        for (Device d : devices) {
+            futures.add(sendCommand(d.getId(), action, parameters, source));
+        }
+        
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(v -> futures.stream().map(CompletableFuture::join).collect(Collectors.toList()));
     }
 }
