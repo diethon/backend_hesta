@@ -1,182 +1,197 @@
-# Backend Digital Twin contract
+# Đặc tả Digital Twin phía backend
 
-`GET /api/v1/homes/{homeId}/twin` returns `ApiResponse<TwinHomeSnapshotResponse>`
-with success code `1000`. Authentication uses the existing Bearer JWT and
-`CustomUserDetails`. Only an ACTIVE HomeMember (OWNER or MEMBER) can read the home;
-platform ADMIN does not bypass home membership. Existing error codes and HTTP
-statuses apply: 401 unauthenticated, 403 unauthorized, 404 missing home.
+`GET /api/v1/homes/{homeId}/twin` trả về `ApiResponse<TwinHomeSnapshotResponse>`
+với mã thành công `1000`. Cơ chế xác thực sử dụng Bearer JWT và
+`CustomUserDetails` hiện có. Chỉ `HomeMember` ở trạng thái `ACTIVE` (`OWNER` hoặc
+`MEMBER`) mới được đọc dữ liệu nhà; vai trò hệ thống `ADMIN` không được bỏ qua
+điều kiện thành viên. Các mã lỗi và trạng thái HTTP hiện có vẫn được áp dụng:
+401 khi chưa xác thực, 403 khi không đủ quyền, 404 khi không tìm thấy nhà.
 
-## Snapshot schema
+## Cấu trúc bản chụp trạng thái (snapshot)
 
-| DTO | Fields |
+| DTO | Các trường |
 | --- | --- |
 | TwinHomeSnapshotResponse | UUID homeId, String name, rooms[], unassignedDevices[], unassignedSensors[] |
 | TwinRoomSnapshotResponse | UUID roomId, UUID homeId, String name, String icon, devices[], sensors[] |
 | TwinDeviceSnapshotResponse | UUID deviceId, UUID roomId, String name, DeviceType deviceType, String icon, DeviceStatus status, JsonNode currentState, OffsetDateTime lastSeen, TwinHealthStatus healthStatus |
 | TwinSensorSnapshotResponse | String sensorId, UUID roomId, UUID deviceId, String metricType, BigDecimal latestValue, String unit, OffsetDateTime observedAt, TwinHealthStatus healthStatus |
 
-All collections are present, including empty collections. `roomId` is null for
-unassigned nodes, which appear in the home's explicit unassigned collections.
-No synthetic Room is created. Device nodes include sensor hardware as well as
-actuators. A room's sensor list contains the individual measured metric streams.
-`icon`, `lastSeen`, and sensor `unit` may be null; unknown observations are not
-replaced with the current time. Times are ISO-8601 offset timestamps; the event
-envelope timestamp is an Instant. `currentState` preserves the existing JSON
-runtime state, including its native scalar and nested value types, through a
-detached JsonNode rather than exposing the persistence map or JPA entities.
+Mọi danh sách đều có mặt trong phản hồi, kể cả danh sách rỗng. Các nút chưa được
+gán phòng có `roomId` là null và nằm trong các danh sách chưa gán tương ứng của
+nhà. Hệ thống không tạo phòng giả. Nút thiết bị bao gồm cả phần cứng cảm biến và
+thiết bị chấp hành. Danh sách cảm biến của phòng chứa từng luồng chỉ số đo riêng.
+`icon`, `lastSeen` và `unit` của cảm biến có thể là null; thời điểm đo chưa biết
+không được thay bằng thời gian hiện tại. Thời gian dùng định dạng ISO-8601 có độ
+lệch múi giờ; dấu thời gian trong cấu trúc bao sự kiện là `Instant`.
+`currentState` giữ nguyên trạng thái JSON hiện có, bao gồm kiểu giá trị đơn và
+giá trị lồng nhau, thông qua một `JsonNode` tách biệt, thay vì đưa trực tiếp đối
+tượng map dùng để lưu trữ hoặc các thực thể JPA ra ngoài.
 
-## Source of truth and identity
+## Nguồn dữ liệu chuẩn và định danh
 
-This checkout has no separate Sensor entity or sensor registry. The existing
-`sensor_readings` table stores `(device_id, metric_type, value, unit, recorded_at)`.
-`SensorReading` only maps that existing table. There is no Twin table or migration.
+Phiên bản mã nguồn này không có thực thể Sensor hay danh mục cảm biến riêng.
+Bảng `sensor_readings` hiện có lưu `(device_id, metric_type, value, unit, recorded_at)`.
+`SensorReading` chỉ ánh xạ bảng đó. Trạng thái Twin khi vận hành không có bảng
+trạng thái riêng; vị trí hiển thị được lưu riêng qua [API bố cục Twin](TWIN_LAYOUT.md).
 
-A sensor node represents one device/metric stream. Its stable ID is the canonical
-device UUID string, a colon, and the exact stored `metric_type`, for example
-`00000000-0000-4000-8000-000000000022:TEMPERATURE`. The metric is not normalized or
-inferred from capabilities. The ID does not depend on the reading row ID, list
-position, room assignment, value, or timestamp. Different metrics on the same
-device have distinct sensor IDs. A device with no readings still appears in
-`devices`; it has no known sensor streams until readings establish those metrics.
-There is no metadata from which to infer a never-observed metric's unit.
+Một nút cảm biến đại diện cho một luồng thiết bị/chỉ số. ID ổn định của nó gồm
+chuỗi UUID chuẩn của thiết bị, dấu hai chấm và giá trị `metric_type` được lưu
+nguyên văn, ví dụ `00000000-0000-4000-8000-000000000022:TEMPERATURE`.
+Chỉ số không được chuẩn hóa hoặc suy ra từ khả năng của thiết bị. ID không phụ
+thuộc vào ID bản ghi đo, vị trí trong danh sách, phòng được gán, giá trị hay dấu
+thời gian. Các chỉ số khác nhau trên cùng thiết bị có ID cảm biến riêng. Thiết
+bị chưa có số đo vẫn xuất hiện trong `devices`; chỉ khi có số đo thì hệ thống
+mới biết các luồng chỉ số của nó. Không có siêu dữ liệu để suy ra đơn vị của
+chỉ số chưa từng được đo.
 
-`TwinSnapshotServiceImpl` authorizes first, then loads rooms, devices, and latest
-readings in three bulk queries inside a read-only REPEATABLE_READ transaction.
-`TwinSnapshotMapper` groups nodes by their real room relationship. Device queries
-fetch rooms to avoid per-node lazy queries. Soft-deleted devices are excluded.
-The telemetry query is home-scoped and chooses the greatest `recorded_at` for
-each `(device_id, metric_type)`, breaking equal-time ties by greatest reading ID.
-It returns the latest row per metric, not the whole telemetry history. Units are
-the existing nullable strings (`°C`, `%`, `boolean`, etc.); values remain numeric,
-including numeric motion readings. No alternative unit enum is introduced.
+`TwinSnapshotServiceImpl` kiểm tra quyền trước, rồi tải phòng, thiết bị và các
+số đo mới nhất bằng ba truy vấn theo lô trong giao dịch chỉ đọc `REPEATABLE_READ`.
+`TwinSnapshotMapper` nhóm các nút theo quan hệ phòng thực tế. Truy vấn thiết bị
+tải kèm phòng để tránh truy vấn tải lười cho từng nút. Thiết bị đã xóa mềm bị
+loại bỏ. Truy vấn dữ liệu đo được giới hạn theo nhà và chọn `recorded_at` lớn
+nhất cho mỗi cặp `(device_id, metric_type)`; nếu trùng thời điểm thì chọn ID
+bản ghi đo lớn nhất. Truy vấn chỉ trả về bản ghi mới nhất của từng chỉ số,
+không trả về toàn bộ lịch sử đo. Đơn vị vẫn là chuỗi có thể null hiện có
+(`°C`, `%`, `boolean`, v.v.); giá trị vẫn là số, kể cả số đo chuyển động.
+Không bổ sung enum đơn vị khác.
 
-## Granular realtime updates
+## Cập nhật thời gian thực theo từng nút
 
-The unchanged shared `RealtimeEvent<T>` envelope contains `eventId`, `type`,
-`homeId`, `deviceId`, `data`, and `timestamp`. The destination remains
-`/topic/homes/{homeId}/events` on the existing STOMP endpoint.
+Cấu trúc bao dùng chung `RealtimeEvent<T>` giữ nguyên các trường `eventId`,
+`type`, `homeId`, `deviceId`, `data` và `timestamp`. Đích nhận vẫn là
+`/topic/homes/{homeId}/events` trên điểm cuối STOMP hiện có.
 
-| Event type | data type | Node key |
+| Loại sự kiện | Kiểu của data | Khóa nút |
 | --- | --- | --- |
 | DEVICE_STATE_CHANGED | TwinDeviceSnapshotResponse | data.deviceId |
 | SENSOR_READING_UPDATED | TwinSensorSnapshotResponse | data.sensorId |
 
-`data` is a complete replacement for one node using the same fields as the
-snapshot. It never contains `rooms` or a complete home. Both envelope `deviceId`
-and payload `deviceId` refer to the device; the envelope preserves `homeId` and
-the payload preserves `roomId`. Sensor events include `metricType`, `latestValue`,
-`unit`, and `observedAt`, allowing one of several metrics on a device to change
-independently. An event for a newly observed metric can insert that sensor node.
+`data` là dữ liệu thay thế đầy đủ cho một nút, dùng cùng các trường với bản
+chụp trạng thái. Nó không bao giờ chứa `rooms` hoặc toàn bộ nhà. `deviceId`
+trong cả cấu trúc bao và phần dữ liệu đều trỏ đến thiết bị; cấu trúc bao giữ
+`homeId`, phần dữ liệu giữ `roomId`. Sự kiện cảm biến có `metricType`,
+`latestValue`, `unit` và `observedAt`, cho phép từng chỉ số trên cùng thiết bị
+thay đổi độc lập. Sự kiện của chỉ số mới được ghi nhận có thể thêm nút cảm biến đó.
 
-The existing device state update method queues `DeviceStateChangedEvent` with a
-detached payload after saving state. `DeviceSensorRealtimeListener` publishes
-through the existing `RealtimeEventPublisher` only AFTER_COMMIT. Rollback or
-publication outside a transaction does not send an event.
+Phương thức cập nhật trạng thái thiết bị hiện có đưa `DeviceStateChangedEvent`
+với dữ liệu tách biệt vào hàng đợi sau khi lưu trạng thái.
+`DeviceSensorRealtimeListener` chỉ phát sự kiện qua `RealtimeEventPublisher`
+hiện có ở pha `AFTER_COMMIT`. Giao dịch bị hoàn tác hoặc việc phát ngoài giao
+dịch đều không gửi sự kiện.
 
-The development-only [mock sensor pipeline](MOCK_SENSOR_PIPELINE.md) now exercises
-the canonical `SensorReadingUpdatedEvent` hook. No real hardware producer exists.
-The reusable service emits this inside its persistence transaction when it
-accepts a new latest reading:
+[Luồng cảm biến giả lập](MOCK_SENSOR_PIPELINE.md) chỉ dành cho môi trường phát
+triển hiện sử dụng điểm tích hợp chuẩn `SensorReadingUpdatedEvent`. Chưa có
+nguồn phát từ phần cứng thật. Dịch vụ dùng lại được phát sự kiện sau trong giao
+dịch lưu trữ khi chấp nhận một số đo mới nhất:
 
 ```java
 applicationEventPublisher.publishEvent(new SensorReadingUpdatedEvent(
         reading.getDevice().getHome().getId(), twinSnapshotMapper.sensor(reading)));
 ```
 
-The mock adapter is opt-in and preserves this contract without MQTT processing.
-Historical backfills must not be emitted as latest-state updates. The event timestamp is
-publication time; `observedAt` is the original observation time.
+Bộ điều hợp giả lập phải được bật chủ động và giữ nguyên đặc tả này mà không
+xử lý MQTT. Dữ liệu lịch sử được bổ sung không được phát dưới dạng cập nhật
+trạng thái mới nhất. Dấu thời gian của sự kiện là thời điểm phát;
+`observedAt` là thời điểm đo gốc.
 
-## Executable examples and verification
+## Ví dụ có thể kiểm chứng và kiểm thử
 
-- [Snapshot response](examples/twin-snapshot.json): one home, two rooms, three
-  devices, three sensor streams (including two metrics on one device).
-- [Device event](examples/twin-device-event.json).
-- [Sensor event](examples/twin-sensor-event.json).
+- [Phản hồi bản chụp trạng thái](examples/twin-snapshot.json): một nhà, hai phòng,
+  ba thiết bị, ba luồng cảm biến (gồm hai chỉ số trên cùng một thiết bị).
+- [Sự kiện thiết bị](examples/twin-device-event.json).
+- [Sự kiện cảm biến](examples/twin-sensor-event.json).
 
-`TwinContractSerializationTest` compares all three files with actual Spring
-Jackson serialization. Mapping tests cover identities, relationships, runtime
-state, nullable data, unassigned nodes, and detached state. Service tests use the
-real HomeAuthorizationService to verify active members, non-members, disabled
-owners, anonymous callers, and missing homes. MVC tests exercise the real
-security filter chain and authenticated principal extraction. Realtime tests
-verify a single-node payload, home/device/sensor context, commit, and rollback.
+`TwinContractSerializationTest` đối chiếu cả ba tệp với kết quả tuần tự hóa
+thực tế của Spring Jackson. Các kiểm thử ánh xạ bao phủ định danh, quan hệ,
+trạng thái vận hành, dữ liệu có thể null, nút chưa gán phòng và trạng thái tách
+biệt. Kiểm thử dịch vụ dùng `HomeAuthorizationService` thật để xác minh thành
+viên đang hoạt động, người không phải thành viên, chủ nhà bị vô hiệu hóa,
+người gọi chưa xác thực và nhà không tồn tại. Kiểm thử MVC dùng chuỗi bộ lọc
+bảo mật thật và cách lấy danh tính đã xác thực. Kiểm thử thời gian thực xác
+minh dữ liệu một nút, ngữ cảnh nhà/thiết bị/cảm biến, xác nhận và hoàn tác giao dịch.
 
 ```powershell
 mvn.cmd '-Dtest=TwinSnapshotMapperTest,TwinSnapshotServiceTest,TwinSnapshotControllerTest,TwinContractSerializationTest,DeviceStateRealtimeTest,DeviceSensorRealtimeTransactionTest' test
 ```
 
-`SensorReadingRepositoryTest` additionally verifies latest-per-metric selection,
-timestamp ties, home isolation, soft deletion, and unassigned devices against
-PostgreSQL with rollback. It runs only when `HESTA_TEST_DATABASE_URL` explicitly
-names localhost or 127.0.0.1 and uses `HESTA_TEST_DATABASE_USERNAME` and
-`HESTA_TEST_DATABASE_PASSWORD`. Apply the existing Supabase migrations to that
-local database first; the test uses Hibernate validation and never creates or
-updates the schema. Never point tests at shared Cloud data. When running the
-full suite, also override Spring's datasource properties to a safe test database,
-because the legacy test local profile has separate datasource configuration.
+`SensorReadingRepositoryTest` còn kiểm tra cách chọn số đo mới nhất cho từng
+chỉ số, trường hợp trùng dấu thời gian, cách ly dữ liệu giữa các nhà, xóa mềm
+và thiết bị chưa gán phòng trên PostgreSQL, với giao dịch được hoàn tác. Kiểm
+thử chỉ chạy khi `HESTA_TEST_DATABASE_URL` chỉ rõ localhost hoặc 127.0.0.1,
+và dùng `HESTA_TEST_DATABASE_USERNAME`, `HESTA_TEST_DATABASE_PASSWORD`.
+Trước tiên phải áp dụng các migration Supabase hiện có vào cơ sở dữ liệu cục
+bộ đó; kiểm thử dùng cơ chế kiểm tra lược đồ của Hibernate, không tạo hay cập
+nhật lược đồ. Không trỏ kiểm thử đến dữ liệu Cloud dùng chung. Khi chạy toàn
+bộ bộ kiểm thử, cần ghi đè cả cấu hình nguồn dữ liệu của Spring sang cơ sở dữ
+liệu kiểm thử an toàn, vì hồ sơ `local` cũ dành cho kiểm thử có cấu hình nguồn
+dữ liệu riêng.
 
-Verification on 2026-09-17 (Java 21, Spring Boot 3.4.3):
+Kết quả kiểm chứng ngày 2026-09-17 (Java 21, Spring Boot 3.4.3):
 
-- Targeted tests: **23 passed**, no failures, errors, or skips, including the
-  PostgreSQL repository test against the local Supabase schema.
-- Full `mvn.cmd test`: **111 tests, 110 passed, 1 error, no skips**. The existing
-  `MqttSmokeTest.testPublishRoundTrip` could not connect to the local MQTT broker.
-  Both attempts to download a temporary broker image failed on Docker DNS
-  resolution. All Twin tests and the application context test passed. This run
-  supplied `app.realtime.websocket.heartbeat=20s` in the test process because the
-  legacy test resource configuration omits it. No source configuration changed.
-- `mvn.cmd -DskipTests package`: **BUILD SUCCESS**, producing
-  `target/backend-0.0.1-SNAPSHOT.jar`. Tests were run separately as recorded above;
-  the full test suite is not green because of the broker error.
-- `git diff --check`: passed. Changes are limited to backend Java/tests and docs.
+- Kiểm thử có mục tiêu: **23 ca đạt**, không thất bại, lỗi hay bỏ qua, bao gồm
+  kiểm thử repository PostgreSQL trên lược đồ Supabase cục bộ.
+- Toàn bộ `mvn.cmd test`: **111 ca, 110 đạt, 1 lỗi, không bỏ qua**.
+  `MqttSmokeTest.testPublishRoundTrip` hiện có không kết nối được đến MQTT
+  broker cục bộ. Cả hai lần tải image broker tạm đều thất bại do lỗi phân giải
+  DNS của Docker. Tất cả kiểm thử Twin và kiểm thử ngữ cảnh ứng dụng đều đạt.
+  Lần chạy này cung cấp `app.realtime.websocket.heartbeat=20s` trong tiến trình
+  kiểm thử vì cấu hình tài nguyên kiểm thử cũ thiếu giá trị này. Không sửa cấu
+  hình trong mã nguồn.
+- `mvn.cmd -DskipTests package`: **BUILD SUCCESS**, tạo
+  `target/backend-0.0.1-SNAPSHOT.jar`. Kiểm thử được chạy riêng như ghi nhận
+  ở trên; toàn bộ bộ kiểm thử chưa đạt do lỗi broker.
+- `git diff --check`: đạt. Thay đổi giới hạn ở mã Java, kiểm thử backend và tài liệu.
 
-## Implementation file inventory
+## Danh sách tệp triển khai
 
-Paths below are relative to `src/main/java/com/hesta/backend/` unless stated otherwise.
+Các đường dẫn dưới đây tính từ `src/main/java/com/hesta/backend/`, trừ khi có ghi chú khác.
 
-| Created production files | Purpose |
+| Tệp mã ứng dụng được tạo | Mục đích |
 | --- | --- |
-| dto/response/TwinHomeSnapshotResponse.java | Home snapshot |
-| dto/response/TwinRoomSnapshotResponse.java | Room snapshot |
-| dto/response/TwinDeviceSnapshotResponse.java | Device snapshot and event data |
-| dto/response/TwinSensorSnapshotResponse.java | Sensor snapshot and event data |
-| entity/SensorReading.java | Existing telemetry table mapping |
-| repository/SensorReadingRepository.java | Latest per metric query |
-| mapper/TwinSnapshotMapper.java | Shared snapshot/event node mapping |
-| service/TwinSnapshotService.java | Snapshot service interface |
-| service/impl/TwinSnapshotServiceImpl.java | Authorized snapshot read |
-| controller/TwinSnapshotController.java | GET endpoint |
-| dto/command/DeviceStateChangedEvent.java | Device transaction event |
-| dto/command/SensorReadingUpdatedEvent.java | Sensor transaction event hook |
-| realtime/publisher/DeviceSensorRealtimeListener.java | After-commit publication |
+| dto/response/TwinHomeSnapshotResponse.java | Bản chụp trạng thái nhà |
+| dto/response/TwinRoomSnapshotResponse.java | Bản chụp trạng thái phòng |
+| dto/response/TwinDeviceSnapshotResponse.java | Bản chụp trạng thái và dữ liệu sự kiện thiết bị |
+| dto/response/TwinSensorSnapshotResponse.java | Bản chụp trạng thái và dữ liệu sự kiện cảm biến |
+| entity/SensorReading.java | Ánh xạ bảng dữ liệu đo hiện có |
+| repository/SensorReadingRepository.java | Truy vấn số đo mới nhất theo từng chỉ số |
+| mapper/TwinSnapshotMapper.java | Ánh xạ nút dùng chung cho bản chụp trạng thái và sự kiện |
+| service/TwinSnapshotService.java | Giao diện dịch vụ bản chụp trạng thái |
+| service/impl/TwinSnapshotServiceImpl.java | Đọc bản chụp trạng thái sau khi kiểm tra quyền |
+| controller/TwinSnapshotController.java | Điểm cuối GET |
+| dto/command/DeviceStateChangedEvent.java | Sự kiện giao dịch thiết bị |
+| dto/command/SensorReadingUpdatedEvent.java | Điểm tích hợp sự kiện giao dịch cảm biến |
+| realtime/publisher/DeviceSensorRealtimeListener.java | Phát sự kiện sau khi xác nhận giao dịch |
 
-Modified production files: `repository/DeviceRepository.java` adds the bulk device
-query with room fetching; `service/impl/DeviceServiceImpl.java` queues the device
-event after updating state.
+Các tệp mã ứng dụng được sửa: `repository/DeviceRepository.java` bổ sung truy
+vấn thiết bị theo lô có tải kèm phòng; `service/impl/DeviceServiceImpl.java`
+đưa sự kiện thiết bị vào hàng đợi sau khi cập nhật trạng thái.
 
-Created under `src/test/java/com/hesta/backend/`: `controller/TwinSnapshotControllerTest.java`,
-`mapper/TwinSnapshotMapperTest.java`, `mapper/TwinContractSerializationTest.java`,
-`service/TwinSnapshotServiceTest.java`, `service/DeviceStateRealtimeTest.java`,
-`repository/SensorReadingRepositoryTest.java`,
-`realtime/publisher/DeviceSensorRealtimeTransactionTest.java`, and `support/TwinFixtures.java`.
+Các tệp được tạo trong `src/test/java/com/hesta/backend/`:
+`controller/TwinSnapshotControllerTest.java`, `mapper/TwinSnapshotMapperTest.java`,
+`mapper/TwinContractSerializationTest.java`, `service/TwinSnapshotServiceTest.java`,
+`service/DeviceStateRealtimeTest.java`, `repository/SensorReadingRepositoryTest.java`,
+`realtime/publisher/DeviceSensorRealtimeTransactionTest.java` và `support/TwinFixtures.java`.
 
-Created documentation: this file and the three JSON files linked above.
-Modified documentation: `docs/REALTIME.md` links this contract.
+Tài liệu được tạo: tệp này và ba tệp JSON được liên kết ở trên.
+Tài liệu được sửa: `docs/REALTIME.md` bổ sung liên kết đến đặc tả này.
 
-## Boundaries and limitations
+## Phạm vi và giới hạn
 
-- `status`, `lastSeen`, and `observedAt` remain stored raw values. The separate
-  [Twin health feature](TWIN_HEALTH.md) now derives `healthStatus` and publishes
-  pure freshness transitions without changing ingestion's responsibility for
-  maintaining lastSeen/status.
-- The shared broker has no durable replay or ordering/version guarantee. Initial
-  snapshot/event race reconciliation, reconnects, and out-of-order updates remain
-  consumer concerns. Observation time is supplied, but is not a monotonic version.
-- Structural updates such as room creation, reassignment, or device removal have
-  no new event type in this task. Reload the snapshot when those structures change.
-- The latest-per-metric query uses existing indexes. Large telemetry retention
-  volumes may warrant a separately reviewed query/index optimization.
-- No frontend files, React/Redux/TypeScript, new WebSocket/STOMP infrastructure,
-  Digital Twin persistence, or layout editor were added. Health thresholds are
-  defined by the subsequent [Twin health feature](TWIN_HEALTH.md).
+- `status`, `lastSeen` và `observedAt` vẫn là các giá trị gốc được lưu.
+  [Tính năng trạng thái hoạt động của Twin](TWIN_HEALTH.md) riêng biệt hiện suy
+  ra `healthStatus` và phát các chuyển trạng thái chỉ do độ mới của dữ liệu,
+  đồng thời giữ nguyên trách nhiệm cập nhật lastSeen/status của luồng tiếp nhận.
+- Broker dùng chung không hỗ trợ phát lại bền vững hay bảo đảm thứ tự/phiên bản.
+  Bên nhận phải xử lý tình huống bản chụp ban đầu và sự kiện đến đồng thời,
+  kết nối lại và cập nhật sai thứ tự. Thời điểm đo được cung cấp nhưng không
+  phải là số phiên bản tăng đơn điệu.
+- Những thay đổi cấu trúc như tạo phòng, gán lại phòng hoặc xóa thiết bị chưa
+  có loại sự kiện mới trong phạm vi công việc này. Hãy tải lại bản chụp trạng
+  thái khi các cấu trúc đó thay đổi.
+- Truy vấn số đo mới nhất theo từng chỉ số sử dụng các chỉ mục hiện có. Khi
+  lượng dữ liệu đo lưu giữ lớn, có thể cần tối ưu truy vấn/chỉ mục qua một
+  đợt rà soát riêng.
+- Phần triển khai này không bổ sung tệp frontend, React/Redux/TypeScript, hạ
+  tầng WebSocket/STOMP mới, cơ chế lưu trữ Digital Twin hay trình chỉnh sửa bố
+  cục. Các ngưỡng trạng thái hoạt động được định nghĩa trong
+  [tính năng trạng thái hoạt động của Twin](TWIN_HEALTH.md) bổ sung sau đó.

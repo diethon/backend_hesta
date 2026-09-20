@@ -1,20 +1,20 @@
-# Local demo data
+# Dữ liệu demo cục bộ
 
 ## Mục đích
 
-`supabase/seed.sql` tạo một dataset local có quan hệ đầy đủ để phát triển và demo HESTA mà không
-dùng dữ liệu cá nhân hoặc database Cloud.
+`supabase/seed.sql` tạo một bộ dữ liệu cục bộ có quan hệ đầy đủ để phát triển
+và minh họa HESTA mà không dùng dữ liệu cá nhân hoặc cơ sở dữ liệu Cloud.
 
-Dataset gồm:
+Bộ dữ liệu gồm:
 
-- 5 tài khoản local, gồm platform `USER` và `ADMIN`.
+- 5 tài khoản cục bộ, gồm vai trò nền tảng `USER` và `ADMIN`.
 - 2 căn nhà tách biệt.
 - Quan hệ `OWNER`/`MEMBER` và quyền truy cập theo phòng.
 - 5 phòng, 3 edge node và 8 thiết bị.
-- Device state history và sensor readings.
-- Scene, scene actions, schedule và automation rule.
-- Security event, device anomaly và notification theo từng recipient.
-- Notification preference cho từng user.
+- Lịch sử trạng thái thiết bị và số đo cảm biến.
+- Scene, hành động scene, lịch và quy tắc tự động hóa.
+- Sự kiện bảo mật, bất thường thiết bị và thông báo theo từng người nhận.
+- Tùy chọn thông báo cho từng người dùng.
 
 ## Khởi tạo
 
@@ -24,18 +24,20 @@ Dataset gồm:
 npx supabase start
 ```
 
-Nạp thêm dataset vào database local hiện tại và chọn password cho các account demo:
+Nạp thêm bộ dữ liệu vào cơ sở dữ liệu cục bộ hiện tại và chọn mật khẩu cho
+các tài khoản demo:
 
 ```powershell
 .\scripts\Initialize-LocalDemo.ps1
 ```
 
-Script hỏi password một lần bằng input ẩn rồi chỉ lưu BCrypt hash vào database. Password không được
-ghi vào Git hoặc log.
+Script hỏi mật khẩu một lần bằng ô nhập ẩn rồi chỉ lưu mã băm BCrypt vào cơ
+sở dữ liệu. Mật khẩu không được ghi vào Git hoặc nhật ký.
 
-Script ép dữ liệu gửi vào PostgreSQL theo UTF-8, kể cả khi chạy bằng Windows PowerShell 5.1. Nếu
-dataset từng được nạp bằng phiên bản cũ và chữ tiếng Việt đã thành dấu `?`, chỉ cần chạy lại script;
-các trường văn bản demo sẽ được cập nhật lại mà không tạo bản ghi trùng.
+Script ép dữ liệu gửi vào PostgreSQL theo UTF-8, kể cả khi chạy bằng Windows
+PowerShell 5.1. Nếu bộ dữ liệu từng được nạp bằng phiên bản cũ và chữ tiếng
+Việt đã thành dấu `?`, chỉ cần chạy lại script; các trường văn bản demo sẽ
+được cập nhật mà không tạo bản ghi trùng.
 
 Nếu muốn xóa và dựng lại toàn bộ database local từ migrations trước khi seed:
 
@@ -43,22 +45,22 @@ Nếu muốn xóa và dựng lại toàn bộ database local từ migrations tr�
 .\scripts\Initialize-LocalDemo.ps1 -ResetDatabase
 ```
 
-Bạn phải nhập chính xác `RESET` trước khi script xóa database local. Lệnh này không push hoặc thay đổi
-Supabase Cloud.
+Bạn phải nhập chính xác `RESET` trước khi script xóa cơ sở dữ liệu cục bộ.
+Lệnh này không đẩy migration hoặc thay đổi Supabase Cloud.
 
 ## Tài khoản demo
 
-Tất cả tài khoản sử dụng password bạn nhập khi chạy script.
+Tất cả tài khoản sử dụng mật khẩu bạn nhập khi chạy script.
 
-| Email | Platform role | Home role | Phạm vi |
+| Email | Vai trò nền tảng | Vai trò trong nhà | Phạm vi |
 |---|---|---|---|
 | `owner@hesta.local` | `USER` | `OWNER` | Toàn bộ Nhà HESTA Demo. |
 | `member@hesta.local` | `USER` | `MEMBER` | Phòng khách và Nhà bếp. |
 | `guest@hesta.local` | `USER` | `MEMBER` | Phòng khách và Phòng ngủ. |
-| `second.owner@hesta.local` | `USER` | `OWNER` | Căn hộ Gia Huy, dùng để kiểm tra isolation. |
-| `admin@hesta.local` | `ADMIN` | Không có | Kiểm thử API platform admin. |
+| `second.owner@hesta.local` | `USER` | `OWNER` | Căn hộ Gia Huy, dùng để kiểm tra cách ly dữ liệu. |
+| `admin@hesta.local` | `ADMIN` | Không có | Kiểm thử API quản trị nền tảng. |
 
-## Topology chính
+## Cấu trúc chính
 
 ### Nhà HESTA Demo
 
@@ -77,13 +79,14 @@ Nhà HESTA Demo
     └── Khóa cửa chính
 ```
 
-Notification mẫu cho từng user có cả trạng thái read/unread và các type `SECURITY`, `AUTOMATION`,
-`DEVICE`, `SYSTEM`.
+Thông báo mẫu cho từng người dùng có cả trạng thái đã đọc/chưa đọc và các loại
+`SECURITY`, `AUTOMATION`, `DEVICE`, `SYSTEM`.
 
 ### Căn hộ Gia Huy
 
-Có một camera trạng thái `ERROR`, một `DeviceAnomaly` và notification `ANOMALY`. Dataset này giúp
-kiểm tra user của nhà thứ nhất không thể đọc dữ liệu nhà thứ hai.
+Có một camera trạng thái `ERROR`, một `DeviceAnomaly` và thông báo `ANOMALY`.
+Bộ dữ liệu giúp kiểm tra người dùng của nhà thứ nhất không thể đọc dữ liệu nhà
+thứ hai.
 
 ## Xem dữ liệu
 
@@ -115,8 +118,8 @@ user_preferences
 
 ## Lưu ý bảo mật
 
-- Dataset chỉ dành cho local development.
-- Không dùng email/password demo trên môi trường thật.
-- Không thêm plaintext password vào `supabase/seed.sql`, `.env.example`, tài liệu hoặc commit.
-- `npx supabase db reset` sẽ tạo lại password hash ngẫu nhiên; chạy script để đặt password đăng nhập
-  mà bạn chọn sau mỗi lần reset.
+- Bộ dữ liệu chỉ dành cho phát triển cục bộ.
+- Không dùng email/mật khẩu demo trên môi trường thật.
+- Không thêm mật khẩu dạng rõ vào `supabase/seed.sql`, `.env.example`, tài liệu hoặc commit.
+- `npx supabase db reset` sẽ tạo lại mã băm mật khẩu ngẫu nhiên; chạy script để
+  đặt mật khẩu đăng nhập bạn chọn sau mỗi lần reset.

@@ -30,6 +30,12 @@ public enum ErrorCode {
     SCENE_ACTIONS_INVALID(1114, "Scene actions must use unique contiguous order values starting at zero", HttpStatus.BAD_REQUEST),
     SCENE_REORDER_INVALID(1115, "Reorder payload must contain every scene action exactly once", HttpStatus.BAD_REQUEST),
     INVALID_REQUEST(1116, "Request body is invalid", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_GEOMETRY_INVALID(1125, "Twin layout geometry must use finite normalized coordinates", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_ROOM_INVALID(1126, "Twin layout references an invalid room", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_DEVICE_INVALID(1127, "Twin layout references an invalid device", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_SENSOR_INVALID(1128, "Twin layout references an invalid sensor stream", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_DUPLICATE_ENTRY(1129, "Twin layout contains a duplicate entry", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_REVISION_CONFLICT(1130, "Twin layout revision is out of date", HttpStatus.CONFLICT),
 
     // Các mã lỗi chung
     UNCATEGORIZED_EXCEPTION(9999, "Lỗi không xác định", HttpStatus.INTERNAL_SERVER_ERROR),

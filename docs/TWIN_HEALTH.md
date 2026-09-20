@@ -1,267 +1,295 @@
-# Digital Twin freshness: ACTIVE / STALE / OFFLINE
+# Độ mới dữ liệu Digital Twin: ACTIVE / STALE / OFFLINE
 
-`TwinHealthStatus` is a derived visualization concern, separate from the existing
-`DeviceStatus` and `currentState`. Neither device business status nor `lastSeen`
-is changed by this feature. No health state is persisted.
+`TwinHealthStatus` là trạng thái suy ra để phục vụ hiển thị, tách biệt với
+`DeviceStatus` và `currentState` hiện có. Tính năng này không thay đổi trạng
+thái nghiệp vụ của thiết bị hay `lastSeen`. Trạng thái hoạt động suy ra không
+được lưu vào cơ sở dữ liệu.
 
-## Authoritative time and exact rules
+## Thời gian tham chiếu chuẩn và quy tắc chính xác
 
-`TwinHealthStatusResolverImpl` contains the only threshold comparisons. It uses an
-injected `java.time.Clock` (UTC by default) or an explicit evaluation Instant.
+`TwinHealthStatusResolverImpl` là nơi duy nhất thực hiện so sánh các ngưỡng.
+Thành phần này dùng `java.time.Clock` được tiêm vào (mặc định UTC) hoặc một
+`Instant` đánh giá được truyền tường minh.
 
-| Condition | healthStatus |
+| Điều kiện | healthStatus |
 | --- | --- |
-| Missing reference timestamp | OFFLINE |
+| Thiếu dấu thời gian tham chiếu | OFFLINE |
 | age < staleAfter | ACTIVE |
 | staleAfter <= age < offlineAfter | STALE |
 | age >= offlineAfter | OFFLINE |
 
-`age = evaluatedAt - referenceTime`, compared as exact Java Durations. Future
-timestamps have negative age and deterministically resolve ACTIVE until the
-clock passes their freshness boundaries. Timestamps are never rewritten or
-replaced by snapshot request time or WebSocket publication time.
+`age = evaluatedAt - referenceTime`, được so sánh chính xác dưới dạng
+`Duration` của Java. Dấu thời gian trong tương lai có tuổi dữ liệu âm và luôn
+được xác định là ACTIVE cho đến khi đồng hồ vượt các ngưỡng độ mới tương ứng.
+Dấu thời gian không bao giờ bị ghi lại hay thay thế bằng thời điểm yêu cầu
+bản chụp trạng thái hoặc thời điểm phát WebSocket.
 
-- A Device uses only its stored `Device.lastSeen`.
-- A sensor stream uses its latest `SensorReading.recordedAt`, exposed as
-  `observedAt`. Latest remains greatest observation time, then greatest reading
-  ID for a tie. Each `(deviceId, exact metricType)` stream is independent.
-- A sensor event does **not** update the Device's lastSeen or health. Fresh
-  TEMPERATURE does not refresh HUMIDITY. A latest accepted observation may
-  already be stale/offline when it arrives, and is classified accordingly.
+- Thiết bị chỉ dùng `Device.lastSeen` đã lưu.
+- Luồng cảm biến dùng `SensorReading.recordedAt` mới nhất, được trả ra qua
+  `observedAt`. Mới nhất vẫn là thời điểm đo lớn nhất, sau đó là ID bản ghi đo
+  lớn nhất nếu trùng thời điểm. Mỗi luồng `(deviceId, exact metricType)` độc lập.
+- Sự kiện cảm biến **không** cập nhật lastSeen hay trạng thái hoạt động của
+  thiết bị. TEMPERATURE mới không làm mới HUMIDITY. Số đo mới nhất được chấp
+  nhận có thể đã ở trạng thái stale/offline khi đến và được phân loại tương ứng.
 
-## Configuration
+## Cấu hình
 
-Defaults live only in `TwinHealthProperties` constructor-binding annotations.
-Spring Boot's normal configuration/environment overrides apply; values bind and
-validate at startup. Restart the application to change these settings.
+Giá trị mặc định chỉ được khai báo tại các annotation liên kết cấu hình qua
+hàm khởi tạo của `TwinHealthProperties`. Cơ chế ghi đè cấu hình/biến môi trường
+thông thường của Spring Boot vẫn áp dụng; các giá trị được liên kết và kiểm
+tra khi khởi động. Cần khởi động lại ứng dụng để thay đổi những thiết lập này.
 
-| Property | Default | Environment variable |
+| Thuộc tính | Mặc định | Biến môi trường |
 | --- | --- | --- |
 | app.twin.health.stale-after | 1m | APP_TWIN_HEALTH_STALEAFTER |
 | app.twin.health.offline-after | 5m | APP_TWIN_HEALTH_OFFLINEAFTER |
 | app.twin.health.evaluation-interval | 15s | APP_TWIN_HEALTH_EVALUATIONINTERVAL |
 | app.twin.health.scheduling-enabled | true | APP_TWIN_HEALTH_SCHEDULINGENABLED |
 
-`staleAfter > 0`, `offlineAfter > staleAfter`, and `evaluationInterval > 0` are
-mandatory. Invalid durations or ordering fail configuration binding with a clear
-property-specific error. The scheduling switch is intended for deterministic
-tests or externally driven evaluation; production should normally leave it on.
-If disabled, callers must invoke `evaluateAll()` themselves to obtain time-based
-transitions and cache pruning.
+Bắt buộc `staleAfter > 0`, `offlineAfter > staleAfter` và
+`evaluationInterval > 0`. Khoảng thời gian hoặc thứ tự ngưỡng không hợp lệ
+làm quá trình liên kết cấu hình thất bại với lỗi rõ ràng theo từng thuộc
+tính. Công tắc lập lịch phục vụ kiểm thử có kết quả xác định hoặc việc chủ
+động kích hoạt đánh giá từ bên ngoài; môi trường vận hành thường nên bật.
+Nếu tắt, bên gọi phải tự gọi `evaluateAll()` để nhận các chuyển trạng thái
+theo thời gian và dọn bộ nhớ đệm.
 
-## Snapshot and complete-node events
+## Bản chụp trạng thái và sự kiện chứa đầy đủ một nút
 
-`TwinDeviceSnapshotResponse` adds one `TwinHealthStatus healthStatus` field and
-retains `DeviceStatus status`, `currentState`, and `lastSeen` unchanged.
-`TwinSensorSnapshotResponse` adds `healthStatus` and retains every existing field.
-Home/Room structure, UUIDs, exact sensor IDs, and the ApiResponse envelope remain
-unchanged. `TwinSnapshotMapper` evaluates all nodes in one snapshot at a single
-Clock instant using the shared resolver; snapshot reads do not mutate the cache.
+`TwinDeviceSnapshotResponse` bổ sung trường `TwinHealthStatus healthStatus`,
+giữ nguyên `DeviceStatus status`, `currentState` và `lastSeen`.
+`TwinSensorSnapshotResponse` bổ sung `healthStatus` và giữ toàn bộ trường
+hiện có. Cấu trúc nhà/phòng, UUID, ID cảm biến nguyên bản và cấu trúc bao
+`ApiResponse` đều không đổi. `TwinSnapshotMapper` đánh giá mọi nút trong một
+bản chụp tại cùng một thời điểm của `Clock`, dùng bộ phân giải chung; thao
+tác đọc bản chụp không thay đổi bộ nhớ đệm.
 
-The existing `DEVICE_STATE_CHANGED` and `SENSOR_READING_UPDATED` events continue
-to send complete single-node DTOs, now including healthStatus. The existing
-AFTER_COMMIT listener recalculates health at publication from the payload's
-authoritative reference time, so a long transaction cannot blindly publish
-ACTIVE based on the time when its DTO was first mapped.
+Các sự kiện `DEVICE_STATE_CHANGED` và `SENSOR_READING_UPDATED` hiện có tiếp
+tục gửi DTO đầy đủ của một nút, nay có thêm healthStatus. Bộ lắng nghe
+`AFTER_COMMIT` hiện có tính lại trạng thái hoạt động khi phát dựa trên thời
+gian tham chiếu chuẩn trong dữ liệu, nên giao dịch kéo dài không thể phát
+ACTIVE một cách máy móc dựa vào thời điểm DTO được ánh xạ ban đầu.
 
-## Time-based evaluation and transition cache
+## Đánh giá theo thời gian và bộ nhớ đệm chuyển trạng thái
 
-There is one `TwinHealthScheduler` and one per-instance `TwinHealthEvaluationService`.
-The scheduler establishes a baseline immediately on startup, then runs at the
-configured fixed delay after each sweep finishes. It has a single dedicated
-worker, separate from the existing WebSocket heartbeat scheduler. There are no
-per-device/per-sensor threads or timers.
+Mỗi bản chạy ứng dụng có một `TwinHealthScheduler` và một
+`TwinHealthEvaluationService`. Bộ lập lịch thiết lập trạng thái cơ sở ngay
+khi khởi động, sau đó chạy với khoảng chờ cố định đã cấu hình tính từ lúc
+mỗi lượt quét kết thúc. Nó có một luồng xử lý riêng, tách biệt với bộ lập
+lịch heartbeat WebSocket hiện có. Không có luồng xử lý hay bộ hẹn giờ riêng
+cho từng thiết bị/cảm biến.
 
-A sweep loads two bulk scalar projections: live Devices and the latest reading
-of every live sensor stream. It loads no telemetry history and performs no
-per-node lazy query. Queries exclude soft-deleted devices. Both queries execute
-in one read-only REPEATABLE_READ transaction. The evaluator finishes that read
-transaction before publishing transitions through `RealtimeEventPublisher`.
+Một lượt quét tải hai tập dữ liệu chiếu chỉ gồm các giá trị đơn theo lô:
+thiết bị chưa bị xóa và số đo mới nhất của từng luồng cảm biến hiện hữu.
+Không tải lịch sử đo và không truy vấn tải lười theo từng nút. Các truy vấn
+loại bỏ thiết bị đã xóa mềm và cùng chạy trong một giao dịch chỉ đọc
+`REPEATABLE_READ`. Bộ đánh giá kết thúc giao dịch đọc trước khi phát chuyển
+trạng thái qua `RealtimeEventPublisher`.
 
-Cache keys are `(DEVICE, device UUID string)` and `(SENSOR, canonical sensorId)`.
-The sensor ID remains `<device UUID>:<exact metricType>`, generated by the same
-helper as snapshot mapping. Only the last calculated status is cached. Reads and
-cache updates are serialized to prevent a concurrent sweep from overwriting a
-newer committed evaluation. Equal statuses publish nothing. Changed statuses
-publish one typed health event; the cache advances after a successful publish.
-Failed publication leaves the previous cached status available for retry.
+Khóa bộ nhớ đệm là `(DEVICE, device UUID string)` và `(SENSOR, canonical sensorId)`.
+ID cảm biến vẫn là `<device UUID>:<exact metricType>`, được tạo bởi cùng hàm
+hỗ trợ dùng khi ánh xạ bản chụp. Chỉ trạng thái được tính gần nhất được lưu
+đệm. Việc đọc và cập nhật bộ nhớ đệm được tuần tự hóa để tránh lượt quét đồng
+thời ghi đè kết quả đánh giá mới hơn đã được xác nhận. Trạng thái không đổi
+thì không phát sự kiện. Khi trạng thái thay đổi, hệ thống phát một sự kiện
+trạng thái hoạt động có kiểu xác định; bộ nhớ đệm cập nhật sau khi phát thành
+công. Nếu phát thất bại, trạng thái cũ trong bộ nhớ đệm được giữ để thử lại.
 
-First sight of a node establishes a silent baseline. Restarting the application
-does not emit a flood of fake transitions; initial clients use the REST snapshot
-for current health. Every full sweep removes keys absent from the current live
-node set, including deleted devices and removed sensor streams. Cache size tracks
-live nodes, not historical readings or every ID ever observed.
+Lần đầu thấy một nút chỉ thiết lập trạng thái cơ sở, không phát sự kiện.
+Khởi động lại ứng dụng không tạo hàng loạt chuyển trạng thái giả; ứng dụng
+khách mới dùng bản chụp REST để lấy trạng thái hoạt động hiện tại. Mỗi lượt
+quét đầy đủ xóa các khóa không còn trong tập nút hiện hữu, bao gồm thiết bị
+đã xóa và luồng cảm biến đã bị loại bỏ. Kích thước bộ nhớ đệm phụ thuộc vào
+số nút hiện hữu, không phụ thuộc lịch sử đo hay mọi ID từng được ghi nhận.
 
-## Recovery after committed activity
+## Phục hồi sau hoạt động đã xác nhận giao dịch
 
-`TwinHealthActivityListener` observes the existing `DeviceStateChangedEvent` and
-`SensorReadingUpdatedEvent` only AFTER_COMMIT, after their complete-node event is
-published. It immediately evaluates the affected Device or exact sensor metric.
-It does not wait for the next scheduler interval.
+`TwinHealthActivityListener` chỉ theo dõi `DeviceStateChangedEvent` và
+`SensorReadingUpdatedEvent` hiện có ở pha `AFTER_COMMIT`, sau khi sự kiện
+chứa đầy đủ một nút của chúng được phát. Nó đánh giá ngay thiết bị hoặc đúng
+chỉ số cảm biến bị ảnh hưởng, không đợi chu kỳ lập lịch tiếp theo.
 
-Recovery rereads the current committed reference through a short REQUIRES_NEW
-read transaction: AFTER_COMMIT can still bind the completed transaction's resources.
-This also prevents a delayed callback from using an obsolete event timestamp,
-home, or room context. Routing comes from the current database relationships.
-A missing/deleted node removes its cache key rather than publishing recovery.
+Quá trình phục hồi đọc lại tham chiếu đã xác nhận hiện tại qua một giao dịch
+đọc ngắn `REQUIRES_NEW`: ở pha `AFTER_COMMIT`, tài nguyên của giao dịch đã
+kết thúc vẫn có thể còn được gắn với luồng xử lý. Cách này cũng tránh việc
+hàm gọi lại chạy muộn dùng dấu thời gian sự kiện hoặc ngữ cảnh nhà/phòng đã
+cũ. Định tuyến dựa trên quan hệ hiện tại trong cơ sở dữ liệu. Nút không tồn
+tại hoặc đã bị xóa sẽ bị xóa khóa bộ nhớ đệm thay vì phát sự kiện phục hồi.
 
-Historical input already suppresses `SensorReadingUpdatedEvent` in the unchanged
-ingestion service. It therefore cannot trigger recovery. Even a sweep still
-selects the true latest reading. A rollback invokes neither realtime listener,
-so it cannot publish a health recovery or change the committed latest timestamp.
+Dịch vụ tiếp nhận hiện có vốn không phát `SensorReadingUpdatedEvent` cho dữ
+liệu lịch sử, nên dữ liệu này không thể kích hoạt phục hồi. Ngay cả lượt
+quét cũng vẫn chọn số đo mới nhất thực sự. Hoàn tác giao dịch không kích
+hoạt cả hai bộ lắng nghe thời gian thực, do đó không thể phát phục hồi trạng
+thái hay thay đổi dấu thời gian mới nhất đã xác nhận.
 
-## Realtime health-change contract
+## Đặc tả sự kiện thay đổi trạng thái hoạt động theo thời gian thực
 
-One new shared enum value, `TWIN_HEALTH_STATUS_CHANGED`, represents all health
-transitions. The unchanged `RealtimeEvent<T>` envelope routes it through
-`/topic/homes/{homeId}/events` and the existing publisher/transport. There is no
-new endpoint, broker, publisher, topic family, or frontend polling API.
+Một giá trị enum dùng chung mới, `TWIN_HEALTH_STATUS_CHANGED`, đại diện cho
+mọi chuyển trạng thái hoạt động. Cấu trúc bao `RealtimeEvent<T>` giữ nguyên,
+định tuyến qua `/topic/homes/{homeId}/events` và bộ phát/kênh truyền hiện có.
+Không có điểm cuối, broker, bộ phát, nhóm topic hay API truy vấn định kỳ cho
+frontend mới.
 
-`TwinHealthStatusChangedPayload` contains:
+`TwinHealthStatusChangedPayload` gồm:
 
-- `nodeType`: DEVICE or SENSOR.
-- `nodeId`: device UUID string or canonical sensor ID.
-- `deviceId`: UUID of the source Device.
-- `roomId`: UUID, or null for an unassigned Device/stream.
-- `previousStatus` and `healthStatus`: canonical TwinHealthStatus values.
-- `referenceTime`: authoritative OffsetDateTime, nullable for a never-seen Device.
-- `evaluatedAt`: evaluation Instant from the injected Clock.
+- `nodeType`: DEVICE hoặc SENSOR.
+- `nodeId`: chuỗi UUID thiết bị hoặc ID cảm biến chuẩn.
+- `deviceId`: UUID của thiết bị nguồn.
+- `roomId`: UUID, hoặc null nếu thiết bị/luồng chưa được gán phòng.
+- `previousStatus` và `healthStatus`: các giá trị chuẩn của TwinHealthStatus.
+- `referenceTime`: thời gian tham chiếu chuẩn kiểu OffsetDateTime, có thể
+  null nếu chưa từng ghi nhận hoạt động của thiết bị.
+- `evaluatedAt`: thời điểm đánh giá kiểu Instant từ Clock được tiêm vào.
 
-The envelope timestamp remains publication time. The payload contains one node,
-never the home snapshot. See [the exact sample JSON](examples/twin-health-event.json),
-verified by `TwinContractSerializationTest`. Existing snapshot/device/sensor JSON
-examples have also been extended and remain serialization-tested.
+Dấu thời gian của cấu trúc bao vẫn là thời điểm phát. Phần dữ liệu chỉ chứa
+một nút, không chứa bản chụp toàn bộ nhà. Xem [JSON mẫu chính xác](examples/twin-health-event.json),
+được kiểm chứng bằng `TwinContractSerializationTest`. Các JSON mẫu bản chụp,
+thiết bị và cảm biến hiện có cũng được mở rộng và tiếp tục được kiểm thử tuần tự hóa.
 
-## Sample timeline
+## Ví dụ dòng thời gian
 
-This timeline overrides staleAfter to **30s** and offlineAfter to **5m**; the
-production stale default is 1m. Exact resolver results are:
+Ví dụ này ghi đè staleAfter thành **30s**, offlineAfter thành **5m**; ngưỡng
+stale mặc định khi vận hành là 1m. Kết quả chính xác của bộ phân giải:
 
-| Time | Reference time | Health |
+| Thời điểm | Thời gian tham chiếu | Trạng thái hoạt động |
 | --- | --- | --- |
-| 10:00:00 observation accepted | 10:00:00 | ACTIVE |
+| 10:00:00 chấp nhận số đo | 10:00:00 | ACTIVE |
 | 10:00:29.999 | 10:00:00 | ACTIVE |
 | 10:00:30.000 | 10:00:00 | STALE |
 | 10:04:59.999 | 10:00:00 | STALE |
 | 10:05:00.000 | 10:00:00 | OFFLINE |
-| 10:06:00 fresh latest observation commits | 10:06:00 | ACTIVE |
+| 10:06:00 xác nhận giao dịch chứa số đo mới nhất còn mới | 10:06:00 | ACTIVE |
 
-The scheduled event is delivered on the first sweep at/after a boundary, rather
-than promising a push at its exact nanosecond. Snapshot and complete-node event
-health use the resolver immediately. A long pause between sweeps can legitimately
-produce ACTIVE -> OFFLINE directly; it does not invent an unobserved STALE event.
+Sự kiện theo lịch được gửi ở lượt quét đầu tiên tại hoặc sau ngưỡng, không
+bảo đảm đẩy đúng từng nano giây tại ngưỡng. Trạng thái hoạt động trong bản
+chụp và sự kiện chứa đầy đủ một nút được tính ngay bằng bộ phân giải. Nếu
+khoảng nghỉ giữa các lượt quét dài, chuyển thẳng ACTIVE -> OFFLINE là hợp
+lệ; hệ thống không tạo sự kiện STALE chưa từng được quan sát.
 
-## Tests and backend-only demo
+## Kiểm thử và chạy minh họa chỉ với backend
 
-Tests use explicit 30s/5m thresholds, fixed or manually advanced Clocks, and direct
-evaluator invocation. They do not sleep to cross health boundaries. Socket queue
-timeouts only wait for asynchronous transport delivery.
+Kiểm thử dùng ngưỡng 30s/5m tường minh, Clock cố định hoặc được tăng thủ công
+và gọi trực tiếp bộ đánh giá. Chúng không tạm dừng để chờ vượt ngưỡng trạng
+thái. Thời gian chờ của hàng đợi socket chỉ dùng để đợi việc truyền bất đồng bộ.
 
-- Resolver tests cover the exact boundaries, one nanosecond before stale, missing
-  timestamps, future timestamps, and deterministic repeated evaluation.
-- Binding tests cover invalid values, ordering, and the documented environment names.
-- Evaluator/scheduler tests cover silent baselines, deduplication, recovery,
-  independent metrics/device health, routing, node pruning, and one registered job.
-- Existing Twin tests now additionally verify derived health while preserving all
-  prior mapping, security, and serialization assertions.
-- The existing PostgreSQL/real-STOMP mock harness now also verifies pure time
-  transitions, STALE/OFFLINE recovery, sensor/device rollback, historical input,
-  independent metrics, and unchanged Device status/lastSeen semantics.
+- Kiểm thử bộ phân giải bao phủ chính xác các ngưỡng, thời điểm trước ngưỡng
+  stale một nano giây, dấu thời gian thiếu, dấu thời gian tương lai và đánh
+  giá lặp lại cho kết quả xác định.
+- Kiểm thử liên kết cấu hình bao phủ giá trị không hợp lệ, thứ tự ngưỡng và
+  tên biến môi trường đã ghi trong tài liệu.
+- Kiểm thử bộ đánh giá/lập lịch bao phủ trạng thái cơ sở không phát sự kiện,
+  loại bỏ sự kiện trùng, phục hồi, tính độc lập giữa các chỉ số/trạng thái
+  thiết bị, định tuyến, dọn nút và chỉ đăng ký một tác vụ.
+- Các kiểm thử Twin hiện có kiểm chứng thêm trạng thái hoạt động suy ra,
+  đồng thời giữ mọi kiểm tra ánh xạ, bảo mật và tuần tự hóa trước đó.
+- Bộ kiểm thử giả lập dùng PostgreSQL/STOMP thật hiện có còn xác minh chuyển
+  trạng thái thuần theo thời gian, phục hồi từ STALE/OFFLINE, hoàn tác cảm
+  biến/thiết bị, dữ liệu lịch sử, tính độc lập giữa các chỉ số và ngữ nghĩa
+  status/lastSeen của thiết bị không đổi.
 
-With local `HESTA_TEST_DATABASE_URL`, `HESTA_TEST_DATABASE_USERNAME`, and
-`HESTA_TEST_DATABASE_PASSWORD` configured, record this deterministic health demo:
+Sau khi cấu hình `HESTA_TEST_DATABASE_URL`, `HESTA_TEST_DATABASE_USERNAME` và
+`HESTA_TEST_DATABASE_PASSWORD` cho môi trường cục bộ, có thể ghi lại phiên
+minh họa trạng thái hoạt động có kết quả xác định này:
 
 ```powershell
 mvn.cmd '-Dtest=MockSensorPipelineIntegrationTest#healthTimeline_transitionsWithoutActivity_andRecoversOnlyAfterFreshCommit' test
 ```
 
-It uses the existing backend test subscriber and prints `HEALTH DEMO received`
-events from the actual STOMP connection. No frontend or MQTT broker is needed.
-The captured [health demo log](examples/twin-health-demo.txt) contains all three
-transitions. Its `evaluatedAt` uses the manually advanced test Clock, while the
-unchanged envelope `timestamp` records actual publication time.
-Production transition logs use DEBUG and include only home/node identity and the
-previous/current health values; unchanged evaluations do not log per-node telemetry.
+Phiên minh họa dùng bộ nhận sự kiện kiểm thử backend hiện có và in các sự
+kiện `HEALTH DEMO received` từ kết nối STOMP thật. Không cần frontend hay MQTT
+broker. [Nhật ký minh họa trạng thái hoạt động](examples/twin-health-demo.txt)
+đã ghi lại cả ba chuyển trạng thái. `evaluatedAt` dùng Clock kiểm thử được
+tăng thủ công, còn `timestamp` của cấu trúc bao giữ nguyên thời điểm phát
+thực tế. Nhật ký chuyển trạng thái khi vận hành dùng mức DEBUG và chỉ gồm
+định danh nhà/nút cùng trạng thái hoạt động trước/hiện tại; các lần đánh giá
+không thay đổi không ghi dữ liệu đo theo từng nút.
 
-## Operational limits
+## Giới hạn vận hành
 
-- The cache and scheduler are per application instance. Multiple instances can
-  independently publish the same transition; no cluster-wide deduplication is added.
-- Broker delivery remains best-effort, without durable replay or exactly-once
-  acknowledgement. Resync after reconnect uses the existing Twin snapshot.
-- A sweep is O(current devices + current metric streams). Large installations
-  may need separately reviewed paging/indexing or ownership of evaluation work.
-- Committed callbacks briefly serialize with sweeps and require a fresh database
-  connection; size the connection pool for concurrent transactions plus these reads.
-- Future-dated observations remain ACTIVE until their age reaches a boundary.
-  This deterministic freshness rule does not repair source clock skew.
-- Device recovery requires an actual producer to maintain lastSeen and emit its
-  existing committed activity event. Sensor ingestion intentionally does neither
-  on behalf of the Device. Direct database changes are picked up by the next sweep.
+- Bộ nhớ đệm và bộ lập lịch thuộc từng bản chạy ứng dụng. Nhiều bản chạy có
+  thể phát độc lập cùng một chuyển trạng thái; chưa có cơ chế loại trùng
+  trên toàn cụm.
+- Broker chỉ cố gắng chuyển phát, không hỗ trợ phát lại bền vững hay xác nhận
+  đúng một lần. Đồng bộ lại sau khi kết nối lại dùng bản chụp Twin hiện có.
+- Một lượt quét có độ phức tạp O(số thiết bị hiện tại + số luồng chỉ số hiện
+  tại). Hệ thống lớn có thể cần phân trang/chỉ mục hoặc phân chia trách nhiệm
+  đánh giá qua một đợt rà soát riêng.
+- Các hàm gọi lại sau khi xác nhận giao dịch được tuần tự hóa ngắn với lượt
+  quét và cần kết nối cơ sở dữ liệu mới; cần tính kích thước nhóm kết nối
+  cho cả giao dịch đồng thời lẫn các lượt đọc này.
+- Số đo mang thời gian tương lai giữ ACTIVE cho đến khi tuổi dữ liệu chạm
+  ngưỡng. Quy tắc độ mới có kết quả xác định này không sửa sai lệch đồng hồ nguồn.
+- Thiết bị chỉ phục hồi khi nguồn phát thực sự cập nhật lastSeen và phát sự
+  kiện hoạt động đã xác nhận hiện có. Luồng tiếp nhận cảm biến chủ đích không
+  làm thay hai việc này cho thiết bị. Thay đổi trực tiếp trong cơ sở dữ liệu
+  được phát hiện ở lượt quét tiếp theo.
 
-No frontend, MQTT integration, notification changes, new Sensor entity, health
-table, migration, or new WebSocket/STOMP infrastructure is part of this feature.
+Tính năng này không bao gồm frontend, tích hợp MQTT, thay đổi thông báo,
+thực thể Sensor mới, bảng trạng thái hoạt động, migration hay hạ tầng
+WebSocket/STOMP mới.
 
-## Verification recorded on 2026-09-17
+## Kết quả kiểm chứng ghi nhận ngày 2026-09-17
 
-All database checks used isolated local PostgreSQL at `127.0.0.1:54322`, never
-Supabase Cloud. Credentials came from the local container environment and were
-not written into tracked configuration. Hibernate schema validation remained on.
+Mọi kiểm tra cơ sở dữ liệu đều dùng PostgreSQL cục bộ biệt lập tại
+`127.0.0.1:54322`, không dùng Supabase Cloud. Thông tin xác thực lấy từ môi
+trường container cục bộ, không ghi vào cấu hình được Git theo dõi. Cơ chế
+kiểm tra lược đồ của Hibernate vẫn được bật.
 
-| Verification | Result | Local output |
+| Nội dung kiểm chứng | Kết quả | Tệp kết quả cục bộ |
 | --- | --- | --- |
-| Targeted health, Twin, mock ingestion, repository and realtime transaction tests | 89 passed; no failures/errors/skips | `target/twin-health-targeted.log` |
-| Full `mvn.cmd test` | 178 tests: 177 passed, 1 existing MQTT error; no skips | `target/twin-health-full-suite.log` |
-| `mvn.cmd -DskipTests package` after separate test runs | BUILD SUCCESS | `target/twin-health-build.log` |
-| `git diff --check` | Passed | No whitespace errors |
+| Kiểm thử có mục tiêu cho trạng thái hoạt động, Twin, tiếp nhận giả lập, repository và giao dịch thời gian thực | 89 ca đạt; không thất bại/lỗi/bỏ qua | `target/twin-health-targeted.log` |
+| Toàn bộ `mvn.cmd test` | 178 ca: 177 đạt, 1 lỗi MQTT hiện có; không bỏ qua | `target/twin-health-full-suite.log` |
+| `mvn.cmd -DskipTests package` sau các lần chạy kiểm thử riêng | BUILD SUCCESS | `target/twin-health-build.log` |
+| `git diff --check` | Đạt | Không có lỗi khoảng trắng |
 
-The sole full-suite error is the pre-existing
-`MqttSmokeTest.testPublishRoundTrip`: the local MQTT broker connection is refused.
-MQTT code/tests were not changed to conceal this external dependency failure.
-The packaged artifact is `target/backend-0.0.1-SNAPSHOT.jar`; the package command
-skips rerunning tests, and does not make the full suite green.
+Lỗi duy nhất trong toàn bộ bộ kiểm thử là lỗi có sẵn ở
+`MqttSmokeTest.testPublishRoundTrip`: kết nối đến MQTT broker cục bộ bị từ
+chối. Không sửa mã/kiểm thử MQTT để che giấu lỗi phụ thuộc bên ngoài này.
+Tệp đóng gói là `target/backend-0.0.1-SNAPSHOT.jar`; lệnh đóng gói bỏ qua chạy
+lại kiểm thử và không đồng nghĩa toàn bộ bộ kiểm thử đã đạt.
 
-The targeted run selected `TwinHealthStatusResolverTest`,
+Lần chạy có mục tiêu chọn `TwinHealthStatusResolverTest`,
 `TwinHealthPropertiesTest`, `TwinHealthEvaluationServiceTest`,
 `TwinHealthSchedulerTest`, `MockSensorPipelineIntegrationTest`,
 `SensorReadingIngestionServiceTest`, `MockSensorExposureTest`,
 `MockSensorExamplesTest`, `TwinSnapshotMapperTest`, `TwinSnapshotServiceTest`,
 `TwinSnapshotControllerTest`, `TwinContractSerializationTest`,
-`DeviceStateRealtimeTest`, `DeviceSensorRealtimeTransactionTest`, and
+`DeviceStateRealtimeTest`, `DeviceSensorRealtimeTransactionTest` và
 `SensorReadingRepositoryTest`.
 
-## Files created and modified for this feature
+## Các tệp được tạo và sửa cho tính năng này
 
-Production paths below are relative to `src/main/java/com/hesta/backend/`.
+Đường dẫn mã ứng dụng dưới đây tính từ `src/main/java/com/hesta/backend/`.
 
-| Created file | Responsibility |
+| Tệp được tạo | Trách nhiệm |
 | --- | --- |
-| `enums/TwinHealthStatus.java` | Canonical ACTIVE / STALE / OFFLINE |
-| `enums/TwinNodeType.java` | DEVICE / SENSOR transport discriminator |
-| `config/TwinHealthProperties.java` | Validated typed durations and single default location |
-| `config/TwinHealthConfig.java` | Clock and dedicated single-worker scheduler wiring |
-| `service/TwinHealthStatusResolver.java` | Shared health calculation interface |
-| `service/impl/TwinHealthStatusResolverImpl.java` | Exact timestamp boundary rules |
-| `service/TwinHealthEvaluationService.java` | Bulk and individual evaluation interface |
-| `service/impl/TwinHealthEvaluationServiceImpl.java` | Derived transitions, cache, pruning and existing publisher reuse |
-| `service/impl/TwinHealthScheduler.java` | One configurable periodic evaluation job |
-| `repository/TwinHealthReference.java` | Bulk scalar timestamp/context projection |
-| `dto/response/TwinHealthStatusChangedPayload.java` | Typed one-node health event |
-| `realtime/publisher/TwinHealthActivityListener.java` | Existing committed event recovery |
+| `enums/TwinHealthStatus.java` | Các giá trị chuẩn ACTIVE / STALE / OFFLINE |
+| `enums/TwinNodeType.java` | Phân biệt DEVICE / SENSOR khi truyền dữ liệu |
+| `config/TwinHealthProperties.java` | Khoảng thời gian có kiểu, được kiểm tra và khai báo mặc định tại một nơi |
+| `config/TwinHealthConfig.java` | Cấu hình Clock và bộ lập lịch riêng với một luồng xử lý |
+| `service/TwinHealthStatusResolver.java` | Giao diện tính trạng thái hoạt động dùng chung |
+| `service/impl/TwinHealthStatusResolverImpl.java` | Quy tắc ngưỡng thời gian chính xác |
+| `service/TwinHealthEvaluationService.java` | Giao diện đánh giá theo lô và từng nút |
+| `service/impl/TwinHealthEvaluationServiceImpl.java` | Suy ra chuyển trạng thái, lưu đệm, dọn đệm và tái sử dụng bộ phát hiện có |
+| `service/impl/TwinHealthScheduler.java` | Một tác vụ đánh giá định kỳ có thể cấu hình |
+| `repository/TwinHealthReference.java` | Phép chiếu giá trị đơn theo lô cho thời gian/ngữ cảnh |
+| `dto/response/TwinHealthStatusChangedPayload.java` | Sự kiện trạng thái hoạt động có kiểu cho một nút |
+| `realtime/publisher/TwinHealthActivityListener.java` | Phục hồi từ sự kiện đã xác nhận giao dịch hiện có |
 
-Modified production files:
+Các tệp mã ứng dụng được sửa:
 
-- `dto/response/TwinDeviceSnapshotResponse.java` and
-  `dto/response/TwinSensorSnapshotResponse.java`: additive health field/copy helper.
-- `mapper/TwinSnapshotMapper.java`: shared health resolver, one snapshot Clock
-  instant, canonical sensor-ID helper.
-- `realtime/model/RealtimeEventType.java`: one health transition type.
-- `realtime/publisher/DeviceSensorRealtimeListener.java`: derive complete-node
-  payload health at AFTER_COMMIT publication.
-- `repository/DeviceRepository.java` and `repository/SensorReadingRepository.java`:
-  bulk and affected-node freshness projections.
+- `dto/response/TwinDeviceSnapshotResponse.java` và
+  `dto/response/TwinSensorSnapshotResponse.java`: bổ sung trường trạng thái
+  hoạt động và hàm hỗ trợ sao chép.
+- `mapper/TwinSnapshotMapper.java`: dùng chung bộ phân giải trạng thái hoạt
+  động, một thời điểm Clock cho cả bản chụp và hàm tạo ID cảm biến chuẩn.
+- `realtime/model/RealtimeEventType.java`: thêm một loại chuyển trạng thái hoạt động.
+- `realtime/publisher/DeviceSensorRealtimeListener.java`: suy ra trạng thái
+  hoạt động cho dữ liệu đầy đủ của nút khi phát ở pha `AFTER_COMMIT`.
+- `repository/DeviceRepository.java` và `repository/SensorReadingRepository.java`:
+  phép chiếu dữ liệu độ mới theo lô và theo nút bị ảnh hưởng.
 
-Created tests/support under `src/test/java/com/hesta/backend/`:
+Các tệp kiểm thử/hỗ trợ được tạo trong `src/test/java/com/hesta/backend/`:
 
 - `config/TwinHealthPropertiesTest.java`
 - `service/TwinHealthStatusResolverTest.java`
@@ -270,7 +298,7 @@ Created tests/support under `src/test/java/com/hesta/backend/`:
 - `support/MutableClock.java`
 - `support/TwinHealthTestSupport.java`
 
-Modified existing tests under that same root:
+Các tệp kiểm thử hiện có được sửa trong cùng thư mục gốc:
 
 - `mapper/MockSensorExamplesTest.java`
 - `mapper/TwinContractSerializationTest.java`
@@ -282,14 +310,14 @@ Modified existing tests under that same root:
 - `service/SensorReadingIngestionServiceTest.java`
 - `service/TwinSnapshotServiceTest.java`
 
-Created documentation/evidence: `docs/TWIN_HEALTH.md`,
-`docs/examples/twin-health-event.json`, and `docs/examples/twin-health-demo.txt`.
-Modified documentation: `docs/DIGITAL_TWIN.md`, `docs/MOCK_SENSOR_PIPELINE.md`,
-`docs/REALTIME.md`, and four current-contract examples under `docs/examples/`:
-`twin-snapshot.json`, `twin-device-event.json`, `twin-sensor-event.json`, and
+Tài liệu/bằng chứng được tạo: `docs/TWIN_HEALTH.md`,
+`docs/examples/twin-health-event.json` và `docs/examples/twin-health-demo.txt`.
+Tài liệu được sửa: `docs/DIGITAL_TWIN.md`, `docs/MOCK_SENSOR_PIPELINE.md`,
+`docs/REALTIME.md` và bốn ví dụ theo đặc tả hiện tại trong `docs/examples/`:
+`twin-snapshot.json`, `twin-device-event.json`, `twin-sensor-event.json` và
 `mock-sensor-event.json`.
 
-Scope review: no frontend files were inspected or modified; no entity, migration,
-MQTT, notification, authentication or WebSocket infrastructure file changed.
-The existing publisher, mock pipeline and SENSOR_READING_UPDATED behavior are
-preserved. DeviceStatus and stored lastSeen retain their existing semantics.
+Rà soát phạm vi: không đọc hay sửa tệp frontend; không thay đổi tệp thực thể,
+migration, MQTT, thông báo, xác thực hay hạ tầng WebSocket. Bộ phát, luồng
+giả lập và hành vi SENSOR_READING_UPDATED hiện có được giữ nguyên.
+DeviceStatus và lastSeen đã lưu giữ nguyên ngữ nghĩa hiện tại.

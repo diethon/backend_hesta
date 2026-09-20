@@ -441,4 +441,65 @@ FROM (VALUES
 ) AS source(id, title, message)
 WHERE target.id = source.id;
 
+-- Digital Twin 2D: additional edge cases and normalized canvas placement.
+-- Runtime freshness is refreshed only by the explicit demo simulator, not on
+-- every seed run. Existing user-edited layouts are preserved in their entirety.
+INSERT INTO public.devices (
+    id, home_id, room_id, name, device_type, status, current_state,
+    capabilities, icon, last_seen, is_deleted
+) VALUES
+    ('00000000-0000-4000-8000-000000000609',
+     '00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000403',
+     'Cảm biến nhiệt độ nhà bếp', 'SENSOR', 'ONLINE', '{"temperature":31.2}',
+     '["temperature"]', 'thermometer', now() - interval '2 minutes', false),
+    ('00000000-0000-4000-8000-000000000610',
+     '00000000-0000-4000-8000-000000000201', NULL,
+     'Ổ cắm chưa gán phòng', 'SOCKET', 'UNKNOWN', '{}',
+     '["power"]', 'plug', NULL, false)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.sensor_readings (id, device_id, metric_type, value, unit, recorded_at)
+VALUES (900006, '00000000-0000-4000-8000-000000000609', 'TEMPERATURE', 31.200, '°C',
+        now() - interval '2 minutes')
+ON CONFLICT DO NOTHING;
+
+-- Explicit seed IDs must never collide with subsequent API-generated readings.
+SELECT setval(pg_get_serial_sequence('public.sensor_readings', 'id'),
+    GREATEST((SELECT COALESCE(MAX(id), 1) FROM public.sensor_readings),
+             nextval(pg_get_serial_sequence('public.sensor_readings', 'id'))));
+
+DO $$
+DECLARE
+    demo_layout UUID;
+BEGIN
+    INSERT INTO public.twin_layouts (home_id, revision)
+    VALUES ('00000000-0000-4000-8000-000000000201', 1)
+    ON CONFLICT (home_id) DO NOTHING
+    RETURNING id INTO demo_layout;
+
+    IF demo_layout IS NOT NULL THEN
+        INSERT INTO public.twin_room_layouts (layout_id, room_id, x, y, width, height)
+        VALUES
+            (demo_layout, '00000000-0000-4000-8000-000000000401', .050, .050, .500, .450),
+            (demo_layout, '00000000-0000-4000-8000-000000000402', .600, .050, .350, .450),
+            (demo_layout, '00000000-0000-4000-8000-000000000403', .050, .550, .500, .400),
+            (demo_layout, '00000000-0000-4000-8000-000000000404', .600, .550, .350, .400);
+
+        INSERT INTO public.twin_node_layouts (layout_id, node_type, node_id, room_id, x, y)
+        VALUES
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000401', .200, .200),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000602', '00000000-0000-4000-8000-000000000401', .400, .200),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000605', '00000000-0000-4000-8000-000000000402', .700, .180),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000607', '00000000-0000-4000-8000-000000000402', .850, .180),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000605:TEMPERATURE', '00000000-0000-4000-8000-000000000402', .700, .370),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000605:HUMIDITY', '00000000-0000-4000-8000-000000000402', .850, .370),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000606', '00000000-0000-4000-8000-000000000403', .200, .680),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000609', '00000000-0000-4000-8000-000000000403', .400, .680),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000609:TEMPERATURE', '00000000-0000-4000-8000-000000000403', .400, .850),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000603', '00000000-0000-4000-8000-000000000404', .700, .680),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000604', '00000000-0000-4000-8000-000000000404', .850, .680),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000603:MOTION', '00000000-0000-4000-8000-000000000404', .700, .850);
+    END IF;
+END $$;
+
 COMMIT;

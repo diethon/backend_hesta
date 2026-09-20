@@ -1,53 +1,59 @@
-# Mock-only sensor pipeline
+# Luồng xử lý cảm biến chỉ dùng cho giả lập
 
-This development adapter proves the existing Twin/realtime contract before
-hardware ingestion exists. It is not a finalized hardware protocol or production
-ingestion API. There is no MQTT, device provisioning, sensor registry, new table,
-or frontend work in the mock pipeline. The separate [Twin health feature](TWIN_HEALTH.md)
-now derives freshness from its committed observations without redesigning ingestion.
+Bộ điều hợp dành cho phát triển này kiểm chứng đặc tả Twin/thời gian thực
+hiện có trước khi có luồng tiếp nhận từ phần cứng. Đây chưa phải giao thức
+phần cứng hoàn chỉnh hay API tiếp nhận cho môi trường vận hành. Luồng giả
+lập không bao gồm MQTT, cấp cấu hình thiết bị, danh mục cảm biến, bảng mới
+hay công việc frontend. [Tính năng trạng thái hoạt động của Twin](TWIN_HEALTH.md)
+riêng biệt hiện suy ra độ mới từ các số đo đã xác nhận giao dịch mà không
+thiết kế lại luồng tiếp nhận.
 
-## Entry point and access
+## Điểm tiếp nhận và quyền truy cập
 
-`POST /api/v1/dev/sensors/mock-reading` is registered only when BOTH conditions hold:
+`POST /api/v1/dev/sensors/mock-reading` chỉ được đăng ký khi ĐỒNG THỜI thỏa
+mãn hai điều kiện:
 
-- Spring profile `mock-sensors` is active, and neither `prod` nor `production` is active.
-- `app.mock-sensors.enabled=true` (environment variable `APP_MOCK_SENSORS_ENABLED=true`).
+- Hồ sơ Spring `mock-sensors` đang bật, còn `prod` và `production` đều không bật.
+- `app.mock-sensors.enabled=true` (biến môi trường `APP_MOCK_SENSORS_ENABLED=true`).
 
-It is disabled by default. Do not enable it on a production deployment. The
-existing stateless Bearer JWT filter is unchanged. The service requires an ACTIVE
-HomeMember for the device's home, using the authenticated `CustomUserDetails` ID.
-An ADMIN platform role does not bypass that membership check. The caller cannot
-supply the authoritative home ID, room ID, sensor ID, or user identity.
+Mặc định điểm cuối bị tắt. Không bật trên môi trường vận hành chính thức.
+Bộ lọc Bearer JWT không lưu trạng thái hiện có được giữ nguyên. Dịch vụ yêu
+cầu người dùng là `HomeMember` ở trạng thái `ACTIVE` của nhà chứa thiết bị,
+dựa trên ID từ `CustomUserDetails` đã xác thực. Vai trò hệ thống `ADMIN`
+không được bỏ qua kiểm tra thành viên này. Bên gọi không thể cung cấp ID
+nhà, ID phòng, ID cảm biến hay danh tính người dùng để làm nguồn dữ liệu chuẩn.
 
-## Mock input and validation
+## Dữ liệu giả lập đầu vào và kiểm tra hợp lệ
 
-`MockSensorReadingRequest` contains `deviceId`, `metricType`, `value`, `unit`, and
-`observedAt`. The thin controller maps it to source-independent `SensorReadingInput`.
-`SensorReadingIngestionServiceImpl` validates that input for every caller, including
-direct service calls. Validation is centralized in the service rather than being
-limited to the HTTP adapter. Malformed JSON, nonnumeric values, and unparseable
-offset timestamps are rejected by Spring MVC using the existing `ApiResponse`
-error shape.
+`MockSensorReadingRequest` gồm `deviceId`, `metricType`, `value`, `unit` và
+`observedAt`. Controller mỏng ánh xạ dữ liệu sang `SensorReadingInput`, độc
+lập với nguồn gửi. `SensorReadingIngestionServiceImpl` kiểm tra đầu vào cho
+mọi bên gọi, kể cả gọi trực tiếp dịch vụ. Việc kiểm tra tập trung trong dịch
+vụ, không chỉ giới hạn ở bộ điều hợp HTTP. JSON sai định dạng, giá trị không
+phải số và dấu thời gian có độ lệch múi giờ không phân tích được sẽ bị Spring
+MVC từ chối theo cấu trúc lỗi `ApiResponse` hiện có.
 
-| Field | Rule |
+| Trường | Quy tắc |
 | --- | --- |
-| deviceId | Required UUID; device must exist and not be soft-deleted |
-| metricType | Required, non-blank String of at most 50 characters; no NUL; preserved exactly, with no trim/case conversion |
-| value | Required BigDecimal; representable by NUMERIC(10,3) without rounding; absolute value below 10000000 and at most three nonzero fractional places |
-| unit | Existing nullable String; at most 20 characters; no NUL |
-| observedAt | Required offset timestamp; provisional input supports years 1–9999 and microsecond precision, matching PostgreSQL's timestamp precision without rounding |
+| deviceId | UUID bắt buộc; thiết bị phải tồn tại và chưa bị xóa mềm |
+| metricType | String bắt buộc, không rỗng hoặc chỉ chứa khoảng trắng, tối đa 50 ký tự; không có NUL; giữ nguyên, không cắt khoảng trắng hay đổi hoa/thường |
+| value | BigDecimal bắt buộc; biểu diễn được bằng NUMERIC(10,3) mà không làm tròn; giá trị tuyệt đối nhỏ hơn 10000000 và phần thập phân sau khi bỏ số 0 tận cùng có tối đa ba chữ số |
+| unit | String có thể null hiện có; tối đa 20 ký tự; không có NUL |
+| observedAt | Dấu thời gian có độ lệch múi giờ bắt buộc; đầu vào tạm thời hỗ trợ năm 1–9999 và độ chính xác micro giây, khớp độ chính xác dấu thời gian của PostgreSQL mà không làm tròn |
 
-No physical temperature/humidity ranges are invented. Missing or invalid data is
-never substituted with zero or the current time. A null unit is preserved.
+Không tự đặt giới hạn vật lý cho nhiệt độ/độ ẩm. Dữ liệu thiếu hoặc không
+hợp lệ không bao giờ được thay bằng số 0 hay thời gian hiện tại. Đơn vị
+null được giữ nguyên.
 
-Errors use existing `AppException`/`ErrorCode` conventions: 1120 device ID required,
-1121 invalid metric, 1122 invalid numeric value, 1123 invalid unit, 1124 invalid or
-missing observation time, 1116 unreadable body, 1102 unknown/deleted device, 1100
-missing home, 1004 unauthenticated, and 1005 unauthorized. Parsing failures such as
-`"observedAt":"yesterday"` return 1116; validly parsed timestamps outside the
-supported precision/year window return 1124.
+Lỗi tuân theo quy ước `AppException`/`ErrorCode` hiện có: 1120 khi thiếu ID
+thiết bị, 1121 khi chỉ số không hợp lệ, 1122 khi giá trị số không hợp lệ,
+1123 khi đơn vị không hợp lệ, 1124 khi thiếu hoặc sai thời điểm đo, 1116 khi
+không đọc được nội dung yêu cầu, 1102 khi thiết bị không tồn tại/đã xóa,
+1100 khi không tìm thấy nhà, 1004 khi chưa xác thực và 1005 khi không đủ
+quyền. Lỗi phân tích như `"observedAt":"yesterday"` trả về 1116; dấu thời
+gian phân tích được nhưng vượt giới hạn năm/độ chính xác hỗ trợ trả về 1124.
 
-## Persistence, latest state, and realtime
+## Lưu trữ, trạng thái mới nhất và cập nhật thời gian thực
 
 ```text
 Mock REST request -> SensorReadingInput -> SensorReadingIngestionService
@@ -58,93 +64,101 @@ Mock REST request -> SensorReadingInput -> SensorReadingIngestionService
   -> existing RealtimeEventPublisher -> existing STOMP home destination
 ```
 
-The transaction runs at READ_COMMITTED and locks the Device row for writing.
-Submissions through this service for the same device serialize their persistence
-and latest-state decisions, including when no prior reading exists. Different
-devices are independent. This deliberately simple lock also serializes different
-metrics on the same device. Future producers must use this service rather than
-writing directly if they need the same concurrency behavior.
+Giao dịch chạy ở mức `READ_COMMITTED` và khóa ghi bản ghi thiết bị. Các yêu
+cầu gửi qua dịch vụ cho cùng một thiết bị được tuần tự hóa khi lưu và quyết
+định trạng thái mới nhất, kể cả khi chưa có số đo trước đó. Các thiết bị
+khác nhau độc lập. Cơ chế khóa đơn giản có chủ đích này cũng tuần tự hóa
+những chỉ số khác nhau trên cùng thiết bị. Các nguồn phát sau này phải dùng
+dịch vụ này thay vì ghi trực tiếp nếu cần cùng hành vi xử lý đồng thời.
 
-The repository selects greatest `recordedAt`, then greatest reading ID for equal
-times, exactly as the existing Twin query does. Identity-generated IDs are
-available after save. Historical readings are persisted with `latest=false` and
-produce no application or realtime event. Equal-time new rows win by their greater
-ID. The existing Twin snapshot sees the same committed latest reading naturally;
-there is no second latest-state store.
+Repository chọn `recordedAt` lớn nhất, rồi ID bản ghi đo lớn nhất nếu trùng
+thời điểm, đúng như truy vấn Twin hiện có. ID do cơ sở dữ liệu sinh bằng cơ
+chế identity có sẵn sau khi lưu. Số đo lịch sử được lưu với `latest=false`
+và không tạo sự kiện ứng dụng hay thời gian thực. Bản ghi mới cùng thời
+điểm được ưu tiên nhờ ID lớn hơn. Bản chụp Twin hiện có tự nhiên đọc cùng
+số đo mới nhất đã xác nhận; không có kho trạng thái mới nhất thứ hai.
 
-Success returns HTTP 200 with `ApiResponse<SensorReadingAcceptedResponse>`:
-`code=1000`, `result.readingId`, `result.latest`, and `result.reading` containing the
-accepted `TwinSensorSnapshotResponse`. For historical input, `reading` is the
-accepted historical row, not a replacement for the current Twin node. `latest`
-records the transaction's decision; it is not a websocket delivery acknowledgement
-or a promise that no later transaction will supersede it.
+Thành công trả về HTTP 200 với `ApiResponse<SensorReadingAcceptedResponse>`:
+`code=1000`, `result.readingId`, `result.latest` và `result.reading` chứa
+`TwinSensorSnapshotResponse` đã được chấp nhận. Với dữ liệu lịch sử,
+`reading` là bản ghi lịch sử được chấp nhận, không phải dữ liệu thay thế
+nút Twin hiện tại. `latest` ghi nhận quyết định của giao dịch; nó không
+phải xác nhận chuyển phát WebSocket hay cam kết rằng không có giao dịch
+sau đó thay thế kết quả này.
 
-The event's `data` uses `TwinSensorSnapshotResponse`, minimally extended by the
-later health feature with `healthStatus`. The sensor identity remains
-`<device UUID>:<exact metricType>`. Its home/device/room context comes from the
-loaded Device relationships. `observedAt` preserves the input observation time;
-the `RealtimeEvent` timestamp is publication time. Only one sensor node is sent.
-Unassigned devices have `roomId=null`. Rollback publishes nothing through the
-existing AFTER_COMMIT listener. The shared transport still has no durable replay
-or global ordering guarantee; this change does not add one.
+`data` của sự kiện dùng `TwinSensorSnapshotResponse`, được tính năng trạng
+thái hoạt động bổ sung sau đó mở rộng tối thiểu bằng `healthStatus`. Định
+danh cảm biến vẫn là `<device UUID>:<exact metricType>`. Ngữ cảnh nhà/thiết
+bị/phòng lấy từ các quan hệ của thiết bị đã tải. `observedAt` giữ nguyên
+thời điểm đo đầu vào; dấu thời gian của `RealtimeEvent` là thời điểm phát.
+Chỉ một nút cảm biến được gửi. Thiết bị chưa gán phòng có `roomId=null`.
+Hoàn tác giao dịch không phát gì qua bộ lắng nghe `AFTER_COMMIT` hiện có.
+Kênh truyền dùng chung vẫn không bảo đảm phát lại bền vững hay thứ tự toàn
+cục; thay đổi này không bổ sung các khả năng đó.
 
-## Examples
+## Ví dụ
 
-- [Valid mock request](examples/mock-sensor-request.json).
-- [Resulting SENSOR_READING_UPDATED shape](examples/mock-sensor-event.json).
-- [Invalid numeric request](examples/mock-sensor-invalid-request.json).
-- [Its HTTP 400 error body](examples/mock-sensor-invalid-response.json).
-- [Captured successful demo and rejection logs](examples/mock-sensor-demo.txt)
-  from the real PostgreSQL/HTTP/STOMP integration scenario.
+- [Yêu cầu giả lập hợp lệ](examples/mock-sensor-request.json).
+- [Cấu trúc SENSOR_READING_UPDATED được tạo](examples/mock-sensor-event.json).
+- [Yêu cầu có giá trị số không hợp lệ](examples/mock-sensor-invalid-request.json).
+- [Nội dung lỗi HTTP 400 tương ứng](examples/mock-sensor-invalid-response.json).
+- [Nhật ký minh họa thành công và từ chối yêu cầu](examples/mock-sensor-demo.txt)
+  ghi lại từ kịch bản tích hợp PostgreSQL/HTTP/STOMP thật.
 
-The illustrative IDs must be replaced with a device/home that the authenticated
-user can access. Event ID and publication timestamp are generated at runtime.
-`MockSensorExamplesTest` verifies example serialization against actual DTOs.
+Cần thay các ID minh họa bằng thiết bị/nhà mà người dùng đã xác thực có
+quyền truy cập. ID sự kiện và thời điểm phát được sinh khi chạy.
+`MockSensorExamplesTest` kiểm chứng việc tuần tự hóa ví dụ với DTO thực tế.
 
-## Recordable demo with no frontend or MQTT
+## Chạy minh họa có thể ghi hình, không cần frontend hay MQTT
 
-Use the real-HTTP integration harness as the debug STOMP subscriber. It starts a
-backend on a random local port using the existing MVC/security/JPA/STOMP components,
-creates isolated generated test records, performs the flow, and deletes its own
-records afterward. It imports no MQTT components. PostgreSQL must be a local
-Supabase database with the existing migrations applied; no schema changes occur.
+Dùng bộ kiểm thử tích hợp HTTP thật làm bộ nhận STOMP phục vụ gỡ lỗi. Nó
+khởi động backend ở một cổng cục bộ ngẫu nhiên bằng các thành phần
+MVC/bảo mật/JPA/STOMP hiện có, tạo dữ liệu kiểm thử biệt lập, thực hiện
+luồng xử lý rồi xóa dữ liệu do chính nó tạo. Bộ kiểm thử không nạp thành
+phần MQTT. PostgreSQL phải là cơ sở dữ liệu Supabase cục bộ đã áp dụng các
+migration hiện có; không thay đổi lược đồ.
 
-Set `HESTA_TEST_DATABASE_URL` to `jdbc:postgresql://127.0.0.1:54322/postgres` (or
-your local PostgreSQL port), and provide `HESTA_TEST_DATABASE_USERNAME` and
-`HESTA_TEST_DATABASE_PASSWORD` in your environment. The test refuses nonlocal
-database URLs and is skipped when those opt-in settings are absent. It generates
-short-lived JWTs in memory and never prints them.
+Đặt `HESTA_TEST_DATABASE_URL` thành `jdbc:postgresql://127.0.0.1:54322/postgres`
+(hoặc cổng PostgreSQL cục bộ của bạn), đồng thời cung cấp
+`HESTA_TEST_DATABASE_USERNAME` và `HESTA_TEST_DATABASE_PASSWORD` qua môi
+trường. Kiểm thử từ chối URL cơ sở dữ liệu không cục bộ và bị bỏ qua khi
+thiếu các thiết lập kích hoạt chủ động này. Nó tạo JWT ngắn hạn trong bộ
+nhớ và không bao giờ in chúng.
 
-Record the terminal while running:
+Ghi hình cửa sổ dòng lệnh khi chạy:
 
 ```powershell
 mvn.cmd '-Dtest=MockSensorPipelineIntegrationTest#mockHttpInput_commit_deliversNewestEventsAndHistoricalInputKeepsTwinState' test
 ```
 
-The single scenario performs these steps in order:
+Kịch bản duy nhất thực hiện lần lượt:
 
-1. Start the backend using the test configuration and local PostgreSQL.
-2. Authenticate the real WebSocket STOMP client and subscribe to a valid Home.
-3. Send a valid mock reading (29.4) through the HTTP endpoint.
-4. Verify its persisted row and print the accepted reading ID.
-5. Receive and print the actual `SENSOR_READING_UPDATED` JSON on the socket.
-6. Send a newer reading (30.0).
-7. Receive and print its realtime value.
-8. Send an older historical reading (28.0).
-9. Verify `latest=false`, no sensor event, and GET Twin still showing 30.0.
-10. Send an invalid numeric reading, verify clear HTTP 400/code 1122, no new row,
-    and no sensor event.
+1. Khởi động backend bằng cấu hình kiểm thử và PostgreSQL cục bộ.
+2. Xác thực ứng dụng khách WebSocket STOMP thật và đăng ký nhận sự kiện của
+   một nhà hợp lệ.
+3. Gửi số đo giả lập hợp lệ (29.4) qua điểm cuối HTTP.
+4. Kiểm tra bản ghi đã lưu và in ID số đo được chấp nhận.
+5. Nhận và in JSON `SENSOR_READING_UPDATED` thực tế trên socket.
+6. Gửi số đo mới hơn (30.0).
+7. Nhận và in giá trị thời gian thực của nó.
+8. Gửi số đo lịch sử cũ hơn (28.0).
+9. Kiểm tra `latest=false`, không có sự kiện cảm biến và GET Twin vẫn trả
+   về 30.0.
+10. Gửi số đo không hợp lệ, kiểm tra HTTP 400/mã 1122 rõ ràng, không có bản
+    ghi mới và không có sự kiện cảm biến.
 
-Look for `MOCK DEMO` log lines. Subscription readiness is verified by a received
-device probe through the existing broker before sending sensor input; the probe
-is test-only and is not part of ingestion. The real event publisher/listener,
-database, authentication, membership checks, and STOMP transport are not mocked.
+Tìm các dòng nhật ký `MOCK DEMO`. Trước khi gửi đầu vào cảm biến, việc đăng
+ký nhận sự kiện được xác minh là sẵn sàng bằng cách nhận sự kiện thăm dò
+thiết bị qua broker hiện có; sự kiện này chỉ dùng trong kiểm thử, không
+thuộc luồng tiếp nhận. Bộ phát/bộ lắng nghe sự kiện, cơ sở dữ liệu, xác
+thực, kiểm tra thành viên và kênh truyền STOMP đều dùng thành phần thật.
 
-For a manually running backend, explicitly configure a **local** Spring datasource
-and start it with profile `mock-sensors` plus `APP_MOCK_SENSORS_ENABLED=true`.
-Do not rely on the legacy `local` profile's datasource defaults. Connect a debug
-STOMP subscriber to `/ws`, use a Bearer token in the STOMP CONNECT header, and
-subscribe to `/topic/homes/{homeId}/events`. The HTTP request can be sent with:
+Nếu chạy backend thủ công, hãy cấu hình tường minh nguồn dữ liệu Spring
+**cục bộ**, khởi động với hồ sơ `mock-sensors` và
+`APP_MOCK_SENSORS_ENABLED=true`. Không dựa vào mặc định nguồn dữ liệu của
+hồ sơ `local` cũ. Kết nối bộ nhận STOMP gỡ lỗi đến `/ws`, dùng Bearer token
+trong tiêu đề STOMP CONNECT và đăng ký `/topic/homes/{homeId}/events`.
+Có thể gửi yêu cầu HTTP bằng:
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:HESTA_DEMO_ACCESS_TOKEN" }
@@ -155,59 +169,65 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8080/api/v1/dev/sensors/mo
     -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json)
 ```
 
-Use a timestamp later than that stream's current latest observation, then increment
-it for the second reading. Decrement it for historical input. Use value `10000000`
-for the numeric rejection. Keep the token out of recordings and logs.
+Dùng dấu thời gian muộn hơn số đo mới nhất hiện tại của luồng, rồi tăng
+thời gian cho số đo thứ hai. Giảm thời gian để gửi dữ liệu lịch sử. Dùng
+giá trị `10000000` để thử trường hợp từ chối số không hợp lệ. Không để token
+xuất hiện trong bản ghi hình hay nhật ký.
 
-## Verification and source replacement
+## Kiểm chứng và thay thế nguồn dữ liệu
 
-Unit tests cover validation, exact metric preservation, authorization, missing or
-deleted devices, accepted persistence, historical suppression, and deployment
-gates. PostgreSQL/socket integration tests cover the entire committed flow, Twin
-reads, tied times, two metrics, null room, malformed/missing fields, disabled
-membership, rollback, and concurrent historical input. Existing Twin contract tests
-remain regression checks.
+Kiểm thử đơn vị bao phủ kiểm tra hợp lệ, giữ nguyên chỉ số, phân quyền,
+thiết bị thiếu hoặc đã xóa, lưu dữ liệu được chấp nhận, không phát sự kiện
+lịch sử và các điều kiện cho phép triển khai. Kiểm thử tích hợp
+PostgreSQL/socket bao phủ toàn bộ luồng đã xác nhận giao dịch, đọc Twin,
+trùng thời điểm, hai chỉ số, phòng null, trường sai định dạng/thiếu, thành
+viên bị vô hiệu hóa, hoàn tác và gửi đồng thời dữ liệu lịch sử. Các kiểm
+thử đặc tả Twin hiện có tiếp tục dùng để kiểm tra hồi quy.
 
 ```powershell
 mvn.cmd '-Dtest=SensorReadingIngestionServiceTest,MockSensorExposureTest,MockSensorExamplesTest,MockSensorPipelineIntegrationTest,TwinSnapshotMapperTest,TwinSnapshotServiceTest,TwinSnapshotControllerTest,TwinContractSerializationTest,DeviceStateRealtimeTest,DeviceSensorRealtimeTransactionTest,SensorReadingRepositoryTest' test
 ```
 
-Rejected decoded input logs only deviceId, bounded/control-character-sanitized
-metricType, observedAt, and a stable rejection reason. Unreadable bodies log that
-context is unavailable, without logging the body, headers, JWT, or exception text.
-Accepted telemetry has no per-reading production log; demo output is test-only.
+Với đầu vào đã giải mã nhưng bị từ chối, nhật ký chỉ ghi deviceId,
+metricType đã giới hạn độ dài và loại bỏ ký tự điều khiển, observedAt cùng
+lý do từ chối ổn định. Với nội dung yêu cầu không đọc được, nhật ký chỉ
+báo không có ngữ cảnh, không ghi nội dung, tiêu đề, JWT hay văn bản ngoại
+lệ. Dữ liệu đo được chấp nhận không được ghi nhật ký theo từng số đo trong
+môi trường vận hành; đầu ra minh họa chỉ có trong kiểm thử.
 
-Future MQTT/gateway adapters can map their authenticated input into
-`SensorReadingInput` and invoke `SensorReadingIngestionService`. Hardware identity
-authentication and its authorization policy still need a separate design; never
-trust a hardware payload's user/home ID or bypass authorization by passing an
-arbitrary user ID. Validation, persistence, latest selection, mapping, application
-event, and AFTER_COMMIT realtime flow can be retained. No real hardware integration
-is claimed by this implementation.
+Bộ điều hợp MQTT/gateway sau này có thể ánh xạ đầu vào đã xác thực sang
+`SensorReadingInput` và gọi `SensorReadingIngestionService`. Xác thực danh
+tính phần cứng và chính sách phân quyền của nó vẫn cần thiết kế riêng;
+không tin ID người dùng/nhà trong dữ liệu phần cứng hay bỏ qua phân quyền
+bằng cách truyền một ID người dùng tùy ý. Có thể giữ lại kiểm tra hợp lệ,
+lưu trữ, chọn bản ghi mới nhất, ánh xạ, sự kiện ứng dụng và luồng thời gian
+thực `AFTER_COMMIT`. Phần triển khai này chưa tích hợp phần cứng thật.
 
-## Verification result (2026-09-17)
+## Kết quả kiểm chứng (2026-09-17)
 
-- **57 targeted tests passed**, with no failures, errors, or skips. This includes
-  six real PostgreSQL/STOMP integration cases, the concurrency case, source input
-  validation and exposure gates, sample serialization, and all existing Twin tests.
-- Full `mvn.cmd test`: **145 tests, 144 passed, 1 error, no skips**. The only error
-  was the existing `MqttSmokeTest.testPublishRoundTrip`, with connection refused
-  from the deliberately local-only broker URL. No MQTT code was changed or added.
-  The test process forced PostgreSQL to localhost, used Hibernate validation,
-  disabled Flyway, and supplied the existing required WebSocket heartbeat setting.
-- `mvn.cmd -DskipTests package`: **BUILD SUCCESS**. The JAR is
-  `target/backend-0.0.1-SNAPSHOT.jar`; tests were executed separately above.
-- `git diff --check`: passed. The integration fixtures were removed afterward;
-  PostgreSQL's `session_replication_role` was verified as `origin`.
+- **57 ca kiểm thử có mục tiêu đạt**, không thất bại, lỗi hay bỏ qua. Bao
+  gồm sáu trường hợp tích hợp PostgreSQL/STOMP thật, trường hợp xử lý đồng
+  thời, kiểm tra đầu vào và điều kiện mở điểm cuối, tuần tự hóa ví dụ cùng
+  toàn bộ kiểm thử Twin hiện có.
+- Toàn bộ `mvn.cmd test`: **145 ca, 144 đạt, 1 lỗi, không bỏ qua**. Lỗi duy
+  nhất là `MqttSmokeTest.testPublishRoundTrip` hiện có, do kết nối bị từ chối
+  tại URL broker được chủ đích giới hạn ở cục bộ. Không sửa hay thêm mã
+  MQTT. Tiến trình kiểm thử buộc PostgreSQL dùng localhost, dùng kiểm tra
+  lược đồ Hibernate, tắt Flyway và cung cấp cấu hình heartbeat WebSocket
+  bắt buộc hiện có.
+- `mvn.cmd -DskipTests package`: **BUILD SUCCESS**. Tệp JAR là
+  `target/backend-0.0.1-SNAPSHOT.jar`; kiểm thử đã được chạy riêng ở trên.
+- `git diff --check`: đạt. Dữ liệu kiểm thử tích hợp được xóa sau đó;
+  `session_replication_role` của PostgreSQL được xác minh là `origin`.
 
-The full suite is not green until its external MQTT smoke-test dependency is
-available. The mock pipeline tests require no MQTT broker. Raw run logs are in
-`target/mock-sensor-targeted.log`, `target/mock-sensor-full-suite.log`, and
-`target/mock-sensor-build.log`.
+Toàn bộ bộ kiểm thử chưa đạt cho đến khi phụ thuộc MQTT bên ngoài của kiểm
+thử khói khả dụng. Các kiểm thử luồng giả lập không cần MQTT broker. Nhật
+ký chạy gốc nằm tại `target/mock-sensor-targeted.log`,
+`target/mock-sensor-full-suite.log` và `target/mock-sensor-build.log`.
 
-## File inventory
+## Danh sách tệp
 
-Created production files under `src/main/java/com/hesta/backend/`:
+Các tệp mã ứng dụng được tạo trong `src/main/java/com/hesta/backend/`:
 
 - `dto/request/MockSensorReadingRequest.java`
 - `dto/command/SensorReadingInput.java`
@@ -217,20 +237,23 @@ Created production files under `src/main/java/com/hesta/backend/`:
 - `controller/MockSensorController.java`
 - `exception/MockSensorRequestExceptionHandler.java`
 
-Modified production files: `exception/ErrorCode.java` adds the validation codes;
-`repository/DeviceRepository.java` adds the locked device lookup;
-`repository/SensorReadingRepository.java` adds save and latest-stream lookup.
+Các tệp mã ứng dụng được sửa: `exception/ErrorCode.java` bổ sung mã kiểm tra
+hợp lệ; `repository/DeviceRepository.java` bổ sung tra cứu thiết bị có khóa;
+`repository/SensorReadingRepository.java` bổ sung thao tác lưu và tra cứu
+luồng mới nhất.
 
-Created tests under `src/test/java/com/hesta/backend/`:
+Các tệp kiểm thử được tạo trong `src/test/java/com/hesta/backend/`:
 `service/SensorReadingIngestionServiceTest.java`, `controller/MockSensorExposureTest.java`,
-`mapper/MockSensorExamplesTest.java`, and `realtime/MockSensorPipelineIntegrationTest.java`.
-Created this document and its five linked example/evidence files; updated
-`docs/DIGITAL_TWIN.md` to point to the implemented mock producer.
+`mapper/MockSensorExamplesTest.java` và `realtime/MockSensorPipelineIntegrationTest.java`.
+Tạo tài liệu này và năm tệp ví dụ/bằng chứng được liên kết; cập nhật
+`docs/DIGITAL_TWIN.md` để trỏ đến nguồn phát giả lập đã triển khai.
 
-Reused by the original mock-pipeline implementation: `SensorReading`, `TwinSensorSnapshotResponse`,
-`TwinSnapshotMapper`, `SensorReadingUpdatedEvent`, `DeviceSensorRealtimeListener`,
-`RealtimeEventPublisher`, `RealtimeEventType.SENSOR_READING_UPDATED`, and the shared
-WebSocket/STOMP infrastructure. No Sensor entity/table, migration, frontend,
-hardware/MQTT integration, or health threshold was added by that implementation.
-The subsequent [Twin health feature](TWIN_HEALTH.md) extends the node DTOs,
-mapper, and committed listener while retaining this ingestion flow.
+Phần triển khai luồng giả lập ban đầu tái sử dụng: `SensorReading`,
+`TwinSensorSnapshotResponse`, `TwinSnapshotMapper`, `SensorReadingUpdatedEvent`,
+`DeviceSensorRealtimeListener`, `RealtimeEventPublisher`,
+`RealtimeEventType.SENSOR_READING_UPDATED` và hạ tầng WebSocket/STOMP dùng
+chung. Phần triển khai đó không bổ sung thực thể/bảng Sensor, migration,
+frontend, tích hợp phần cứng/MQTT hay ngưỡng trạng thái hoạt động.
+[Tính năng trạng thái hoạt động của Twin](TWIN_HEALTH.md) bổ sung sau đó mở
+rộng DTO nút, bộ ánh xạ và bộ lắng nghe sau khi xác nhận giao dịch, đồng thời
+giữ nguyên luồng tiếp nhận này.
