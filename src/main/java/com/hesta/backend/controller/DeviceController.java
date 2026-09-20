@@ -10,6 +10,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import com.hesta.backend.service.DeviceCommandService;
+import com.hesta.backend.enums.DeviceAction;
+import com.hesta.backend.enums.StateChangeSource;
+import com.hesta.backend.dto.command.CommandResult;
+import java.util.concurrent.CompletableFuture;
 
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +25,7 @@ import java.util.UUID;
 public class DeviceController {
 
     private final DeviceService deviceService;
+    private final DeviceCommandService deviceCommandService;
 
     @GetMapping("/homes/{homeId}/devices")
     public ResponseEntity<ApiResponse<List<DeviceResponse>>> getDevicesByHome(
@@ -99,5 +105,18 @@ public class DeviceController {
                 .code(1000)
                 .result(result)
                 .build());
+    }
+    @PostMapping("/devices/{deviceId}/command")
+    public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestBody java.util.Map<String, Object> request) {
+        
+        String actionStr = request.getOrDefault("action", "").toString();
+        DeviceAction action = DeviceAction.valueOf(actionStr);
+        java.util.Map<String, Object> params = (java.util.Map<String, Object>) request.get("parameters");
+        
+        return deviceCommandService.sendCommand(deviceId, action, params, StateChangeSource.MANUAL)
+                .thenApply(result -> ResponseEntity.ok(com.hesta.backend.dto.response.ApiResponse.<CommandResult>builder().result(result).build()));
     }
 }
