@@ -28,6 +28,7 @@ public class DeviceServiceImpl implements DeviceService {
     private final HomeMemberRepository homeMemberRepository;
     private final RoomRepository roomRepository;
     private final com.hesta.backend.repository.DeviceStateHistoryRepository deviceStateHistoryRepository;
+    private final com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
         homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
@@ -92,8 +93,29 @@ public class DeviceServiceImpl implements DeviceService {
                     }
                 }
             }
+            
+            // PHO-018 & PHO-025: Save DeviceStateHistory
+            java.util.Map<String, Object> prevState = device.getCurrentState() != null ? new java.util.HashMap<>(device.getCurrentState()) : new java.util.HashMap<>();
             device.setCurrentState(newState);
             deviceRepository.save(device);
+            
+            com.hesta.backend.entity.DeviceStateHistory history = com.hesta.backend.entity.DeviceStateHistory.builder()
+                .device(device)
+                .previousState(prevState)
+                .newState(newState)
+                .source(payload.containsKey("source") ? com.hesta.backend.enums.StateChangeSource.valueOf(payload.get("source").toString().toUpperCase()) : com.hesta.backend.enums.StateChangeSource.MANUAL)
+                .changedAt(java.time.OffsetDateTime.now())
+                .build();
+            deviceStateHistoryRepository.save(history);
+            
+            // Push Realtime WebSocket
+            realtimeEventPublisher.publish(com.hesta.backend.realtime.model.RealtimeEvent.create(
+                    com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED,
+                    device.getHome().getId(),
+                    device.getId(),
+                    newState
+            ));
+            
         } catch (IllegalArgumentException e) {
             System.err.println("Invalid payload or UUID format: " + e.getMessage());
         }
