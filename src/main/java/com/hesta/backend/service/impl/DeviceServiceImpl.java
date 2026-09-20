@@ -31,14 +31,13 @@ public class DeviceServiceImpl implements DeviceService {
     private final com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
-        homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
-                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+        if (!homeMemberRepository.existsByHomeIdAndUserId(homeId, userId)) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
     }
 
     private void checkHomeOwner(UUID userId, UUID homeId) {
-        HomeMember member = homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
-                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
-        if (member.getRole() != HomeRole.OWNER) {
+        if (!homeMemberRepository.existsByHomeIdAndUserIdAndRole(homeId, userId, HomeRole.OWNER)) {
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
     }

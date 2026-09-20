@@ -69,4 +69,13 @@ public class MockDeviceCommandServiceImpl implements DeviceCommandService {
                         .build()
         );
     }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<CommandResult>> sendRoomCommand(
+            java.util.UUID roomId, 
+            com.hesta.backend.enums.DeviceAction action, 
+            java.util.Map<String, Object> parameters, 
+            com.hesta.backend.enums.StateChangeSource source) {
+        return java.util.concurrent.CompletableFuture.completedFuture(new java.util.ArrayList<>());
+    }
 }
