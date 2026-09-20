@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import com.hesta.backend.service.DeviceCommandService;
 import com.hesta.backend.enums.DeviceAction;
@@ -106,6 +107,7 @@ public class DeviceController {
                 .result(result)
                 .build());
     }
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -120,12 +122,13 @@ public class DeviceController {
                 .thenApply(result -> ResponseEntity.ok(com.hesta.backend.dto.response.ApiResponse.<CommandResult>builder().result(result).build()));
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
     @PostMapping("/rooms/{roomId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<List<CommandResult>>>> sendRoomCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID roomId,
             @RequestBody java.util.Map<String, Object> request) {
-        
+
         String actionStr = request.getOrDefault("action", "").toString();
         DeviceAction action = DeviceAction.valueOf(actionStr);
         java.util.Map<String, Object> params = (java.util.Map<String, Object>) request.get("parameters");

@@ -17,6 +17,8 @@ public interface HomeMemberRepository extends JpaRepository<HomeMember, UUID> {
     List<HomeMember> findByUserIdOrderByJoinedAtDesc(UUID userId);
     Optional<HomeMember> findByHomeIdAndUserId(UUID homeId, UUID userId);
     boolean existsByHomeIdAndUserId(UUID homeId, UUID userId);
+    boolean existsByHomeIdAndUserIdAndRole(UUID homeId, UUID userId, com.hesta.backend.enums.HomeRole role);
+
 
     @Query("SELECT hm FROM HomeMember hm JOIN FETCH hm.user WHERE hm.home.id = :homeId")
     List<HomeMember> findByHomeIdWithUser(@Param("homeId") UUID homeId);
