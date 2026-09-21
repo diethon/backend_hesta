@@ -37,6 +37,9 @@ public class MqttConfig {
     @Value("${mqtt.topic.default:hesta/outbound}")
     private String defaultTopic;
 
+    @Value("${mqtt.inbound.auto-startup:true}")
+    private boolean inboundAutoStartup;
+
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
@@ -96,6 +99,7 @@ public class MqttConfig {
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(mqttInputChannel());
+        adapter.setAutoStartup(inboundAutoStartup);
         return adapter;
     }
 }

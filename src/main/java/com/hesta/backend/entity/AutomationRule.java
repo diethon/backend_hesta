@@ -1,8 +1,7 @@
 package com.hesta.backend.entity;
 
+import com.hesta.backend.enums.TriggerType;
 import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -13,16 +12,14 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "scenes", uniqueConstraints = {
-        @UniqueConstraint(name = "scenes_home_id_name_key", columnNames = {"home_id", "name"})
-})
+@Table(name = "automation_rules", uniqueConstraints =
+        @UniqueConstraint(name = "uq_automation_rules_home_name", columnNames = {"home_id", "name"}))
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Scene {
-
+public class AutomationRule {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -31,28 +28,28 @@ public class Scene {
     @JoinColumn(name = "home_id", nullable = false)
     private Home home;
 
-    @NotBlank
-    @Size(max = 150)
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
-    @Size(max = 2000)
     @Column(name = "description", length = 2000)
     private String description;
 
-    @Column(name = "enabled", nullable = false)
-    @Builder.Default
-    private boolean enabled = true;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "trigger_type", nullable = false, length = 20)
+    private TriggerType triggerType;
 
-    @OneToMany(mappedBy = "scene", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Column(name = "enabled", nullable = false)
+    private boolean enabled;
+
+    @OneToMany(mappedBy = "rule", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("order ASC, id ASC")
     @Builder.Default
-    private List<SceneAction> actions = new ArrayList<>();
+    private List<RuleCondition> conditions = new ArrayList<>();
 
-    @OneToMany(mappedBy = "scene", cascade = CascadeType.ALL, orphanRemoval = true)
-    @OrderBy("scheduledTime ASC, id ASC")
+    @OneToMany(mappedBy = "rule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("order ASC, id ASC")
     @Builder.Default
-    private List<SceneSchedule> schedules = new ArrayList<>();
+    private List<RuleAction> actions = new ArrayList<>();
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

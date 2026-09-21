@@ -90,6 +90,8 @@ class SceneServiceTest {
         when(sceneRepository.saveAndFlush(any(Scene.class))).thenAnswer(invocation -> {
             Scene saved = invocation.getArgument(0);
             saved.setId(sceneId);
+            assertThat(saved.getActions().getFirst().getValue().isObject()).isTrue();
+            assertThat(saved.getActions().getFirst().getValue().isEmpty()).isTrue();
             saved.getActions().getFirst().setId(UUID.randomUUID());
             return saved;
         });
@@ -175,10 +177,14 @@ class SceneServiceTest {
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
         when(sceneRepository.saveAndFlush(scene)).thenReturn(scene);
 
-        sceneService.addAction(userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
+        SceneActionResponse added = sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
 
         assertThat(existing.getOrder()).isEqualTo(1);
         assertThat(scene.getActions()).extracting(SceneAction::getOrder).containsExactlyInAnyOrder(0, 1);
+        assertThat(added.getValue()).isNull();
+        assertThat(scene.getActions().stream().filter(action -> action.getOrder() == 0).findFirst().orElseThrow()
+                .getValue().isObject()).isTrue();
         verify(sceneActionRepository).deferOrderConstraint();
     }
 

@@ -7,6 +7,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -23,6 +24,7 @@ public class DeviceResponse {
     private Short gpioPin;
     private String status;
     private Map<String, Object> currentState;
+    private List<String> capabilities;
     private String icon;
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
@@ -42,6 +44,7 @@ public class DeviceResponse {
                 .gpioPin(device.getGpioPin())
                 .status(device.getStatus().name())
                 .currentState(device.getCurrentState())
+                .capabilities(device.getCapabilities())
                 .icon(device.getIcon())
                 .digitalTwinX(device.getDigitalTwinX())
                 .digitalTwinY(device.getDigitalTwinY())

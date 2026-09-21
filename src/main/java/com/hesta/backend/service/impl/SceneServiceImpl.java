@@ -1,6 +1,7 @@
 package com.hesta.backend.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.hesta.backend.dto.request.CreateSceneRequest;
 import com.hesta.backend.dto.request.ReorderSceneActionsRequest;
 import com.hesta.backend.dto.request.SceneActionRequest;
@@ -283,7 +284,9 @@ public class SceneServiceImpl implements SceneService {
     }
 
     private JsonNode normalizeValue(JsonNode value) {
-        return value == null || value.isNull() ? null : value;
+        // Avoid relying on how JSON null is bound to PostgreSQL JSONB.
+        // An empty object is non-null even on databases missing the nullability migration.
+        return value == null || value.isNull() ? JsonNodeFactory.instance.objectNode() : value;
     }
 
     private void validateReorderPayload(List<SceneAction> actions, List<UUID> requestedIds) {
@@ -351,12 +354,17 @@ public class SceneServiceImpl implements SceneService {
     }
 
     private SceneActionResponse toActionResponse(SceneAction action) {
+        JsonNode value = action.getValue();
+        if ("TURN_ON".equals(action.getAction()) || "TURN_OFF".equals(action.getAction())
+                || value == null || value.isNull()) {
+            value = null;
+        }
         return SceneActionResponse.builder()
                 .id(action.getId())
                 .targetDeviceId(action.getTargetDevice().getId())
                 .targetDeviceName(action.getTargetDevice().getName())
                 .action(action.getAction())
-                .value(action.getValue())
+                .value(value)
                 .order(action.getOrder())
                 .createdAt(action.getCreatedAt())
                 .updatedAt(action.getUpdatedAt())
