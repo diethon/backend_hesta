@@ -38,20 +38,32 @@ public class MqttMessageReceiver {
                 }
             } else if (topic.endsWith("/ack")) {
                 String commandId = data.get("commandId") != null ? data.get("commandId").toString() : null;
-                if (commandId != null && MqttDeviceCommandServiceImpl.pendingCommands.containsKey(commandId)) {
-                    CompletableFuture<CommandResult> future = MqttDeviceCommandServiceImpl.pendingCommands.remove(commandId);
-                    
-                    boolean success = "SUCCESS".equalsIgnoreCase(String.valueOf(data.get("status")));
-                    
-                    CommandResult result = CommandResult.builder()
-                        .commandId(commandId)
-                        .success(success)
-                        .status(String.valueOf(data.get("status")))
-                        .errorCode(data.containsKey("errorCode") ? String.valueOf(data.get("errorCode")) : null)
-                        .message("Received ACK")
-                        .build();
-                    
-                    future.complete(result);
+                if (commandId != null) {
+                    if (MqttDeviceCommandServiceImpl.pendingCommands.containsKey(commandId)) {
+                        CompletableFuture<CommandResult> future = MqttDeviceCommandServiceImpl.pendingCommands.remove(commandId);
+                        
+                        boolean success = "SUCCESS".equalsIgnoreCase(String.valueOf(data.get("status")));
+                        
+                        CommandResult result = CommandResult.builder()
+                            .commandId(commandId)
+                            .success(success)
+                            .status(String.valueOf(data.get("status")))
+                            .errorCode(data.containsKey("errorCode") ? String.valueOf(data.get("errorCode")) : null)
+                            .message("Received ACK")
+                            .build();
+                        
+                        future.complete(result);
+                    } else {
+                        log.warn("Received late or duplicate ACK for commandId: {}. The original command may have timed out.", commandId);
+                        
+                        // State Reconciliation for late ACK
+                        String deviceIdStr = data.get("deviceId") != null ? data.get("deviceId").toString() : null;
+                        if (deviceIdStr != null && data.containsKey("state")) {
+                            Map<String, Object> state = (Map<String, Object>) data.get("state");
+                            log.info("Applying state reconciliation for late ACK from device {}", deviceIdStr);
+                            deviceService.updateDeviceStateFromMqtt(deviceIdStr, state);
+                        }
+                    }
                 }
             }
         } catch (Exception e) {
