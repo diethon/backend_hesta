@@ -3,21 +3,32 @@ package com.hesta.backend.service.impl;
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
 import com.hesta.backend.dto.response.DeviceResponse;
 import com.hesta.backend.entity.Device;
-import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.DeviceStateHistoryRepository;
 import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.repository.RoomRepository;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
+import com.hesta.backend.realtime.model.RealtimeEvent;
+import com.hesta.backend.realtime.model.RealtimeEventType;
+import com.hesta.backend.enums.DeviceType;
+import com.hesta.backend.enums.StateChangeSource;
+import com.hesta.backend.entity.DeviceStateHistory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,8 +38,10 @@ public class DeviceServiceImpl implements DeviceService {
     private final DeviceRepository deviceRepository;
     private final HomeMemberRepository homeMemberRepository;
     private final RoomRepository roomRepository;
-    private final com.hesta.backend.repository.DeviceStateHistoryRepository deviceStateHistoryRepository;
-    private final com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
+    private final DeviceStateHistoryRepository deviceStateHistoryRepository;
+    private final RealtimeEventPublisher realtimeEventPublisher;
+
+    private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
         if (!homeMemberRepository.existsByHomeIdAndUserId(homeId, userId)) {
@@ -74,42 +87,66 @@ public class DeviceServiceImpl implements DeviceService {
 
     @Override
     @Transactional
-    public void updateDeviceStateFromMqtt(String deviceIdStr, java.util.Map<String, Object> payload) {
+    public void updateDeviceStateFromMqtt(String deviceIdStr, Map<String, Object> payload) {
         try {
             UUID deviceId = UUID.fromString(deviceIdStr);
             Device device = deviceRepository.findById(deviceId)
                     .orElseThrow(() -> new RuntimeException("Device not found"));
 
-            java.util.List<String> allowedKeys = device.getCapabilities();
-            java.util.Map<String, Object> newState = new java.util.HashMap<>();
+            List<String> allowedKeys = device.getCapabilities();
+            Map<String, Object> newState = new HashMap<>();
 
             if (allowedKeys == null || allowedKeys.isEmpty()) {
                 newState.putAll(payload);
             } else {
-                for (java.util.Map.Entry<String, Object> entry : payload.entrySet()) {
+                for (Map.Entry<String, Object> entry : payload.entrySet()) {
                     if (allowedKeys.contains(entry.getKey())) {
                         newState.put(entry.getKey(), entry.getValue());
                     }
                 }
             }
             
-            // PHO-018 & PHO-025: Save DeviceStateHistory
-            java.util.Map<String, Object> prevState = device.getCurrentState() != null ? new java.util.HashMap<>(device.getCurrentState()) : new java.util.HashMap<>();
+            Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
+            
+            // 1. Luôn cập nhật lastSeen (thiết bị còn sống)
+            device.setLastSeen(OffsetDateTime.now());
+            
+            // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau, không làm gì thêm)
+            if (prevState.equals(newState)) {
+                deviceRepository.save(device); // Chỉ lưu lastSeen
+                return; // Ngắt mạch, không lưu History, không bắn Websocket
+            }
+            
+            // Cập nhật trạng thái mới
             device.setCurrentState(newState);
             deviceRepository.save(device);
             
-            com.hesta.backend.entity.DeviceStateHistory history = com.hesta.backend.entity.DeviceStateHistory.builder()
-                .device(device)
-                .previousState(prevState)
-                .newState(newState)
-                .source(payload.containsKey("source") ? com.hesta.backend.enums.StateChangeSource.valueOf(payload.get("source").toString().toUpperCase()) : com.hesta.backend.enums.StateChangeSource.MANUAL)
-                .changedAt(java.time.OffsetDateTime.now())
-                .build();
-            deviceStateHistoryRepository.save(history);
+            // 3. Throttling cho CẢM BIẾN (Chỉ lưu History 5 phút 1 lần)
+            boolean shouldSaveHistory = true;
+            if (device.getDeviceType() == DeviceType.SENSOR) {
+                OffsetDateTime lastSave = lastSensorSaveTime.get(deviceId);
+                if (lastSave != null && Duration.between(lastSave, OffsetDateTime.now()).toMinutes() < 5) {
+                    shouldSaveHistory = false; // Bỏ qua ghi DB Lịch sử
+                } else {
+                    lastSensorSaveTime.put(deviceId, OffsetDateTime.now());
+                }
+            }
+
+            // Ghi Lịch sử nếu được phép
+            if (shouldSaveHistory) {
+                DeviceStateHistory history = DeviceStateHistory.builder()
+                    .device(device)
+                    .previousState(prevState)
+                    .newState(newState)
+                    .source(payload.containsKey("source") ? StateChangeSource.valueOf(payload.get("source").toString().toUpperCase()) : StateChangeSource.MANUAL)
+                    .changedAt(OffsetDateTime.now())
+                    .build();
+                deviceStateHistoryRepository.save(history);
+            }
             
-            // Push Realtime WebSocket
-            realtimeEventPublisher.publish(com.hesta.backend.realtime.model.RealtimeEvent.create(
-                    com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED,
+            // Push Realtime WebSocket (Chỉ bắn khi có State Change)
+            realtimeEventPublisher.publish(RealtimeEvent.create(
+                    RealtimeEventType.DEVICE_STATE_CHANGED,
                     device.getHome().getId(),
                     device.getId(),
                     newState
