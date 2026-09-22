@@ -73,11 +73,19 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             log.info("Publishing MQTT Command to {}: {}", topic, jsonPayload);
             mqttGateway.sendToMqtt(topic, 1, jsonPayload);
             
+            long metricStartTime = System.currentTimeMillis();
             return future.orTimeout(commandTimeoutMs, TimeUnit.MILLISECONDS)
-                    .whenComplete((res, ex) -> activeDeviceCommands.remove(deviceId))
+                    .whenComplete((res, ex) -> {
+                        activeDeviceCommands.remove(deviceId);
+                        long roundtrip = System.currentTimeMillis() - metricStartTime;
+                        if (ex == null) {
+                            log.info("[METRICS] MQTT Roundtrip (Success) completed in {} ms for commandId {}", roundtrip, commandId);
+                        }
+                    })
                     .exceptionally(ex -> {
                         pendingCommands.remove(commandId);
-                        log.warn("Command {} to device {} timed out", commandId, deviceId);
+                        long roundtrip = System.currentTimeMillis() - metricStartTime;
+                        log.warn("[METRICS] MQTT Roundtrip (Timeout) after {} ms for commandId {}. Device {} timed out.", roundtrip, commandId, deviceId);
                         return CommandResult.builder()
                                 .commandId(commandId)
                                 .success(false)

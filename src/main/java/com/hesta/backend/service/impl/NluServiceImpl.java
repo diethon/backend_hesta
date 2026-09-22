@@ -102,11 +102,13 @@ public class NluServiceImpl implements NluService {
 
     @Override
     public CompletableFuture<CommandResult> processNaturalLanguageCommand(String text, UUID userId) {
+        long metricStartTime = System.currentTimeMillis();
         String intent = extractIntent(text);
         
         log.info("NLU Processed - Intent: {}, Raw Text: {}", intent, text);
         
         if ("UNKNOWN_INTENT".equals(intent)) {
+            log.info("[METRICS] NLU Processing (Unknown Intent) completed in {} ms", (System.currentTimeMillis() - metricStartTime));
             return CompletableFuture.completedFuture(
                 CommandResult.builder().success(false).message("Xin lỗi, tôi không nhận diện được lệnh. Bạn muốn bật hay tắt thiết bị nào?").build()
             );
@@ -140,6 +142,7 @@ public class NluServiceImpl implements NluService {
         }
         
         if (matchingDevices.isEmpty()) {
+            log.info("[METRICS] NLU Processing (Device Not Found) completed in {} ms", (System.currentTimeMillis() - metricStartTime));
             return CompletableFuture.completedFuture(
                 CommandResult.builder().success(false).message("Không tìm thấy thiết bị nào khớp với lệnh của bạn. Vui lòng thử lại.").build()
             );
@@ -147,6 +150,7 @@ public class NluServiceImpl implements NluService {
         
         // Ambiguity Detection
         if (matchingDevices.size() > 1) {
+            log.info("[METRICS] NLU Processing (Ambiguity Detected) completed in {} ms", (System.currentTimeMillis() - metricStartTime));
             String options = matchingDevices.get(0).getName() + " và " + matchingDevices.get(1).getName();
             return CompletableFuture.completedFuture(
                 CommandResult.builder()
@@ -174,6 +178,7 @@ public class NluServiceImpl implements NluService {
             } catch (NumberFormatException ignored) {}
         }
         
+        log.info("[METRICS] NLU Processing (Success) completed in {} ms", (System.currentTimeMillis() - metricStartTime));
         return deviceCommandService.sendCommand(target.getId(), action, params, StateChangeSource.VOICE);
     }
 }
