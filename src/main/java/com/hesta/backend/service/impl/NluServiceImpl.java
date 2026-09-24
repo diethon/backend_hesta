@@ -4,10 +4,12 @@ import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
+import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
 import com.hesta.backend.service.NluService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
@@ -22,11 +24,16 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
+
 public class NluServiceImpl implements NluService {
 
     private final DeviceCommandService deviceCommandService;
-    private final com.hesta.backend.repository.DeviceRepository deviceRepository;
+    private final DeviceRepository deviceRepository;
+
+    public NluServiceImpl(@Qualifier("mqttDeviceCommandServiceImpl") DeviceCommandService deviceCommandService, DeviceRepository deviceRepository) {
+        this.deviceCommandService = deviceCommandService;
+        this.deviceRepository = deviceRepository;
+    }
 
     /**
      * Chuẩn hóa chuỗi tiếng Việt (xóa dấu, đưa về chữ thường) để so sánh dễ hơn

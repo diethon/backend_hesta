@@ -3,6 +3,7 @@ package com.hesta.backend.service.impl;
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
 import com.hesta.backend.dto.response.DeviceResponse;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.exception.AppException;
@@ -70,10 +71,17 @@ public class DeviceServiceImpl implements DeviceService {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new RuntimeException("Room not found"));
         checkHomeAccess(userId, room.getHome().getId());
-
+        
         return deviceRepository.findByRoomId(roomId).stream()
                 .map(DeviceResponse::fromEntity)
                 .collect(Collectors.toList());
+    }
+
+    private UUID getHomeId(Device device) {
+        if (device.getNode() != null && device.getRoom() != null && device.getRoom().getHome() != null) {
+            return device.getRoom().getHome().getId();
+        }
+        throw new RuntimeException("Device is not associated with any home");
     }
 
     @Override
@@ -81,7 +89,7 @@ public class DeviceServiceImpl implements DeviceService {
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, device.getHome().getId());
+        checkHomeAccess(userId, getHomeId(device));
         return DeviceResponse.fromEntity(device);
     }
 
@@ -105,22 +113,21 @@ public class DeviceServiceImpl implements DeviceService {
                     }
                 }
             }
-            
+
             Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
-            
-            // 1. Luôn cập nhật lastSeen (thiết bị còn sống)
-            device.setLastSeen(OffsetDateTime.now());
-            
+
+
+
             // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau, không làm gì thêm)
             if (prevState.equals(newState)) {
                 deviceRepository.save(device); // Chỉ lưu lastSeen
                 return; // Ngắt mạch, không lưu History, không bắn Websocket
             }
-            
+
             // Cập nhật trạng thái mới
             device.setCurrentState(newState);
             deviceRepository.save(device);
-            
+
             // 3. Throttling cho CẢM BIẾN (Chỉ lưu History 5 phút 1 lần)
             boolean shouldSaveHistory = true;
             if (device.getDeviceType() == DeviceType.SENSOR) {
@@ -143,15 +150,15 @@ public class DeviceServiceImpl implements DeviceService {
                     .build();
                 deviceStateHistoryRepository.save(history);
             }
-            
+
             // Push Realtime WebSocket (Chỉ bắn khi có State Change)
             realtimeEventPublisher.publish(RealtimeEvent.create(
                     RealtimeEventType.DEVICE_STATE_CHANGED,
-                    device.getHome().getId(),
+                    device.getRoom().getHome().getId(),
                     device.getId(),
                     newState
             ));
-            
+
         } catch (IllegalArgumentException e) {
             System.err.println("Invalid payload or UUID format: " + e.getMessage());
         }
@@ -162,22 +169,24 @@ public class DeviceServiceImpl implements DeviceService {
     public DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-
-        checkHomeOwner(userId, device.getHome().getId());
+        
+        checkHomeOwner(userId, getHomeId(device));
 
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             device.setName(request.getName().trim());
         }
-
+        
         if (request.getRoomId() != null) {
             Room room = roomRepository.findById(request.getRoomId())
                     .orElseThrow(() -> new RuntimeException("Room not found"));
-            if (!room.getHome().getId().equals(device.getHome().getId())) {
+            if (!room.getHome().getId().equals(getHomeId(device))) {
                 throw new RuntimeException("Room does not belong to this home");
             }
-            device.setRoom(room);
+            if (device.getNode() != null) {
+                device.setRoom(room);
+            }
         }
-
+        
         if (request.getIcon() != null) {
             device.setIcon(request.getIcon());
         }
@@ -200,9 +209,9 @@ public class DeviceServiceImpl implements DeviceService {
     public void removeDevice(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-
-        checkHomeOwner(userId, device.getHome().getId());
-
+                
+        checkHomeOwner(userId, getHomeId(device));
+        
         device.setDeleted(true);
         deviceRepository.save(device);
     }
@@ -212,8 +221,8 @@ public class DeviceServiceImpl implements DeviceService {
     public List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, device.getHome().getId());
-
+        checkHomeAccess(userId, getHomeId(device));
+        
         return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()
                 .map(com.hesta.backend.dto.response.DeviceStateHistoryResponse::fromEntity)

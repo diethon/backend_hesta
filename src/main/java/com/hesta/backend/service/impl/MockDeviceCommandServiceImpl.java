@@ -1,6 +1,7 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.command.CommandResult;
+import com.hesta.backend.dto.request.LedCommandRequest;
 import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.service.DeviceCommandService;
@@ -19,6 +20,11 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 @Service
 public class MockDeviceCommandServiceImpl implements DeviceCommandService {
+
+    @Override
+    public void sendCommand(UUID deviceId, LedCommandRequest request) {
+        log.info("Mock sending DeviceCommandRequest to Device [{}]: Action [{}]", deviceId, request != null ? request.getAction() : null);
+    }
 
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {

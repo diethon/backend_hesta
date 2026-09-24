@@ -3,10 +3,12 @@ package com.hesta.backend.controller;
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
 import com.hesta.backend.dto.response.ApiResponse;
 import com.hesta.backend.dto.response.DeviceResponse;
+import com.hesta.backend.dto.response.DeviceStateHistoryResponse;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.DeviceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -15,6 +17,8 @@ import com.hesta.backend.service.DeviceCommandService;
 import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.dto.command.CommandResult;
+
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import java.util.List;
@@ -22,11 +26,17 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1")
-@RequiredArgsConstructor
+
 public class DeviceController {
 
     private final DeviceService deviceService;
+
     private final DeviceCommandService deviceCommandService;
+
+    public DeviceController(DeviceService deviceService, @Qualifier("mqttDeviceCommandServiceImpl") DeviceCommandService deviceCommandService) {
+        this.deviceService = deviceService;
+        this.deviceCommandService = deviceCommandService;
+    }
 
     @GetMapping("/homes/{homeId}/devices")
     public ResponseEntity<ApiResponse<List<DeviceResponse>>> getDevicesByHome(
@@ -96,13 +106,13 @@ public class DeviceController {
     }
 
     @GetMapping("/devices/{deviceId}/history")
-    public ResponseEntity<ApiResponse<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>> getDeviceHistory(
+    public ResponseEntity<ApiResponse<List<DeviceStateHistoryResponse>>> getDeviceHistory(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID deviceId) {
 
-        List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> result = deviceService.getDeviceHistory(userDetails.getId(), deviceId);
+        List<DeviceStateHistoryResponse> result = deviceService.getDeviceHistory(userDetails.getId(), deviceId);
 
-        return ResponseEntity.ok(ApiResponse.<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>builder()
+        return ResponseEntity.ok(ApiResponse.<List<DeviceStateHistoryResponse>>builder()
                 .code(1000)
                 .result(result)
                 .build());
@@ -112,14 +122,14 @@ public class DeviceController {
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID deviceId,
-            @RequestBody java.util.Map<String, Object> request) {
+            @RequestBody Map<String, Object> request) {
         
         String actionStr = request.getOrDefault("action", "").toString();
         DeviceAction action = DeviceAction.valueOf(actionStr);
-        java.util.Map<String, Object> params = (java.util.Map<String, Object>) request.get("parameters");
+        Map<String, Object> params = (Map<String, Object>) request.get("parameters");
         
         return deviceCommandService.sendCommand(deviceId, action, params, StateChangeSource.MANUAL)
-                .thenApply(result -> ResponseEntity.ok(com.hesta.backend.dto.response.ApiResponse.<CommandResult>builder().result(result).build()));
+                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
     }
 
     @PreAuthorize("@deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
@@ -127,13 +137,13 @@ public class DeviceController {
     public CompletableFuture<ResponseEntity<ApiResponse<List<CommandResult>>>> sendRoomCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID roomId,
-            @RequestBody java.util.Map<String, Object> request) {
+            @RequestBody Map<String, Object> request) {
 
         String actionStr = request.getOrDefault("action", "").toString();
         DeviceAction action = DeviceAction.valueOf(actionStr);
-        java.util.Map<String, Object> params = (java.util.Map<String, Object>) request.get("parameters");
+        Map<String, Object> params = (Map<String, Object>) request.get("parameters");
         
         return deviceCommandService.sendRoomCommand(roomId, action, params, StateChangeSource.MANUAL)
-                .thenApply(result -> ResponseEntity.ok(com.hesta.backend.dto.response.ApiResponse.<List<CommandResult>>builder().result(result).build()));
+                .thenApply(result -> ResponseEntity.ok(ApiResponse.<List<CommandResult>>builder().result(result).build()));
     }
 }

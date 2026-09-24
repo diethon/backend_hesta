@@ -91,7 +91,8 @@ public class MqttConfig {
                 topicPrefix + "/+/devices/+/state",
                 topicPrefix + "/+/devices/+/ack",
                 topicPrefix + "/+/devices/+/sensor",
-                topicPrefix + "/+/devices/+/status"
+                topicPrefix + "/+/devices/+/status",
+                topicPrefix + "/+/devices/+/telemetry"
         };
         MqttPahoMessageDrivenChannelAdapter adapter =
                 new MqttPahoMessageDrivenChannelAdapter(clientId + "_in", mqttClientFactory(), topics);

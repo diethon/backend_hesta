@@ -1,6 +1,7 @@
 package com.hesta.backend.entity;
 
 import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.DeviceType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -8,6 +9,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -27,11 +31,7 @@ public class Device {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "home_id", nullable = false)
-    private Home home;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "room_id")
+    @JoinColumn(name = "room_id", nullable = false)
     private Room room;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -43,10 +43,7 @@ public class Device {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "device_type", nullable = false, length = 50)
-    private com.hesta.backend.enums.DeviceType deviceType;
-
-    @Column(name = "gpio_pin")
-    private Short gpioPin;
+    private DeviceType deviceType;
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
@@ -57,12 +54,12 @@ public class Device {
 
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "current_state", nullable = false, columnDefinition = "jsonb")
-    private java.util.Map<String, Object> currentState;
+    private Map<String, Object> currentState;
 
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "capabilities", columnDefinition = "jsonb")
     @Builder.Default
-    private java.util.List<String> capabilities = new java.util.ArrayList<>();
+    private List<String> capabilities = new ArrayList<>();
 
     @Column(name = "icon", length = 50)
     private String icon;
@@ -75,9 +72,6 @@ public class Device {
 
     @Column(name = "digital_twin_z", precision = 10, scale = 3)
     private BigDecimal digitalTwinZ;
-
-    @Column(name = "last_seen")
-    private OffsetDateTime lastSeen;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
