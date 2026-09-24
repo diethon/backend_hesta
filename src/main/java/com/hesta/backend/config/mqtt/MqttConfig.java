@@ -88,6 +88,7 @@ public class MqttConfig {
                 "hesta/nodes/+/devices/+/state",
                 "hesta/nodes/+/devices/+/ack",
                 "hesta/nodes/+/devices/+/sensor",
+                "hesta/nodes/+/devices/+/telemetry",
                 "hesta/nodes/+/devices/+/status"
         };
         MqttPahoMessageDrivenChannelAdapter adapter =

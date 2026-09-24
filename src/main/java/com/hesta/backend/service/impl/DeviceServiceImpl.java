@@ -63,12 +63,19 @@ public class DeviceServiceImpl implements DeviceService {
                 .collect(Collectors.toList());
     }
 
+    private UUID getHomeId(Device device) {
+        if (device.getNode() != null && device.getRoom() != null && device.getRoom().getHome() != null) {
+            return device.getRoom().getHome().getId();
+        }
+        throw new RuntimeException("Device is not associated with any home");
+    }
+
     @Override
     @Transactional(readOnly = true)
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, device.getHome().getId());
+        checkHomeAccess(userId, getHomeId(device));
         return DeviceResponse.fromEntity(device);
     }
 
@@ -105,7 +112,7 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
         
-        checkHomeOwner(userId, device.getHome().getId());
+        checkHomeOwner(userId, getHomeId(device));
 
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             device.setName(request.getName().trim());
@@ -114,10 +121,12 @@ public class DeviceServiceImpl implements DeviceService {
         if (request.getRoomId() != null) {
             Room room = roomRepository.findById(request.getRoomId())
                     .orElseThrow(() -> new RuntimeException("Room not found"));
-            if (!room.getHome().getId().equals(device.getHome().getId())) {
+            if (!room.getHome().getId().equals(getHomeId(device))) {
                 throw new RuntimeException("Room does not belong to this home");
             }
-            device.setRoom(room);
+            if (device.getNode() != null) {
+                device.setRoom(room);
+            }
         }
         
         if (request.getIcon() != null) {
@@ -143,7 +152,7 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
                 
-        checkHomeOwner(userId, device.getHome().getId());
+        checkHomeOwner(userId, getHomeId(device));
         
         device.setDeleted(true);
         deviceRepository.save(device);
@@ -154,7 +163,7 @@ public class DeviceServiceImpl implements DeviceService {
     public List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, device.getHome().getId());
+        checkHomeAccess(userId, getHomeId(device));
         
         return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()

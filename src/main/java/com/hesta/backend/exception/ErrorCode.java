@@ -26,7 +26,15 @@ public enum ErrorCode {
     INVALID_EMAIL(1020, "Định dạng email không hợp lệ", HttpStatus.BAD_REQUEST),
     PASSWORD_REQUIRED(1021, "Mật khẩu không được để trống", HttpStatus.BAD_REQUEST),
     PASSWORD_TOO_SHORT(1022, "Mật khẩu phải có ít nhất 8 ký tự", HttpStatus.BAD_REQUEST),
-    GOOGLE_TOKEN_REQUIRED(1023, "Google ID Token không được để trống", HttpStatus.BAD_REQUEST);
+    GOOGLE_TOKEN_REQUIRED(1023, "Google ID Token không được để trống", HttpStatus.BAD_REQUEST),
+
+    // Các mã lỗi điều khiển thiết bị (Device & Command)
+    DEVICE_NOT_FOUND(1030, "Không tìm thấy thiết bị", HttpStatus.NOT_FOUND),
+    INVALID_DEVICE_ACTION(1031, "Hành động điều khiển không hợp lệ", HttpStatus.BAD_REQUEST),
+    INVALID_RGB_VALUE(1032, "Giá trị RGB không hợp lệ (phải từ 0 đến 255)", HttpStatus.BAD_REQUEST),
+    INVALID_BRIGHTNESS_VALUE(1033, "Giá trị độ sáng không hợp lệ (phải từ 0 đến 100)", HttpStatus.BAD_REQUEST),
+    DEVICE_MQTT_TOPIC_MISSING(1034, "Thiết bị chưa được cấu hình MQTT topic", HttpStatus.BAD_REQUEST),
+    MQTT_PUBLISH_FAILED(1035, "Không thể gửi lệnh điều khiển tới thiết bị qua MQTT broker", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final int code;
     private final String message;
