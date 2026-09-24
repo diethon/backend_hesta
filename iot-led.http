@@ -29,14 +29,14 @@
 #
 #### ====================================================================
 #### 1. POWER_ON Command
-#### ====================================================================
-#POST {{baseUrl}}/api/devices/{{deviceId}}/command
-#Content-Type: application/json
+### ====================================================================
+POST {{baseUrl}}/api/devices/{{deviceId}}/command
+Content-Type: application/json
 ##Authorization: Bearer {{token}}
-#
-#{
-#  "action": "POWER_ON"
-#}
+
+{
+  "action": "POWER_ON"
+}
 
 ### ====================================================================
 ### 2. POWER_OFF Command
@@ -100,7 +100,7 @@ Content-Type: application/json
 
 {
   "action": "SET_BRIGHTNESS",
-  "brightness": 50
+  "brightness": 20
 }
 
 ### ====================================================================

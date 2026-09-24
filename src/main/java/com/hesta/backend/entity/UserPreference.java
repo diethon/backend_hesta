@@ -49,17 +49,9 @@ public class UserPreference {
     @Builder.Default
     boolean voiceFeedbackEnabled = true;
 
-    @Column(name = "notify_security", nullable = false)
+    @Embedded
     @Builder.Default
-    boolean notifySecurity = true;
-
-    @Column(name = "notify_automation", nullable = false)
-    @Builder.Default
-    boolean notifyAutomation = true;
-
-    @Column(name = "notify_system", nullable = false)
-    @Builder.Default
-    boolean notifySystem = true;
+    NotificationPreference notificationPreference = NotificationPreference.defaults();
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)

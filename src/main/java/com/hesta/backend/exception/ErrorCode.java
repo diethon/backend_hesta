@@ -5,6 +5,25 @@ import org.springframework.http.HttpStatus;
 
 @Getter
 public enum ErrorCode {
+    // Scene management
+    HOME_NOT_FOUND(1100, "Home not found", HttpStatus.NOT_FOUND),
+    SCENE_NOT_FOUND(1101, "Scene not found", HttpStatus.NOT_FOUND),
+    DEVICE_NOT_FOUND(1102, "Device not found", HttpStatus.NOT_FOUND),
+    SCENE_NAME_INVALID(1103, "Scene name must be between 1 and 150 characters", HttpStatus.BAD_REQUEST),
+    SCENE_DESCRIPTION_INVALID(1104, "Scene description must not exceed 2000 characters", HttpStatus.BAD_REQUEST),
+    SCENE_NAME_ALREADY_EXISTS(1105, "A scene with this name already exists in the home", HttpStatus.CONFLICT),
+    SCENE_ACTION_NOT_FOUND(1106, "Scene action not found", HttpStatus.NOT_FOUND),
+    SCENE_ACTION_ORDER_INVALID(1107, "Scene action order must be between 0 and 32767", HttpStatus.BAD_REQUEST),
+    SCENE_ACTION_ORDER_CONFLICT(1108, "Scene action order must be unique within the scene", HttpStatus.CONFLICT),
+    SCENE_ACTION_CONFIGURATION_INVALID(1109, "Scene action and value must be valid", HttpStatus.BAD_REQUEST),
+    SCENE_DEVICE_HOME_MISMATCH(1110, "Scene action device must belong to the scene's home", HttpStatus.BAD_REQUEST),
+    SCENE_ENABLED_REQUIRED(1111, "Scene enabled status is required", HttpStatus.BAD_REQUEST),
+    SCENE_ACTION_INVALID(1112, "Scene action is not supported", HttpStatus.BAD_REQUEST),
+    SCENE_ACTION_VALUE_INVALID(1113, "Scene action value is invalid for the selected action", HttpStatus.BAD_REQUEST),
+    SCENE_ACTIONS_INVALID(1114, "Scene actions must use unique contiguous order values starting at zero", HttpStatus.BAD_REQUEST),
+    SCENE_REORDER_INVALID(1115, "Reorder payload must contain every scene action exactly once", HttpStatus.BAD_REQUEST),
+    INVALID_REQUEST(1116, "Request body is invalid", HttpStatus.BAD_REQUEST),
+
     // Các mã lỗi chung
     UNCATEGORIZED_EXCEPTION(9999, "Lỗi không xác định", HttpStatus.INTERNAL_SERVER_ERROR),
     INVALID_KEY(1001, "Lỗi hệ thống: Message key không hợp lệ", HttpStatus.BAD_REQUEST),
@@ -29,12 +48,15 @@ public enum ErrorCode {
     GOOGLE_TOKEN_REQUIRED(1023, "Google ID Token không được để trống", HttpStatus.BAD_REQUEST),
 
     // Các mã lỗi điều khiển thiết bị (Device & Command)
-    DEVICE_NOT_FOUND(1030, "Không tìm thấy thiết bị", HttpStatus.NOT_FOUND),
+
     INVALID_DEVICE_ACTION(1031, "Hành động điều khiển không hợp lệ", HttpStatus.BAD_REQUEST),
     INVALID_RGB_VALUE(1032, "Giá trị RGB không hợp lệ (phải từ 0 đến 255)", HttpStatus.BAD_REQUEST),
     INVALID_BRIGHTNESS_VALUE(1033, "Giá trị độ sáng không hợp lệ (phải từ 0 đến 100)", HttpStatus.BAD_REQUEST),
     DEVICE_MQTT_TOPIC_MISSING(1034, "Thiết bị chưa được cấu hình MQTT topic", HttpStatus.BAD_REQUEST),
-    MQTT_PUBLISH_FAILED(1035, "Không thể gửi lệnh điều khiển tới thiết bị qua MQTT broker", HttpStatus.INTERNAL_SERVER_ERROR);
+    MQTT_PUBLISH_FAILED(1035, "Không thể gửi lệnh điều khiển tới thiết bị qua MQTT broker", HttpStatus.INTERNAL_SERVER_ERROR),
+    // Notification Core
+    NOTIFICATION_NOT_FOUND(1024, "Không tìm thấy thông báo", HttpStatus.NOT_FOUND),
+    NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

@@ -5,6 +5,7 @@ import com.hesta.backend.dto.response.ApiResponse;
 import com.hesta.backend.service.DeviceCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,10 +13,13 @@ import java.util.UUID;
 
 @Slf4j
 @RestController
-@RequiredArgsConstructor
-public class DeviceCommandController {
 
+public class DeviceCommandController {
     private final DeviceCommandService deviceCommandService;
+
+    public DeviceCommandController(@Qualifier("deviceCommandServiceImpl") DeviceCommandService deviceCommandService) {
+        this.deviceCommandService = deviceCommandService;
+    }
 
     @PostMapping({"/api/devices/{deviceId}/command", "/api/v1/devices/{deviceId}/command"})
     public ResponseEntity<ApiResponse<Void>> sendCommand(

@@ -23,4 +23,8 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);
 
     Optional<Device> findByMqttTopic(String mqttTopic);
+//    List<Device> findAllByHomeIdOrderByNameAsc(UUID homeId);
+
+    @Query("SELECT CASE WHEN COUNT(d) > 0 THEN true ELSE false END FROM Device d JOIN HomeMember hm ON d.room.home.id = hm.home.id WHERE d.id = :deviceId AND hm.user.id = :userId")
+    boolean hasAccessToDevice(@Param("deviceId") UUID deviceId, @Param("userId") UUID userId);
 }

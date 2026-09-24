@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -243,5 +244,10 @@ public class DeviceCommandServiceImpl implements DeviceCommandService {
                             .build()
             );
         }
+    }
+
+    @Override
+    public CompletableFuture<List<CommandResult>> sendRoomCommand(UUID roomId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
+        return null;
     }
 }
