@@ -8,6 +8,7 @@ import com.hesta.backend.dto.response.UserResponse;
 import com.hesta.backend.entity.RefreshToken;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.entity.UserPreference;
+import com.hesta.backend.entity.NotificationPreference;
 import com.hesta.backend.enums.AccountStatus;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.PlatformRole;
@@ -88,9 +89,7 @@ public class AuthServiceImpl implements AuthService {
                 .theme("system")
                 .language("vi")
                 .voiceFeedbackEnabled(true)
-                .notifySecurity(true)
-                .notifyAutomation(true)
-                .notifySystem(true)
+                .notificationPreference(NotificationPreference.defaults())
                 .build();
 
         userPreferenceRepository.save(userPreference);
@@ -209,9 +208,7 @@ public class AuthServiceImpl implements AuthService {
                     .theme("system")
                     .language("vi")
                     .voiceFeedbackEnabled(true)
-                    .notifySecurity(true)
-                    .notifyAutomation(true)
-                    .notifySystem(true)
+                    .notificationPreference(NotificationPreference.defaults())
                     .build();
 
             userPreferenceRepository.save(userPreference);

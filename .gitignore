@@ -43,4 +43,7 @@ logs/
 ### Env variables ###
 .env
 .env.*
-src/main/resources/application-local.properties
+!.env.example
+!src/test/resources/.env.properties
+
+/agents
