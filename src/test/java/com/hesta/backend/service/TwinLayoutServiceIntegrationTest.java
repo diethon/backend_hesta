@@ -77,13 +77,14 @@ class TwinLayoutServiceIntegrationTest {
     @Test
     void saveThenReplace_removesOmittedPlacementsAndAdvancesRevision() {
         var first = service.saveLayout(userId, home.getId(), new TwinLayoutSaveRequest(0L,
-                List.of(new TwinRoomLayoutRequest(room.getId(), bd(".1"), bd(".1"), bd(".5"), bd(".5"))),
+                List.of(new TwinRoomLayoutRequest(room.getId(), 2, bd(".1"), bd(".1"), bd(".5"), bd(".5"))),
                 List.of(new TwinNodeLayoutRequest(com.hesta.backend.enums.TwinNodeType.DEVICE,
                         device.getId().toString(), room.getId(), bd(".2"), bd(".2")),
                         new TwinNodeLayoutRequest(com.hesta.backend.enums.TwinNodeType.SENSOR,
                                 device.getId() + ":TEMPERATURE", room.getId(), bd(".3"), bd(".3")))));
         assertThat(first.revision()).isEqualTo(1L);
         assertThat(first.rooms()).hasSize(1);
+        assertThat(first.rooms().getFirst().floor()).isEqualTo(2);
         assertThat(first.nodes()).hasSize(2);
 
         var second = service.saveLayout(userId, home.getId(), new TwinLayoutSaveRequest(1L, List.of(), List.of()));

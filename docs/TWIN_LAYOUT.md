@@ -39,6 +39,8 @@ trong nhà đó. Nút SENSOR dùng định danh chuẩn hiện có
 `<device UUID>:<exact metricType>` và phải khớp với một luồng `SensorReading`
 mới nhất thuộc nhà đó. `roomId` hiển thị của nút là tùy chọn và được kiểm tra
 để bảo đảm thuộc cùng nhà; nó không thay đổi `Device.room` hay trạng thái vận hành.
+Mỗi vị trí phòng có `floor` nguyên từ 1 đến 100. Client cũ không gửi trường
+này được hiểu là tầng 1 để giữ tương thích với bố cục một tầng đã có.
 
 ## Lưu trữ và xử lý đồng thời
 
@@ -48,6 +50,9 @@ Migration bổ sung `supabase/migrations/20260917102640_create_twin_layout.sql` 
   thời gian phục vụ theo dõi thay đổi;
 - `twin_room_layouts`: thông tin hình học của phòng;
 - `twin_node_layouts`: vị trí hiển thị DEVICE/SENSOR.
+
+Migration tiến `20260920150000_add_floor_to_twin_room_layouts.sql` thêm
+`floor_number` có mặc định 1 và ràng buộc 1–100. Không sửa migration đã áp dụng.
 
 Khóa ngoại xóa lan truyền các bản ghi bố cục con khi bố cục hoặc nhà bị xóa,
 nhưng các bản ghi bố cục không bao giờ xóa phòng, thiết bị hay số đo nghiệp
@@ -93,6 +98,10 @@ dữ liệu này với bản chụp Twin hiện có theo `roomId` và theo
 8. Gửi phòng hoặc thiết bị thuộc nhà khác, luồng cảm biến không tồn tại, mục
    trùng lặp, hình học vượt giới hạn hoặc phiên bản cũ; từng trường hợp đều
    bị từ chối và bố cục trước đó được giữ nguyên.
+
+Để kiểm tra nhà nhiều tầng bằng API thật, chạy seed local rồi đăng nhập bằng
+`multifloor.owner@hesta.local`. Nhà `Nhà thông minh 3 tầng` có 8 phòng trên ba
+tầng, 8 thiết bị và 6 luồng cảm biến được đặt sẵn trong bố cục.
 
 Sau khi chạy `npx supabase db reset --local --yes`, dữ liệu khởi tạo có sẵn bố
 cục để đọc cho `Nhà HESTA Demo` (`homeId`

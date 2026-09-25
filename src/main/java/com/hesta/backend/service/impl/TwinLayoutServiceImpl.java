@@ -93,7 +93,7 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
 
         TwinLayout finalLayout = layout;
         roomLayoutRepository.saveAll(request.rooms().stream().map(room -> TwinRoomLayout.builder()
-                .layoutId(finalLayout.getId()).roomId(room.roomId()).x(room.x()).y(room.y())
+                .layoutId(finalLayout.getId()).roomId(room.roomId()).floor(room.floor().shortValue()).x(room.x()).y(room.y())
                 .width(room.width()).height(room.height()).build()).toList());
         nodeLayoutRepository.saveAll(request.nodes().stream().map(node -> TwinNodeLayout.builder()
                 .layoutId(finalLayout.getId()).nodeType(node.nodeType()).nodeId(node.nodeId())
@@ -173,6 +173,9 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
     }
 
     private void validateRoomGeometry(TwinRoomLayoutRequest request) {
+        if (request.floor() == null || request.floor() < 1 || request.floor() > 100) {
+            throw new AppException(ErrorCode.TWIN_LAYOUT_GEOMETRY_INVALID);
+        }
         validateCoordinate(request.x());
         validateCoordinate(request.y());
         validateDimension(request.width());
@@ -210,7 +213,7 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
         });
         List<TwinRoomLayoutResponse> rooms = storedRooms.stream()
                 .filter(row -> liveRooms.containsKey(row.getRoomId()))
-                .map(row -> new TwinRoomLayoutResponse(row.getRoomId(), row.getX(), row.getY(), row.getWidth(), row.getHeight()))
+                .map(row -> new TwinRoomLayoutResponse(row.getRoomId(), row.getFloor(), row.getX(), row.getY(), row.getWidth(), row.getHeight()))
                 .toList();
         List<TwinNodeLayoutResponse> nodes = nodeLayoutRepository.findByLayoutIdOrderByNodeTypeAscNodeIdAsc(layout.getId()).stream()
                 .filter(row -> isLiveNode(layout.getHomeId(), row))

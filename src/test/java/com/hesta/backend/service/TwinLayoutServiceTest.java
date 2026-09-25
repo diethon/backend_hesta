@@ -6,6 +6,7 @@ import com.hesta.backend.dto.request.TwinRoomLayoutRequest;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.TwinLayout;
+import com.hesta.backend.entity.TwinRoomLayout;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -75,12 +76,15 @@ class TwinLayoutServiceTest {
         when(nodeLayouts.findByLayoutIdOrderByNodeTypeAscNodeIdAsc(any())).thenReturn(List.of());
 
         var request = new TwinLayoutSaveRequest(3L,
-                List.of(new TwinRoomLayoutRequest(roomId, bd(".05"), bd(".05"), bd(".40"), bd(".30"))),
+                List.of(new TwinRoomLayoutRequest(roomId, 3, bd(".05"), bd(".05"), bd(".40"), bd(".30"))),
                 List.of());
         var response = service.saveLayout(userId, homeId, request);
 
         assertThat(response.homeId()).isEqualTo(homeId);
         assertThat(response.revision()).isEqualTo(4L);
+        verify(roomLayouts).saveAll(argThat(rows -> ((List<?>) rows).stream()
+                .map(TwinRoomLayout.class::cast)
+                .allMatch(row -> row.getFloor() == 3)));
         verify(roomLayouts).deleteByLayoutId(any());
         verify(nodeLayouts).deleteByLayoutId(any());
         verify(roomLayouts).saveAll(any());
@@ -109,6 +113,20 @@ class TwinLayoutServiceTest {
         when(layouts.findByHomeIdForUpdate(homeId)).thenReturn(Optional.empty());
         var request = new TwinLayoutSaveRequest(0L, List.of(new TwinRoomLayoutRequest(
                 roomId, bd(".80"), bd(".10"), bd(".30"), bd(".20"))), List.of());
+        assertThatThrownBy(() -> service.saveLayout(userId, homeId, request))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode()).isEqualTo(ErrorCode.TWIN_LAYOUT_GEOMETRY_INVALID);
+        verifyNoInteractions(rooms, devices, readings);
+    }
+
+    @Test
+    void saveLayout_invalidFloor_isRejectedBeforePersistence() {
+        Home home = Home.builder().id(homeId).build();
+        when(authorization.requireLayoutManagement(userId, homeId)).thenReturn(home);
+        when(homes.findByIdForUpdate(homeId)).thenReturn(Optional.of(home));
+        when(layouts.findByHomeIdForUpdate(homeId)).thenReturn(Optional.empty());
+        var request = new TwinLayoutSaveRequest(0L, List.of(new TwinRoomLayoutRequest(
+                roomId, 0, bd(".10"), bd(".10"), bd(".30"), bd(".20"))), List.of());
         assertThatThrownBy(() -> service.saveLayout(userId, homeId, request))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode()).isEqualTo(ErrorCode.TWIN_LAYOUT_GEOMETRY_INVALID);

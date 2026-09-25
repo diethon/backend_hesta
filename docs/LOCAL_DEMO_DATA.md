@@ -7,10 +7,10 @@ và minh họa HESTA mà không dùng dữ liệu cá nhân hoặc cơ sở dữ
 
 Bộ dữ liệu gồm:
 
-- 5 tài khoản cục bộ, gồm vai trò nền tảng `USER` và `ADMIN`.
-- 2 căn nhà tách biệt.
+- 7 tài khoản cục bộ, gồm vai trò nền tảng `USER` và `ADMIN`.
+- 3 căn nhà tách biệt, gồm một nhà ba tầng dành cho Digital Twin 3D.
 - Quan hệ `OWNER`/`MEMBER` và quyền truy cập theo phòng.
-- 5 phòng, 3 edge node và 8 thiết bị.
+- 13 phòng, 3 edge node và 16 thiết bị.
 - Lịch sử trạng thái thiết bị và số đo cảm biến.
 - Scene, hành động scene, lịch và quy tắc tự động hóa.
 - Sự kiện bảo mật, bất thường thiết bị và thông báo theo từng người nhận.
@@ -58,7 +58,41 @@ Tất cả tài khoản sử dụng mật khẩu bạn nhập khi chạy script.
 | `member@hesta.local` | `USER` | `MEMBER` | Phòng khách và Nhà bếp. |
 | `guest@hesta.local` | `USER` | `MEMBER` | Phòng khách và Phòng ngủ. |
 | `second.owner@hesta.local` | `USER` | `OWNER` | Căn hộ Gia Huy, dùng để kiểm tra cách ly dữ liệu. |
+| `multifloor.owner@hesta.local` | `USER` | `OWNER` | Nhà thông minh 3 tầng, 8 phòng và 14 marker Twin. |
+| `fresh@hesta.local` | `USER` | Chưa có | Tài khoản trống để tự tạo nhà, phòng và sơ đồ 2D từ đầu. |
 | `admin@hesta.local` | `ADMIN` | Không có | Kiểm thử API quản trị nền tảng. |
+
+Để thử quy trình từ đầu, đăng nhập bằng `fresh@hesta.local` với mật khẩu demo
+đã chọn khi chạy script khởi tạo. Tài khoản này không thuộc nhà nào và không
+có phòng, thiết bị hay sơ đồ Twin. Chọn **Tạo nhà mới** ở trang Tổng quan, mở
+**Digital Twin**, chọn **Chỉnh sửa sơ đồ**, tạo phòng trong bảng **Đối tượng chưa
+đặt**, đặt phòng lên sơ đồ 2D rồi chọn **Lưu bố cục**. Nhà vừa tạo có sơ đồ rỗng
+với phiên bản 0; hệ thống không tự tạo sẵn hình nhà 2D.
+
+### Thêm phòng và thiết bị mẫu cho tài khoản fresh
+
+Sau khi tạo nhà bằng `fresh@hesta.local`, nạp 9 thiết bị mẫu vào nhà đó bằng
+lệnh sau từ thư mục `backend_hesta`:
+
+```powershell
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Get-Content -LiteralPath scripts/Add-FreshTwinDemoDevices.sql -Encoding utf8 -Raw |
+    docker exec -i -e PGCLIENTENCODING=UTF8 supabase_db_backend_hesta psql -v ON_ERROR_STOP=1 -U postgres -d postgres
+```
+
+Lệnh có thể chạy lại mà không tạo thiết bị trùng. Nó yêu cầu tài khoản fresh là
+chủ của đúng một nhà; không tạo phòng, ghép cặp phần cứng, số đo cảm biến hoặc
+bố cục Twin. Để thêm 5 phòng mẫu vào cùng nhà:
+
+```powershell
+Get-Content -LiteralPath scripts/Add-FreshTwinDemoRooms.sql -Encoding utf8 -Raw |
+    docker exec -i -e PGCLIENTENCODING=UTF8 supabase_db_backend_hesta psql -v ON_ERROR_STOP=1 -U postgres -d postgres
+```
+
+Script phòng cũng có thể chạy lại mà không tạo bản ghi trùng. Cả phòng và thiết
+bị nằm trong các tab tương ứng của bảng **Đối tượng chưa đặt**. Thiết bị có trạng
+thái **Chưa xác định** cho đến khi có luồng ghép cặp thật. Đặt phòng và thiết bị
+lên sơ đồ 2D, lưu bố cục rồi mở chế độ 3D để xem mô hình.
 
 ## Cấu trúc chính
 
@@ -88,6 +122,13 @@ Có một camera trạng thái `ERROR`, một `DeviceAnomaly` và thông báo `A
 Bộ dữ liệu giúp kiểm tra người dùng của nhà thứ nhất không thể đọc dữ liệu nhà
 thứ hai.
 
+### Nhà thông minh 3 tầng
+
+Tài khoản `multifloor.owner@hesta.local` sở hữu riêng một nhà gồm 8 phòng:
+ba phòng tầng 1, ba phòng tầng 2 và hai phòng tầng 3. Bố cục Twin chứa 8 thiết
+bị cùng 6 luồng cảm biến, tổng cộng 14 marker. Đây là dữ liệu để kiểm tra chế
+độ **Toàn nhà / T1 / T2 / T3** và **Tách tầng / Xếp chồng** bằng API thật.
+
 ## Xem dữ liệu
 
 Supabase Studio:
@@ -114,6 +155,9 @@ security_events
 device_anomalies
 notifications
 user_preferences
+twin_layouts
+twin_room_layouts
+twin_node_layouts
 ```
 
 ## Lưu ý bảo mật

@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -72,6 +73,32 @@ class TwinLayoutControllerTest {
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result.revision").value(1));
         verify(service).saveLayout(eq(userId), eq(homeId), any());
+    }
+
+    @Test
+    void putLayout_acceptsFloorNumber() throws Exception {
+        when(service.saveLayout(eq(userId), eq(homeId), any())).thenReturn(
+                new TwinLayoutResponse(homeId, 1, List.of(), List.of()));
+        mvc.perform(put(url()).with(authentication(principal()))
+                        .contentType("application/json")
+                        .content("""
+                                {"expectedRevision":0,"rooms":[{"roomId":"00000000-0000-4000-8000-000000000012","floor":3,"x":0.1,"y":0.1,"width":0.2,"height":0.2}],"nodes":[]}
+                                """))
+                .andExpect(status().isOk());
+        verify(service).saveLayout(eq(userId), eq(homeId), argThat(request -> request.rooms().getFirst().floor() == 3));
+    }
+
+    @Test
+    void putLayout_omittedFloorDefaultsToOne() throws Exception {
+        when(service.saveLayout(eq(userId), eq(homeId), any())).thenReturn(
+                new TwinLayoutResponse(homeId, 1, List.of(), List.of()));
+        mvc.perform(put(url()).with(authentication(principal()))
+                        .contentType("application/json")
+                        .content("""
+                                {"expectedRevision":0,"rooms":[{"roomId":"00000000-0000-4000-8000-000000000012","x":0.1,"y":0.1,"width":0.2,"height":0.2}],"nodes":[]}
+                                """))
+                .andExpect(status().isOk());
+        verify(service).saveLayout(eq(userId), eq(homeId), argThat(request -> request.rooms().getFirst().floor() == 1));
     }
 
     @Test

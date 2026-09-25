@@ -52,6 +52,7 @@ class TwinLayoutRepositoryTest {
 
         TwinLayout layout = layouts.save(TwinLayout.builder().homeId(home.getId()).revision(1L).build());
         roomLayouts.save(TwinRoomLayout.builder().layoutId(layout.getId()).roomId(room.getId())
+                .floor((short) 3)
                 .x(new BigDecimal("0.125")).y(new BigDecimal("0.250"))
                 .width(new BigDecimal("0.500")).height(new BigDecimal("0.375")).build());
         nodeLayouts.save(TwinNodeLayout.builder().layoutId(layout.getId()).nodeType(TwinNodeType.DEVICE)
@@ -65,6 +66,7 @@ class TwinLayoutRepositoryTest {
         assertThat(roomLayouts.findByLayoutIdOrderByRoomId(found.getId())).singleElement().satisfies(row -> {
             assertThat(row.getX()).isEqualByComparingTo(".125");
             assertThat(row.getWidth()).isEqualByComparingTo(".500");
+            assertThat(row.getFloor()).isEqualTo((short) 3);
         });
         assertThat(nodeLayouts.findByLayoutIdOrderByNodeTypeAscNodeIdAsc(found.getId())).singleElement()
                 .extracting(TwinNodeLayout::getNodeType).isEqualTo(TwinNodeType.DEVICE);

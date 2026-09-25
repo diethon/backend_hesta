@@ -32,6 +32,9 @@ public class TwinRoomLayout {
     @Column(name = "room_id", nullable = false)
     private UUID roomId;
 
+    @Column(name = "floor_number", nullable = false)
+    private short floor;
+
     @Column(nullable = false, precision = 10, scale = 3)
     private BigDecimal x;
 
