@@ -43,6 +43,7 @@ public enum ErrorCode {
     BEHAVIOR_DEVICE_REQUIRED(1301, "At least one device is required to generate behavior data", HttpStatus.BAD_REQUEST),
     RECOMMENDATION_NOT_FOUND(1302, "Recommendation not found", HttpStatus.NOT_FOUND),
     RECOMMENDATION_ALREADY_RESOLVED(1303, "Recommendation is already resolved", HttpStatus.CONFLICT),
+    NOTIFICATION_NOT_FOUND(1400, "Notification not found", HttpStatus.NOT_FOUND),
 
     // Các mã lỗi chung
     UNCATEGORIZED_EXCEPTION(9999, "Lỗi không xác định", HttpStatus.INTERNAL_SERVER_ERROR),

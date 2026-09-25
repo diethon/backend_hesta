@@ -12,7 +12,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
+        @UniqueConstraint(columnNames = { "node_id", "gpio_pin" })
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
@@ -25,8 +25,6 @@ public class Device {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-
-   
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "room_id")
@@ -42,8 +40,6 @@ public class Device {
     @Enumerated(EnumType.STRING)
     @Column(name = "device_type", nullable = false, length = 50)
     private com.hesta.backend.enums.DeviceType deviceType;
-
-    
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
@@ -72,8 +68,6 @@ public class Device {
 
     @Column(name = "digital_twin_z", precision = 10, scale = 3)
     private BigDecimal digitalTwinZ;
-
-    
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

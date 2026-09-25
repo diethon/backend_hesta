@@ -50,7 +50,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         List<RecommendationResponse> created = new ArrayList<>();
         for (BehaviorPredictionResponse prediction : behavior.predict(userId, homeId, from, to, OffsetDateTime.now())) {
             Device device = devices.findById(prediction.getDeviceId()).orElse(null);
-            if (device == null || !homeId.equals(device.getHome().getId())
+            if (device == null || !homeId.equals(device.getNode().getHome().getId())
                     || (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
                     && device.getCapabilities().stream().noneMatch(cap -> cap.equalsIgnoreCase(prediction.getAction())))
                     || duplicate(existing, device.getId(), prediction.getAction(), prediction.getPredictedTime().withSecond(0).toString())) continue;
@@ -68,7 +68,7 @@ public class RecommendationServiceImpl implements RecommendationService {
             if (pattern.getConfidence() < 0.5 || (!"TURN_ON".equals(pattern.getAction())
                     && !"TURN_OFF".equals(pattern.getAction()))) continue;
             Device device = devices.findById(pattern.getDeviceId()).orElse(null);
-            if (device == null || !homeId.equals(device.getHome().getId())
+            if (device == null || !homeId.equals(device.getNode().getHome().getId())
                     || (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
                     && device.getCapabilities().stream().noneMatch(cap -> cap.equalsIgnoreCase(pattern.getAction())))) continue;
             String time = pattern.getAverageTime().withSecond(0).withNano(0).toString();

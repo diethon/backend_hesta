@@ -34,14 +34,13 @@ public class DeviceResponse {
     public static DeviceResponse fromEntity(Device device) {
         return DeviceResponse.builder()
                 .id(device.getId())
-                .homeId(device.getHome().getId())
                 .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
                 .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
                 .nodeId(device.getNode() != null ? device.getNode().getId() : null)
                 .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())
                 .deviceType(device.getDeviceType() != null ? device.getDeviceType().name() : null)
-                .gpioPin(device.getGpioPin())
+
                 .status(device.getStatus().name())
                 .currentState(device.getCurrentState())
                 .capabilities(device.getCapabilities())
@@ -49,7 +48,6 @@ public class DeviceResponse {
                 .digitalTwinX(device.getDigitalTwinX())
                 .digitalTwinY(device.getDigitalTwinY())
                 .digitalTwinZ(device.getDigitalTwinZ())
-                .lastSeen(device.getLastSeen())
                 .build();
     }
 }

@@ -170,7 +170,7 @@ public class AutomationEngineImpl implements AutomationEngine {
         if (event.getSourceDeviceId() == null) return;
         Device device = deviceRepository.findById(event.getSourceDeviceId())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        if (!homeId.equals(device.getHome().getId())) {
+        if (!homeId.equals(device.getNode().getHome().getId())) {
             throw new AppException(ErrorCode.AUTOMATION_DEVICE_HOME_MISMATCH);
         }
     }

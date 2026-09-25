@@ -59,7 +59,7 @@ public class DeviceServiceImpl implements DeviceService {
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, device.getHome().getId());
+        checkHomeAccess(userId, device.getNode().getHome().getId());
         return DeviceResponse.fromEntity(device);
     }
 
@@ -96,7 +96,7 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
 
-        checkHomeOwner(userId, device.getHome().getId());
+        checkHomeOwner(userId, device.getNode().getHome().getId());
 
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             device.setName(request.getName().trim());
@@ -105,7 +105,7 @@ public class DeviceServiceImpl implements DeviceService {
         if (request.getRoomId() != null) {
             Room room = roomRepository.findById(request.getRoomId())
                     .orElseThrow(() -> new RuntimeException("Room not found"));
-            if (!room.getHome().getId().equals(device.getHome().getId())) {
+            if (!room.getHome().getId().equals(device.getNode().getHome().getId())) {
                 throw new RuntimeException("Room does not belong to this home");
             }
             device.setRoom(room);
@@ -134,7 +134,7 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
 
-        checkHomeOwner(userId, device.getHome().getId());
+        checkHomeOwner(userId, device.getNode().getHome().getId());
 
         device.setDeleted(true);
         deviceRepository.save(device);
@@ -145,7 +145,7 @@ public class DeviceServiceImpl implements DeviceService {
     public List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, device.getHome().getId());
+        checkHomeAccess(userId, device.getNode().getHome().getId());
 
         return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()

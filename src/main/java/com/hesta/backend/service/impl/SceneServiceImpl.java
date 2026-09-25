@@ -230,7 +230,7 @@ public class SceneServiceImpl implements SceneService {
         if (device == null) {
             throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
         }
-        if (!home.getId().equals(device.getHome().getId())) {
+        if (!home.getId().equals(device.getNode().getHome().getId())) {
             throw new AppException(ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
         }
         SceneActionType actionType = validateActionValue(request.getAction(), request.getValue());

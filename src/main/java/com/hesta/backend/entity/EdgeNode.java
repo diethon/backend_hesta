@@ -30,12 +30,9 @@ public class EdgeNode {
     @Column(name = "node_code", nullable = false, length = 100)
     private String nodeCode;
 
- 
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private DeviceStatus status;
-
 
 
     @CreationTimestamp

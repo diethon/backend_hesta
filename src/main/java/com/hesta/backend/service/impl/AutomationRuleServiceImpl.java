@@ -215,7 +215,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
 
     private void validateHome(Device device, Home home) {
         if (device == null) return;
-        if (!home.getId().equals(device.getHome().getId())) {
+        if (!home.getId().equals(device.getNode().getHome().getId())) {
             throw new AppException(ErrorCode.AUTOMATION_DEVICE_HOME_MISMATCH);
         }
     }

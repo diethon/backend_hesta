@@ -36,7 +36,7 @@ public class MqttMessageReceiver {
             if (device == null || device.getDeviceType() != DeviceType.SENSOR || device.getNode() == null
                     || !parts[2].equals(device.getNode().getId().toString())) return;
             Map<String, Object> data = objectMapper.readValue(message.getPayload().toString(), new TypeReference<>() {});
-            automationEngine.process(device.getHome().getId(), AutomationEventRequest.builder()
+            automationEngine.process(device.getNode().getHome().getId(), AutomationEventRequest.builder()
                     .sourceDeviceId(deviceId).eventType("SENSOR_READING").data(data).build());
         } catch (Exception exception) {
             log.warn("Ignored invalid sensor message on topic {}", topic);

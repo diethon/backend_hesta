@@ -72,7 +72,7 @@ public class ManualControlServiceImpl implements ManualControlService {
 
     private Device authorizedDevice(UUID userId, UUID deviceId) {
         Device device = devices.findById(deviceId).orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        authorization.requireAccess(userId, device.getHome().getId());
+        authorization.requireAccess(userId, device.getNode().getHome().getId());
         return device;
     }
 }
