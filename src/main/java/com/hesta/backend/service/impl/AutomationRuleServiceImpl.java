@@ -23,6 +23,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     private final AutomationRuleRepository ruleRepository;
     private final AutomationExecutionRepository executionRepository;
     private final DeviceRepository deviceRepository;
+    private final SceneRepository sceneRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -95,7 +96,15 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
 
     private void replaceChildren(AutomationRule rule, List<RuleConditionRequest> conditionRequests,
                                  List<RuleActionRequest> actionRequests, Home home) {
-        validateOrders(conditionRequests.stream().map(RuleConditionRequest::getOrder).toList(), ErrorCode.AUTOMATION_CONDITION_INVALID);
+        if (conditionRequests == null || (conditionRequests.isEmpty() && rule.getTriggerType() != TriggerType.SCHEDULE)) {
+            throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
+        }
+        if (rule.getTriggerType() == TriggerType.SCHEDULE && !conditionRequests.isEmpty()) {
+            throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
+        }
+        if (!conditionRequests.isEmpty()) {
+            validateOrders(conditionRequests.stream().map(RuleConditionRequest::getOrder).toList(), ErrorCode.AUTOMATION_CONDITION_INVALID);
+        }
         validateOrders(actionRequests.stream().map(RuleActionRequest::getOrder).toList(), ErrorCode.AUTOMATION_ACTION_INVALID);
         Map<UUID, Device> devices = loadDevices(conditionRequests, actionRequests);
 
@@ -107,8 +116,12 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 .map(request -> buildAction(rule, request, devices, home)).toList();
 
         rule.getConditions().clear();
-        rule.getConditions().addAll(conditions);
         rule.getActions().clear();
+        if (rule.getId() != null) {
+            // Delete old rows before inserting replacement rows with the same order indexes.
+            ruleRepository.saveAndFlush(rule);
+        }
+        rule.getConditions().addAll(conditions);
         rule.getActions().addAll(actions);
     }
 
@@ -136,14 +149,32 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
 
     private RuleAction buildAction(AutomationRule rule, RuleActionRequest request,
                                    Map<UUID, Device> devices, Home home) {
-        Device device = devices.get(request.getDeviceId());
-        validateHome(device, home);
+        if (request == null || request.getAction() == null) {
+            throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+        }
         DeviceAction action;
         try {
             action = DeviceAction.valueOf(request.getAction().trim().toUpperCase(Locale.ROOT));
         } catch (RuntimeException exception) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
+        if (action == DeviceAction.EXECUTE_SCENE) {
+            if (request.getSceneId() == null || request.getDeviceId() != null
+                    || (request.getParameters() != null && !request.getParameters().isEmpty())) {
+                throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+            }
+            Scene scene = sceneRepository.findByIdAndHomeId(request.getSceneId(), home.getId())
+                    .orElseThrow(() -> new AppException(ErrorCode.SCENE_NOT_FOUND));
+            if (!scene.isEnabled() || scene.getActions().isEmpty()) {
+                throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+            }
+            return RuleAction.builder().rule(rule).scene(scene).action(action).order(request.getOrder()).build();
+        }
+        if (request.getDeviceId() == null || request.getSceneId() != null) {
+            throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+        }
+        Device device = devices.get(request.getDeviceId());
+        validateHome(device, home);
         validateActionParameters(action, request.getParameters());
         if (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
                 && device.getCapabilities().stream().noneMatch(capability -> capability.equalsIgnoreCase(action.name()))) {
@@ -163,6 +194,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
             case SET_TEMPERATURE -> values.get("temperature") instanceof Number;
             case SET_MODE -> values.get("mode") instanceof String mode && !mode.isBlank();
             case SET_STATE -> !values.isEmpty();
+            case EXECUTE_SCENE -> false;
         };
         if (!valid) throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
     }
@@ -242,8 +274,12 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                                 .expectedValue(condition.getExpectedValue())
                                 .logicalOperator(condition.getLogicalOperator().name()).order(condition.getOrder()).build()).toList())
                 .actions(rule.getActions().stream().sorted(Comparator.comparingInt(RuleAction::getOrder))
-                        .map(action -> RuleActionResponse.builder().id(action.getId()).deviceId(action.getDevice().getId())
-                                .deviceName(action.getDevice().getName()).action(action.getAction().name())
+                        .map(action -> RuleActionResponse.builder().id(action.getId())
+                                .deviceId(action.getDevice() == null ? null : action.getDevice().getId())
+                                .deviceName(action.getDevice() == null ? null : action.getDevice().getName())
+                                .sceneId(action.getScene() == null ? null : action.getScene().getId())
+                                .sceneName(action.getScene() == null ? null : action.getScene().getName())
+                                .action(action.getAction().name())
                                 .parameters(action.getParameters()).order(action.getOrder()).build()).toList())
                 .build();
     }

@@ -25,7 +25,7 @@ public class UpdateAutomationRuleRequest {
     Boolean enabled;
 
     @Valid
-    @NotEmpty(message = "AUTOMATION_CONDITION_INVALID")
+    @NotNull(message = "AUTOMATION_CONDITION_INVALID")
     List<RuleConditionRequest> conditions;
 
     @Valid

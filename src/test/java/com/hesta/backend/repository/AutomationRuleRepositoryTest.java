@@ -6,6 +6,8 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.RuleAction;
 import com.hesta.backend.entity.RuleCondition;
+import com.hesta.backend.entity.Scene;
+import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.ConditionOperator;
@@ -34,6 +36,7 @@ class AutomationRuleRepositoryTest {
     @Autowired private HomeRepository homeRepository;
     @Autowired private DeviceRepository deviceRepository;
     @Autowired private AutomationRuleRepository ruleRepository;
+    @Autowired private SceneRepository sceneRepository;
     @Autowired private EntityManager entityManager;
 
     @Test
@@ -62,6 +65,36 @@ class AutomationRuleRepositoryTest {
                 home.getId(), List.of(TriggerType.SENSOR));
         assertThat(enabled).hasSize(2);
         assertActionsLoadedAfterSecondQuery(enabled);
+    }
+
+    @Test
+    void sceneActionRoundTripsThroughExistingRuleActionTable() {
+        User owner = userRepository.save(User.builder().fullName("Scene Owner")
+                .email("scene-rule-owner@example.com").passwordHash("hash")
+                .provider(AuthProvider.LOCAL).build());
+        Home home = homeRepository.save(Home.builder().name("Scene Rule Home").createdBy(owner).build());
+        Device device = deviceRepository.save(Device.builder().home(home).name("Lamp")
+                .deviceType(DeviceType.LIGHT).status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
+        Scene scene = Scene.builder().home(home).name("Evening").enabled(true).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
+                .action("TURN_ON").order(0).build());
+        sceneRepository.save(scene);
+        AutomationRule rule = AutomationRule.builder().home(home).name("Scene trigger")
+                .triggerType(TriggerType.SCHEDULE).enabled(true).build();
+        rule.getActions().add(RuleAction.builder().rule(rule).scene(scene)
+                .action(DeviceAction.EXECUTE_SCENE).order(0).build());
+        UUID ruleId = ruleRepository.save(rule).getId();
+        entityManager.flush();
+        entityManager.clear();
+
+        AutomationRule loaded = ruleRepository.findByIdAndHomeId(ruleId, home.getId()).orElseThrow();
+        ruleRepository.fetchActionsByIdIn(List.of(ruleId));
+
+        assertThat(loaded.getActions()).hasSize(1);
+        assertThat(loaded.getActions().getFirst().getDevice()).isNull();
+        assertThat(loaded.getActions().getFirst().getScene().getName()).isEqualTo("Evening");
+        assertThat(loaded.getActions().getFirst().getScene().getActions()).hasSize(1);
+        assertThat(ruleRepository.existsActionForScene(scene.getId())).isTrue();
     }
 
     private void assertActionsLoadedAfterSecondQuery(List<AutomationRule> rules) {

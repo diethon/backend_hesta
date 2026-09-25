@@ -26,9 +26,7 @@ public class Device {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "home_id", nullable = false)
-    private Home home;
+   
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "room_id")
@@ -45,8 +43,7 @@ public class Device {
     @Column(name = "device_type", nullable = false, length = 50)
     private com.hesta.backend.enums.DeviceType deviceType;
 
-    @Column(name = "gpio_pin")
-    private Short gpioPin;
+    
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
@@ -76,8 +73,7 @@ public class Device {
     @Column(name = "digital_twin_z", precision = 10, scale = 3)
     private BigDecimal digitalTwinZ;
 
-    @Column(name = "last_seen")
-    private OffsetDateTime lastSeen;
+    
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

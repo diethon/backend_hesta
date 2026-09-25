@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.UUID;
 
 public interface BehaviorEventRepository extends JpaRepository<BehaviorEvent, UUID> {
+    java.util.Optional<BehaviorEvent> findTopByDeviceIdAndEventTypeOrderByOccurredAtDesc(UUID deviceId, String eventType);
+    List<BehaviorEvent> findTop100ByDeviceIdAndEventTypeOrderByOccurredAtDesc(UUID deviceId, String eventType);
     List<BehaviorEvent> findAllByHomeIdAndOccurredAtBetweenOrderByOccurredAtAsc(
             UUID homeId, OffsetDateTime from, OffsetDateTime to);
 

@@ -20,6 +20,35 @@ public class AutomationRuleController {
     private final AutomationRuleService ruleService;
     private final AutomationEngine automationEngine;
     private final HomeAuthorizationService homeAuthorizationService;
+    private final ScheduleService scheduleService;
+
+    @GetMapping("/{ruleId}/schedules")
+    public ResponseEntity<ApiResponse<List<ScheduleResponse>>> schedules(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId, @PathVariable UUID ruleId) {
+        return ok(null, scheduleService.ruleSchedules(user.getId(), homeId, ruleId));
+    }
+
+    @PostMapping("/{ruleId}/schedules")
+    public ResponseEntity<ApiResponse<ScheduleResponse>> createSchedule(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId, @PathVariable UUID ruleId,
+            @Valid @RequestBody ScheduleRequest request) {
+        return ok("Đã thêm lịch", scheduleService.saveRuleSchedule(user.getId(), homeId, ruleId, null, request));
+    }
+
+    @PutMapping("/{ruleId}/schedules/{scheduleId}")
+    public ResponseEntity<ApiResponse<ScheduleResponse>> updateSchedule(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId, @PathVariable UUID ruleId,
+            @PathVariable UUID scheduleId, @Valid @RequestBody ScheduleRequest request) {
+        return ok("Đã cập nhật lịch", scheduleService.saveRuleSchedule(user.getId(), homeId, ruleId, scheduleId, request));
+    }
+
+    @DeleteMapping("/{ruleId}/schedules/{scheduleId}")
+    public ResponseEntity<ApiResponse<Void>> deleteSchedule(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId, @PathVariable UUID ruleId,
+            @PathVariable UUID scheduleId) {
+        scheduleService.deleteRuleSchedule(user.getId(), homeId, ruleId, scheduleId);
+        return ok("Đã xóa lịch", null);
+    }
 
     @PostMapping
     public ResponseEntity<ApiResponse<AutomationRuleResponse>> create(
@@ -73,6 +102,14 @@ public class AutomationRuleController {
             @Valid @RequestBody AutomationEventRequest request) {
         homeAuthorizationService.requireAccess(user.getId(), homeId);
         return ok("Đã xử lý sự kiện tự động hóa", automationEngine.process(homeId, request));
+    }
+
+    @PostMapping("/{ruleId}/test")
+    public ResponseEntity<ApiResponse<AutomationTestResponse>> testRule(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
+            @PathVariable UUID ruleId, @Valid @RequestBody AutomationEventRequest request) {
+        homeAuthorizationService.requireSceneManagement(user.getId(), homeId);
+        return ok("Đã chạy thử quy tắc", automationEngine.testRule(homeId, ruleId, request));
     }
 
     private <T> ResponseEntity<ApiResponse<T>> ok(String message, T result) {

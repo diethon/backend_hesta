@@ -36,6 +36,10 @@ public class Scene {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    @Size(max = 50)
+    @Column(name = "icon", length = 50)
+    private String icon;
+
     @Size(max = 2000)
     @Column(name = "description", length = 2000)
     private String description;

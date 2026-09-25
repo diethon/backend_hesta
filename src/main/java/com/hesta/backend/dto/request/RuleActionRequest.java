@@ -12,8 +12,9 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RuleActionRequest {
-    @NotNull(message = "DEVICE_NOT_FOUND")
     UUID deviceId;
+
+    UUID sceneId;
 
     @NotBlank(message = "AUTOMATION_ACTION_INVALID")
     String action;

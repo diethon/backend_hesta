@@ -30,6 +30,7 @@ class AutomationRuleServiceTest {
     @Mock AutomationRuleRepository ruleRepository;
     @Mock AutomationExecutionRepository executionRepository;
     @Mock DeviceRepository deviceRepository;
+    @Mock SceneRepository sceneRepository;
     @Spy ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks AutomationRuleServiceImpl service;
 
@@ -63,6 +64,50 @@ class AutomationRuleServiceTest {
         assertThat(response.getName()).isEqualTo("Hot room");
         assertThat(response.getConditions()).hasSize(1);
         assertThat(response.getActions()).extracting("action").containsExactly("SET_SPEED");
+    }
+
+    @Test
+    void scheduleRuleNeedsActionsButMayOmitSensorConditions() {
+        when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(deviceRepository.findAllById(any())).thenReturn(List.of(device));
+        when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            AutomationRule rule = invocation.getArgument(0);
+            rule.setId(UUID.randomUUID());
+            return rule;
+        });
+        CreateAutomationRuleRequest request = validRequest();
+        request.setTriggerType("SCHEDULE");
+        request.setConditions(List.of());
+
+        var response = service.create(userId, homeId, request);
+
+        assertThat(response.getTriggerType()).isEqualTo("SCHEDULE");
+        assertThat(response.getConditions()).isEmpty();
+        assertThat(response.getActions()).hasSize(1);
+    }
+
+    @Test
+    void createsRuleActionForSceneInSameHome() {
+        UUID sceneId = UUID.randomUUID();
+        Scene scene = Scene.builder().id(sceneId).home(home).name("Evening").enabled(true).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
+        when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            AutomationRule rule = invocation.getArgument(0);
+            rule.setId(UUID.randomUUID());
+            return rule;
+        });
+        CreateAutomationRuleRequest request = validRequest();
+        request.setTriggerType("SCHEDULE");
+        request.setConditions(List.of());
+        request.setActions(List.of(RuleActionRequest.builder().sceneId(sceneId)
+                .action("EXECUTE_SCENE").order(0).build()));
+
+        var response = service.create(userId, homeId, request);
+
+        assertThat(response.getActions().getFirst().getSceneId()).isEqualTo(sceneId);
+        assertThat(response.getActions().getFirst().getDeviceId()).isNull();
     }
 
     @Test

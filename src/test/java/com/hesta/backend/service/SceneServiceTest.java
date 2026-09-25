@@ -14,6 +14,7 @@ import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.SceneActionRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.service.impl.SceneServiceImpl;
@@ -47,6 +48,8 @@ class SceneServiceTest {
     private SceneActionRepository sceneActionRepository;
     @Mock
     private DeviceRepository deviceRepository;
+    @Mock
+    private AutomationRuleRepository automationRuleRepository;
 
     @InjectMocks
     private SceneServiceImpl sceneService;
@@ -251,6 +254,16 @@ class SceneServiceTest {
         assertError(() -> sceneService.deleteScene(userId, homeId, sceneId), ErrorCode.UNAUTHORIZED);
 
         verify(sceneRepository, never()).findByIdAndHomeId(any(), any());
+    }
+
+    @Test
+    void sceneUsedByRuleCannotBeDeleted() {
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(automationRuleRepository.existsActionForScene(sceneId)).thenReturn(true);
+
+        assertError(() -> sceneService.deleteScene(userId, homeId, sceneId), ErrorCode.SCENE_IN_USE);
+        verify(sceneRepository, never()).delete(any());
     }
 
     private SceneActionRequest actionRequest(

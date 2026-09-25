@@ -8,5 +8,6 @@ public enum DeviceAction {
     SET_SPEED,
     SET_STATE,
     SET_MODE,
-    TOGGLE
+    TOGGLE,
+    EXECUTE_SCENE
 }

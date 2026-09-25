@@ -1,10 +1,14 @@
 package com.hesta.backend.controller;
 
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
+import com.hesta.backend.dto.request.ManualDeviceCommandRequest;
 import com.hesta.backend.dto.response.ApiResponse;
 import com.hesta.backend.dto.response.DeviceResponse;
+import com.hesta.backend.dto.response.ManualCommandResponse;
+import com.hesta.backend.dto.response.ManualOverrideResponse;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.service.ManualControlService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.OffsetDateTime;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -20,6 +25,29 @@ import java.util.UUID;
 public class DeviceController {
 
     private final DeviceService deviceService;
+    private final ManualControlService manualControlService;
+
+    @PostMapping("/devices/{deviceId}/commands")
+    public ResponseEntity<ApiResponse<ManualCommandResponse>> command(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId, @Valid @RequestBody ManualDeviceCommandRequest request) {
+        return ResponseEntity.ok(ApiResponse.<ManualCommandResponse>builder().code(1000)
+                .result(manualControlService.command(userDetails.getId(), deviceId, request.getAction())).build());
+    }
+
+    @PostMapping("/devices/{deviceId}/automation/cancel")
+    public ResponseEntity<ApiResponse<OffsetDateTime>> cancelAutomation(
+            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
+                .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId)).build());
+    }
+
+    @GetMapping("/devices/{deviceId}/automation/overrides")
+    public ResponseEntity<ApiResponse<List<ManualOverrideResponse>>> overrideHistory(
+            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        return ResponseEntity.ok(ApiResponse.<List<ManualOverrideResponse>>builder().code(1000)
+                .result(manualControlService.history(userDetails.getId(), deviceId)).build());
+    }
 
     @GetMapping("/homes/{homeId}/devices")
     public ResponseEntity<ApiResponse<List<DeviceResponse>>> getDevicesByHome(

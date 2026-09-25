@@ -38,4 +38,15 @@ public class BehaviorController {
         return ResponseEntity.ok(ApiResponse.<List<BehaviorPatternResponse>>builder().code(1000)
                 .result(behaviorService.detectPatterns(user.getId(), homeId, from, to)).build());
     }
+
+    @GetMapping("/predictions")
+    public ResponseEntity<ApiResponse<List<BehaviorPredictionResponse>>> predictions(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime at) {
+        return ResponseEntity.ok(ApiResponse.<List<BehaviorPredictionResponse>>builder().code(1000)
+                .result(behaviorService.predict(user.getId(), homeId, from, to,
+                        at == null ? OffsetDateTime.now() : at)).build());
+    }
 }

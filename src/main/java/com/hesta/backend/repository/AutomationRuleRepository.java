@@ -22,10 +22,13 @@ public interface AutomationRuleRepository extends JpaRepository<AutomationRule, 
     List<AutomationRule> findAllByHomeIdAndEnabledTrueAndTriggerTypeIn(UUID homeId, List<TriggerType> triggerTypes);
 
     // Call in the same transaction as a rule lookup to initialize actions on those managed rules.
-    @EntityGraph(attributePaths = {"actions", "actions.device"})
+    @EntityGraph(attributePaths = {"actions", "actions.device", "actions.scene"})
     @Query("select distinct rule from AutomationRule rule where rule.id in :ids")
     List<AutomationRule> fetchActionsByIdIn(@Param("ids") List<UUID> ids);
 
     boolean existsByHomeIdAndName(UUID homeId, String name);
     boolean existsByHomeIdAndNameAndIdNot(UUID homeId, String name, UUID id);
+
+    @Query("select count(action) > 0 from RuleAction action where action.scene.id = :sceneId")
+    boolean existsActionForScene(@Param("sceneId") UUID sceneId);
 }

@@ -26,7 +26,7 @@ public class CreateAutomationRuleRequest {
     Boolean enabled;
 
     @Valid
-    @NotEmpty(message = "AUTOMATION_CONDITION_INVALID")
+    @NotNull(message = "AUTOMATION_CONDITION_INVALID")
     @Builder.Default
     List<RuleConditionRequest> conditions = new ArrayList<>();
 

@@ -25,6 +25,9 @@ public class CreateSceneRequest {
     @Size(max = 150, message = "SCENE_NAME_INVALID")
     String name;
 
+    @Size(max = 50, message = "SCENE_ICON_INVALID")
+    String icon;
+
     @Size(max = 2000, message = "SCENE_DESCRIPTION_INVALID")
     String description;
 

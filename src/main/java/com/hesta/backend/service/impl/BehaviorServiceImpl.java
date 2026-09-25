@@ -3,6 +3,7 @@ package com.hesta.backend.service.impl;
 import com.hesta.backend.dto.request.GenerateBehaviorDataRequest;
 import com.hesta.backend.dto.response.BehaviorDatasetResponse;
 import com.hesta.backend.dto.response.BehaviorPatternResponse;
+import com.hesta.backend.dto.response.BehaviorPredictionResponse;
 import com.hesta.backend.entity.*;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
@@ -76,6 +77,33 @@ public class BehaviorServiceImpl implements BehaviorService {
         return groups.entrySet().stream().map(entry -> pattern(entry.getKey(), entry.getValue(), totalDays))
                 .filter(pattern -> pattern.getOccurrences() >= 2 && pattern.getConfidence() >= 0.5)
                 .sorted(Comparator.comparingDouble(BehaviorPatternResponse::getConfidence).reversed()).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<BehaviorPredictionResponse> predict(UUID userId, UUID homeId,
+                                                     OffsetDateTime from, OffsetDateTime to, OffsetDateTime at) {
+        if (at == null) throw new AppException(ErrorCode.BEHAVIOR_DATASET_INVALID);
+        LocalTime now = at.toLocalTime();
+        Map<UUID, Device> devices = deviceRepository.findAllByHomeIdOrderByNameAsc(homeId).stream()
+                .collect(Collectors.toMap(Device::getId, device -> device));
+        return detectPatterns(userId, homeId, from, to).stream()
+                .filter(pattern -> pattern.getConfidence() >= 0.6)
+                .filter(pattern -> "TURN_ON".equals(pattern.getAction()) || "TURN_OFF".equals(pattern.getAction()))
+                .filter(pattern -> devices.containsKey(pattern.getDeviceId()))
+                .filter(pattern -> Math.abs(Duration.between(now, pattern.getAverageTime()).toMinutes()) <= 45)
+                .filter(pattern -> {
+                    Object power = Optional.ofNullable(devices.get(pattern.getDeviceId()).getCurrentState())
+                            .map(state -> state.get("power")).orElse(null);
+                    return power == null || !String.valueOf(power).equalsIgnoreCase(
+                            "TURN_ON".equals(pattern.getAction()) ? "ON" : "OFF");
+                })
+                .map(pattern -> BehaviorPredictionResponse.builder().deviceId(pattern.getDeviceId())
+                        .deviceName(pattern.getDeviceName()).action(pattern.getAction())
+                        .predictedTime(pattern.getAverageTime()).confidence(pattern.getConfidence())
+                        .reason("Hành động lặp lại gần thời điểm hiện tại trong %d ngày."
+                                .formatted(pattern.getOccurrences())).build())
+                .toList();
     }
 
     private BehaviorEvent event(Home home, User user, Device device, String datasetKey, String action,

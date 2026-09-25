@@ -30,21 +30,13 @@ public class EdgeNode {
     @Column(name = "node_code", nullable = false, length = 100)
     private String nodeCode;
 
-    @Column(name = "mac_address", nullable = false, length = 20, unique = true)
-    private String macAddress;
-
-    @Column(name = "ip_address", length = 45)
-    private String ipAddress;
-
-    @Column(name = "firmware_version", length = 30)
-    private String firmwareVersion;
+ 
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private DeviceStatus status;
 
-    @Column(name = "last_ack_at")
-    private OffsetDateTime lastAckAt;
+
 
     @CreationTimestamp
     @Column(name = "paired_at", nullable = false, updatable = false)

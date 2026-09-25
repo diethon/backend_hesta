@@ -28,8 +28,12 @@ public class RuleAction {
     private AutomationRule rule;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "device_id", nullable = false)
+    @JoinColumn(name = "device_id")
     private Device device;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "scene_id")
+    private Scene scene;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "action_command", nullable = false, length = 100)

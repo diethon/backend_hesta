@@ -16,6 +16,7 @@ import com.hesta.backend.enums.SceneActionType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.SceneActionRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
@@ -45,6 +46,7 @@ public class SceneServiceImpl implements SceneService {
     private final SceneRepository sceneRepository;
     private final SceneActionRepository sceneActionRepository;
     private final DeviceRepository deviceRepository;
+    private final AutomationRuleRepository automationRuleRepository;
 
     @Override
     @Transactional
@@ -59,6 +61,7 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = Scene.builder()
                 .home(home)
                 .name(name)
+                .icon(normalizeIcon(request.getIcon()))
                 .description(normalizeDescription(request.getDescription()))
                 .enabled(request.getEnabled())
                 .build();
@@ -104,6 +107,7 @@ public class SceneServiceImpl implements SceneService {
         }
 
         scene.setName(name);
+        scene.setIcon(normalizeIcon(request.getIcon()));
         scene.setDescription(normalizeDescription(request.getDescription()));
         scene.setEnabled(request.getEnabled());
         if (replacementActions != null) {
@@ -119,7 +123,11 @@ public class SceneServiceImpl implements SceneService {
     @Transactional
     public void deleteScene(UUID authenticatedUserId, UUID homeId, UUID sceneId) {
         homeAuthorizationService.requireSceneManagement(authenticatedUserId, homeId);
-        sceneRepository.delete(findSceneInHome(sceneId, homeId));
+        Scene scene = findSceneInHome(sceneId, homeId);
+        if (automationRuleRepository.existsActionForScene(sceneId)) {
+            throw new AppException(ErrorCode.SCENE_IN_USE);
+        }
+        sceneRepository.delete(scene);
     }
 
     @Override
@@ -336,6 +344,11 @@ public class SceneServiceImpl implements SceneService {
         return description == null || description.isBlank() ? null : description.trim();
     }
 
+    private String normalizeIcon(String icon) {
+        if (icon != null && icon.length() > 50) throw new AppException(ErrorCode.SCENE_ICON_INVALID);
+        return icon == null || icon.isBlank() ? null : icon.trim();
+    }
+
     private SceneResponse toResponse(Scene scene) {
         List<SceneActionResponse> actions = scene.getActions().stream()
                 .sorted(Comparator.comparingInt(SceneAction::getOrder))
@@ -345,6 +358,7 @@ public class SceneServiceImpl implements SceneService {
                 .id(scene.getId())
                 .homeId(scene.getHome().getId())
                 .name(scene.getName())
+                .icon(scene.getIcon())
                 .description(scene.getDescription())
                 .enabled(scene.isEnabled())
                 .actions(actions)

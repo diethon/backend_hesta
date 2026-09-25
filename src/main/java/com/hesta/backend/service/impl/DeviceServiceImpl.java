@@ -3,15 +3,11 @@ package com.hesta.backend.service.impl;
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
 import com.hesta.backend.dto.response.DeviceResponse;
 import com.hesta.backend.entity.Device;
-import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Room;
-import com.hesta.backend.enums.HomeRole;
-import com.hesta.backend.exception.AppException;
-import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
-import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.repository.RoomRepository;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.service.HomeAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,21 +21,16 @@ import java.util.stream.Collectors;
 public class DeviceServiceImpl implements DeviceService {
 
     private final DeviceRepository deviceRepository;
-    private final HomeMemberRepository homeMemberRepository;
+    private final HomeAuthorizationService homeAuthorizationService;
     private final RoomRepository roomRepository;
     private final com.hesta.backend.repository.DeviceStateHistoryRepository deviceStateHistoryRepository;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
-        homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
-                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+        homeAuthorizationService.requireAccess(userId, homeId);
     }
 
     private void checkHomeOwner(UUID userId, UUID homeId) {
-        HomeMember member = homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
-                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
-        if (member.getRole() != HomeRole.OWNER) {
-            throw new AppException(ErrorCode.UNAUTHORIZED);
-        }
+        homeAuthorizationService.requireSceneManagement(userId, homeId);
     }
 
     @Override

@@ -23,6 +23,11 @@ public enum ErrorCode {
     SCENE_ACTIONS_INVALID(1114, "Scene actions must use unique contiguous order values starting at zero", HttpStatus.BAD_REQUEST),
     SCENE_REORDER_INVALID(1115, "Reorder payload must contain every scene action exactly once", HttpStatus.BAD_REQUEST),
     INVALID_REQUEST(1116, "Request body is invalid", HttpStatus.BAD_REQUEST),
+    SCENE_ICON_INVALID(1117, "Scene icon must not exceed 50 characters", HttpStatus.BAD_REQUEST),
+    SCENE_DISABLED(1118, "Scene is disabled", HttpStatus.BAD_REQUEST),
+    SCENE_SCHEDULE_INVALID(1119, "Scene schedule is invalid", HttpStatus.BAD_REQUEST),
+    SCENE_SCHEDULE_NOT_FOUND(1120, "Scene schedule not found", HttpStatus.NOT_FOUND),
+    SCENE_IN_USE(1121, "Scene is used by an automation rule", HttpStatus.CONFLICT),
 
     // Automation and behavior prototypes
     AUTOMATION_RULE_NOT_FOUND(1200, "Automation rule not found", HttpStatus.NOT_FOUND),
@@ -36,6 +41,8 @@ public enum ErrorCode {
     AUTOMATION_EVENT_INVALID(1208, "Automation event is invalid", HttpStatus.BAD_REQUEST),
     BEHAVIOR_DATASET_INVALID(1300, "Behavior dataset request is invalid", HttpStatus.BAD_REQUEST),
     BEHAVIOR_DEVICE_REQUIRED(1301, "At least one device is required to generate behavior data", HttpStatus.BAD_REQUEST),
+    RECOMMENDATION_NOT_FOUND(1302, "Recommendation not found", HttpStatus.NOT_FOUND),
+    RECOMMENDATION_ALREADY_RESOLVED(1303, "Recommendation is already resolved", HttpStatus.CONFLICT),
 
     // Các mã lỗi chung
     UNCATEGORIZED_EXCEPTION(9999, "Lỗi không xác định", HttpStatus.INTERNAL_SERVER_ERROR),
