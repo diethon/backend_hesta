@@ -28,6 +28,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+            
+        // BEST PRACTICE: Restore SecurityContext for Async Dispatch
+        if (jakarta.servlet.DispatcherType.ASYNC.equals(request.getDispatcherType())) {
+            org.springframework.security.core.context.SecurityContext context = 
+                (org.springframework.security.core.context.SecurityContext) request.getAttribute("CACHED_SECURITY_CONTEXT");
+            if (context != null) {
+                SecurityContextHolder.setContext(context);
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         try {
             String jwt = getJwtFromRequest(request);
 
@@ -41,12 +53,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+                
+                // Save context for Async Dispatch
+                request.setAttribute("CACHED_SECURITY_CONTEXT", SecurityContextHolder.getContext());
             }
         } catch (Exception ex) {
-            log.error("Không thể thiết lập xác thực người dùng trong Security Context", ex);
+            log.error("Error setting authentication in Security Context", ex);
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
     }
 
     private String getJwtFromRequest(HttpServletRequest request) {

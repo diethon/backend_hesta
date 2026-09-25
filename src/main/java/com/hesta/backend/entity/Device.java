@@ -1,6 +1,7 @@
 package com.hesta.backend.entity;
 
 import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.DeviceType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -8,11 +9,14 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = { "node_id", "gpio_pin" })
+        @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
@@ -27,7 +31,7 @@ public class Device {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "room_id")
+    @JoinColumn(name = "room_id", nullable = false)
     private Room room;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -39,7 +43,7 @@ public class Device {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "device_type", nullable = false, length = 50)
-    private com.hesta.backend.enums.DeviceType deviceType;
+    private DeviceType deviceType;
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
@@ -50,12 +54,12 @@ public class Device {
 
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "current_state", nullable = false, columnDefinition = "jsonb")
-    private java.util.Map<String, Object> currentState;
+    private Map<String, Object> currentState;
 
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "capabilities", columnDefinition = "jsonb")
     @Builder.Default
-    private java.util.List<String> capabilities = new java.util.ArrayList<>();
+    private List<String> capabilities = new ArrayList<>();
 
     @Column(name = "icon", length = 50)
     private String icon;

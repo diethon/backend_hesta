@@ -37,8 +37,8 @@ public class MqttConfig {
     @Value("${mqtt.topic.default:hesta/outbound}")
     private String defaultTopic;
 
-    @Value("${mqtt.inbound.auto-startup:true}")
-    private boolean inboundAutoStartup;
+    @Value("${mqtt.topic.prefix:hesta/nodes}")
+    private String topicPrefix;
 
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
@@ -88,10 +88,11 @@ public class MqttConfig {
     public MessageProducer inbound() {
         // Subscribe wildcard phù hợp contract HES-42
         String[] topics = {
-                "hesta/nodes/+/devices/+/state",
-                "hesta/nodes/+/devices/+/ack",
-                "hesta/nodes/+/devices/+/sensor",
-                "hesta/nodes/+/devices/+/status"
+                topicPrefix + "/+/devices/+/state",
+                topicPrefix + "/+/devices/+/ack",
+                topicPrefix + "/+/devices/+/sensor",
+                topicPrefix + "/+/devices/+/status",
+                topicPrefix + "/+/devices/+/telemetry"
         };
         MqttPahoMessageDrivenChannelAdapter adapter =
                 new MqttPahoMessageDrivenChannelAdapter(clientId + "_in", mqttClientFactory(), topics);
@@ -99,7 +100,6 @@ public class MqttConfig {
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(mqttInputChannel());
-        adapter.setAutoStartup(inboundAutoStartup);
         return adapter;
     }
 }

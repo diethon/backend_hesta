@@ -1,6 +1,7 @@
 package com.hesta.backend.entity;
 
-import com.hesta.backend.enums.DeviceStatus;
+
+import com.hesta.backend.enums.EdgeNodeStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -27,15 +28,17 @@ public class EdgeNode {
     @JoinColumn(name = "home_id", nullable = false)
     private Home home;
 
+
     @Column(name = "node_code", nullable = false, length = 100)
     private String nodeCode;
 
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    private DeviceStatus status;
-
+    private EdgeNodeStatus status;
 
     @CreationTimestamp
     @Column(name = "paired_at", nullable = false, updatable = false)
     private OffsetDateTime pairedAt;
+
 }

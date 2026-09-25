@@ -104,5 +104,6 @@ horizontal deployment will need a shared broker or pub/sub layer (for example Re
 RabbitMQ, or Kafka) between backend instances. No broker is introduced by this refactor.
 
 The current infrastructure intentionally provides transport, authentication, home-scoped
-authorization, routing, lifecycle cleanup, heartbeat, and future bidirectional capability only. It
-does not implement Sensor, Device, Notification, Digital Twin, automation, or MQTT business logic.
+authorization, routing, lifecycle cleanup, heartbeat, and future bidirectional capability only.
+Feature business logic remains outside this layer. Notification Core now integrates through
+`RealtimeEventPublisher`; see [NOTIFICATION_CORE.md](NOTIFICATION_CORE.md).
