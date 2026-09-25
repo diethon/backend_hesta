@@ -49,6 +49,13 @@ public class SceneServiceImpl implements SceneService {
     private final AutomationRuleRepository automationRuleRepository;
 
     @Override
+    @Transactional(readOnly = true)
+    public List<SceneActionType> getActionTypes(UUID authenticatedUserId, UUID homeId) {
+        homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
+        return List.of(SceneActionType.values());
+    }
+
+    @Override
     @Transactional
     public SceneResponse createScene(UUID authenticatedUserId, UUID homeId, CreateSceneRequest request) {
         Home home = homeAuthorizationService.requireSceneManagement(authenticatedUserId, homeId);
@@ -230,7 +237,8 @@ public class SceneServiceImpl implements SceneService {
         if (device == null) {
             throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
         }
-        if (!home.getId().equals(device.getNode().getHome().getId())) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null
+                || !home.getId().equals(device.getRoom().getHome().getId())) {
             throw new AppException(ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
         }
         SceneActionType actionType = validateActionValue(request.getAction(), request.getValue());

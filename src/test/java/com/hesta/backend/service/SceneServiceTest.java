@@ -13,6 +13,7 @@ import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.enums.DeviceType;
+import com.hesta.backend.enums.SceneActionType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -84,6 +85,14 @@ class SceneServiceTest {
     }
 
     @Test
+    void actionTypesComeFromBackendEnumForAnAuthorizedHome() {
+        List<SceneActionType> types = sceneService.getActionTypes(userId, homeId);
+
+        assertThat(types).containsExactly(SceneActionType.values());
+        verify(homeAuthorizationService).requireAccess(userId, homeId);
+    }
+
+    @Test
     void ownerCreatesSceneWithSameHomeActionAtomically() {
         CreateSceneRequest request = CreateSceneRequest.builder()
                 .name(" Sleep mode ")
@@ -136,6 +145,34 @@ class SceneServiceTest {
         when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(foreignDevice));
+
+        assertError(() -> sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0)),
+                ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
+        verify(sceneRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void acceptsDeviceWithoutNodeWhenItsRoomBelongsToSceneHome() {
+        device.setNode(null);
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+        when(sceneRepository.saveAndFlush(scene)).thenReturn(scene);
+
+        SceneActionResponse response = sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
+
+        assertThat(response.getAction()).isEqualTo("TURN_ON");
+    }
+
+    @Test
+    void rejectsDeviceWhoseRoomIsInAnotherHomeEvenWithSceneHomeNode() {
+        Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
+        device.setRoom(Room.builder().home(anotherHome).build());
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
 
         assertError(() -> sceneService.addAction(
                 userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0)),

@@ -13,11 +13,14 @@ import java.util.UUID;
 @Repository
 public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
-    @Query("SELECT d FROM Device d WHERE d.node.home.id = :homeId")
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId")
     List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
-    @Query("SELECT d FROM Device d WHERE d.node.id = :roomId")
+    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId")
     List<Device> findByRoomId(@Param("roomId") UUID roomId);
+
+    @Query("SELECT d FROM Device d JOIN FETCH d.room r JOIN FETCH r.home WHERE d.id = :deviceId")
+    Optional<Device> findByIdWithRoomHome(@Param("deviceId") UUID deviceId);
 
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.name = :name")
     Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);

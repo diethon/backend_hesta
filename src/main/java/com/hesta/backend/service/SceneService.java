@@ -6,11 +6,13 @@ import com.hesta.backend.dto.request.SceneActionRequest;
 import com.hesta.backend.dto.request.UpdateSceneRequest;
 import com.hesta.backend.dto.response.SceneActionResponse;
 import com.hesta.backend.dto.response.SceneResponse;
+import com.hesta.backend.enums.SceneActionType;
 
 import java.util.List;
 import java.util.UUID;
 
 public interface SceneService {
+    List<SceneActionType> getActionTypes(UUID authenticatedUserId, UUID homeId);
     SceneResponse createScene(UUID authenticatedUserId, UUID homeId, CreateSceneRequest request);
     List<SceneResponse> getScenesForHome(UUID authenticatedUserId, UUID homeId);
     SceneResponse getScene(UUID authenticatedUserId, UUID homeId, UUID sceneId);

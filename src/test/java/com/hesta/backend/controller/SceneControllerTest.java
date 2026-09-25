@@ -8,6 +8,7 @@ import com.hesta.backend.dto.request.UpdateSceneRequest;
 import com.hesta.backend.dto.response.SceneActionResponse;
 import com.hesta.backend.dto.response.SceneResponse;
 import com.hesta.backend.enums.AccountStatus;
+import com.hesta.backend.enums.SceneActionType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.security.CustomUserDetails;
@@ -88,6 +89,16 @@ class SceneControllerTest {
                         .order(0)
                         .build()))
                 .build();
+    }
+
+    @Test
+    void authenticatedUserCanListSceneActionTypes() throws Exception {
+        when(sceneService.getActionTypes(userId, homeId)).thenReturn(List.of(SceneActionType.values()));
+
+        mockMvc.perform(get(sceneCollectionUrl() + "/action-types").with(authentication(authentication)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result[0]").value("TURN_ON"))
+                .andExpect(jsonPath("$.result[5]").value("SET_STATE"));
     }
 
     @Test

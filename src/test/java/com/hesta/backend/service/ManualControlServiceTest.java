@@ -48,7 +48,7 @@ class ManualControlServiceTest {
         Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
                 .room(Room.builder().home(home).build())
                 .capabilities(List.of("TURN_ON", "TURN_OFF")).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        when(devices.findByIdWithRoomHome(deviceId)).thenReturn(Optional.of(device));
         OffsetDateTime until = OffsetDateTime.now().plusMinutes(30);
         when(overrides.activate(device, userId, "OVERRIDE")).thenReturn(until);
         CommandResult command = CommandResult.builder().success(true).status("ACKNOWLEDGED").build();
@@ -71,7 +71,7 @@ class ManualControlServiceTest {
         Home home = Home.builder().id(homeId).build();
         Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
                 .room(Room.builder().home(home).build()).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        when(devices.findByIdWithRoomHome(deviceId)).thenReturn(Optional.of(device));
         assertThatThrownBy(() -> service.command(userId, deviceId, "SET_SPEED"))
                 .isInstanceOf(AppException.class);
         verifyNoInteractions(commands, overrides, recorder);

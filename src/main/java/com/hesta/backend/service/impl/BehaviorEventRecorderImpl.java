@@ -43,7 +43,7 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
         if (result.getAcknowledgedState() != null) current.putAll(result.getAcknowledgedState());
         deviceHistory.save(DeviceStateHistory.builder().device(recordedDevice).previousState(previous)
                 .newState(current).source(source).isTest(false).build());
-        behaviorEvents.save(BehaviorEvent.builder().home(recordedDevice.getNode().getHome()).device(recordedDevice).room(recordedDevice.getRoom())
+        behaviorEvents.save(BehaviorEvent.builder().home(recordedDevice.getRoom().getHome()).device(recordedDevice).room(recordedDevice.getRoom())
                 .eventType("DEVICE_ACTION").action(action.name()).eventSource(source.name())
                 .previousState(previous).currentState(current).occurredAt(OffsetDateTime.now()).build());
         recordedDevice.setCurrentState(current);
@@ -54,7 +54,7 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordSensor(Device device, AutomationEventRequest event) {
         if (event.isTest()) return;
-        behaviorEvents.save(BehaviorEvent.builder().home(device.getNode().getHome()).device(device).room(device.getRoom())
+        behaviorEvents.save(BehaviorEvent.builder().home(device.getRoom().getHome()).device(device).room(device.getRoom())
                 .eventType(event.getEventType()).eventSource("SENSOR")
                 .currentState(new HashMap<>(event.getData()))
                 .occurredAt(event.getOccurredAt() == null ? OffsetDateTime.now() : event.getOccurredAt()).build());

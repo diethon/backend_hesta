@@ -50,6 +50,7 @@ class AutomationRuleServiceTest {
 
     @Test
     void createsAndReadsValidRule() {
+        device.setNode(null);
         when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(deviceRepository.findAllById(any())).thenReturn(List.of(device));
         when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
