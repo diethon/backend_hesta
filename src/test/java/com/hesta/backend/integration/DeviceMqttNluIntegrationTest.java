@@ -5,6 +5,8 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.enums.DeviceStatus;
 import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.service.DeviceCommandService;
+import com.hesta.backend.service.MqttService;
 import com.hesta.backend.service.NluService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.hesta.backend.config.mqtt.MqttGateway;
@@ -35,8 +39,14 @@ public class DeviceMqttNluIntegrationTest {
     @MockitoBean
     private MqttGateway mqttGateway;
 
+    @MockitoBean
+    private MqttService mqttService;
+
     @Autowired
     private NluService nluService;
+
+    @Autowired
+    private DeviceCommandService defaultDeviceCommandService;
 
     @Autowired
     private DeviceRepository deviceRepository;
@@ -45,6 +55,9 @@ public class DeviceMqttNluIntegrationTest {
 
     @Autowired
     private com.hesta.backend.repository.HomeRepository homeRepository;
+
+    @Autowired
+    private com.hesta.backend.repository.RoomRepository roomRepository;
 
     @Autowired
     private com.hesta.backend.repository.UserRepository userRepository;
@@ -62,12 +75,17 @@ public class DeviceMqttNluIntegrationTest {
         home.setCreatedBy(user);
         home = homeRepository.save(home);
 
+        com.hesta.backend.entity.Room room = new com.hesta.backend.entity.Room();
+        room.setName("Living room");
+        room.setHome(home);
+        room = roomRepository.save(room);
+
         // Setup mock device for test
         testLight = new Device();
         testLight.setName("Đèn phòng khách");
         testLight.setDeviceType(DeviceType.LIGHT);
         testLight.setStatus(DeviceStatus.ONLINE);
-        testLight.setHome(home);
+        testLight.setRoom(room);
         Map<String, Object> state = new HashMap<>();
         state.put("status", "OFF");
         testLight.setCurrentState(state);
@@ -76,6 +94,7 @@ public class DeviceMqttNluIntegrationTest {
 
     @Test
     void testEndToEndNluToMqttCommand() {
+        assertThat(defaultDeviceCommandService).isInstanceOf(MqttDeviceCommandServiceImpl.class);
         // 1. Gửi câu lệnh bằng Tiếng Việt (có sai chính tả)
         String userCommand = "btậ đnè phòng khách";
         UUID userId = UUID.randomUUID();
@@ -94,6 +113,7 @@ public class DeviceMqttNluIntegrationTest {
         
         // Cleanup
         deviceRepository.delete(testLight);
-        homeRepository.delete(testLight.getHome());
+        roomRepository.delete(testLight.getRoom());
+        homeRepository.delete(testLight.getRoom().getHome());
     }
 }

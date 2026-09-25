@@ -44,6 +44,8 @@ public class DeviceResponse {
 
         return DeviceResponse.builder()
                 .id(device.getId())
+                .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
+                .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
                 .homeId(home != null ? home.getId() : null)
                 .roomId(room != null ? room.getId() : null)
                 .roomName(room != null ? room.getName() : null)
@@ -53,6 +55,8 @@ public class DeviceResponse {
                 .deviceType(device.getDeviceType() != null ? device.getDeviceType().name() : null)
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
+
+                .status(device.getStatus().name())
                 .currentState(device.getCurrentState())
                 .capabilities(device.getCapabilities())
                 .icon(device.getIcon())

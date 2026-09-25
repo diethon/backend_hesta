@@ -14,7 +14,6 @@ import com.hesta.backend.service.DeviceCommandService;
 import com.hesta.backend.service.MqttService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -25,7 +24,6 @@ import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
-@Primary
 @RequiredArgsConstructor
 public class DeviceCommandServiceImpl implements DeviceCommandService {
 

@@ -19,6 +19,7 @@ import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.entity.DeviceStateHistory;
+import com.hesta.backend.service.HomeAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +38,7 @@ import java.util.stream.Collectors;
 public class DeviceServiceImpl implements DeviceService {
 
     private final DeviceRepository deviceRepository;
-    private final HomeMemberRepository homeMemberRepository;
+    private final HomeAuthorizationService homeAuthorizationService;
     private final RoomRepository roomRepository;
     private final DeviceStateHistoryRepository deviceStateHistoryRepository;
     private final RealtimeEventPublisher realtimeEventPublisher;
@@ -45,15 +46,11 @@ public class DeviceServiceImpl implements DeviceService {
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
-        if (!homeMemberRepository.existsByHomeIdAndUserId(homeId, userId)) {
-            throw new AppException(ErrorCode.UNAUTHORIZED);
-        }
+        homeAuthorizationService.requireAccess(userId, homeId);
     }
 
     private void checkHomeOwner(UUID userId, UUID homeId) {
-        if (!homeMemberRepository.existsByHomeIdAndUserIdAndRole(homeId, userId, HomeRole.OWNER)) {
-            throw new AppException(ErrorCode.UNAUTHORIZED);
-        }
+        homeAuthorizationService.requireSceneManagement(userId, homeId);
     }
 
     @Override
@@ -71,7 +68,7 @@ public class DeviceServiceImpl implements DeviceService {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new RuntimeException("Room not found"));
         checkHomeAccess(userId, room.getHome().getId());
-        
+
         return deviceRepository.findByRoomId(roomId).stream()
                 .map(DeviceResponse::fromEntity)
                 .collect(Collectors.toList());
@@ -89,7 +86,7 @@ public class DeviceServiceImpl implements DeviceService {
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, getHomeId(device));
+        checkHomeAccess(userId, device.getNode().getHome().getId());
         return DeviceResponse.fromEntity(device);
     }
 
@@ -169,24 +166,22 @@ public class DeviceServiceImpl implements DeviceService {
     public DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        
-        checkHomeOwner(userId, getHomeId(device));
+
+        checkHomeOwner(userId, device.getNode().getHome().getId());
 
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             device.setName(request.getName().trim());
         }
-        
+
         if (request.getRoomId() != null) {
             Room room = roomRepository.findById(request.getRoomId())
                     .orElseThrow(() -> new RuntimeException("Room not found"));
-            if (!room.getHome().getId().equals(getHomeId(device))) {
+            if (!room.getHome().getId().equals(device.getNode().getHome().getId())) {
                 throw new RuntimeException("Room does not belong to this home");
             }
-            if (device.getNode() != null) {
-                device.setRoom(room);
-            }
+            device.setRoom(room);
         }
-        
+
         if (request.getIcon() != null) {
             device.setIcon(request.getIcon());
         }
@@ -209,9 +204,9 @@ public class DeviceServiceImpl implements DeviceService {
     public void removeDevice(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-                
-        checkHomeOwner(userId, getHomeId(device));
-        
+
+        checkHomeOwner(userId, device.getNode().getHome().getId());
+
         device.setDeleted(true);
         deviceRepository.save(device);
     }
@@ -221,8 +216,8 @@ public class DeviceServiceImpl implements DeviceService {
     public List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
-        checkHomeAccess(userId, getHomeId(device));
-        
+        checkHomeAccess(userId, device.getNode().getHome().getId());
+
         return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()
                 .map(com.hesta.backend.dto.response.DeviceStateHistoryResponse::fromEntity)

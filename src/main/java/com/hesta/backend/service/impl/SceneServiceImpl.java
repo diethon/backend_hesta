@@ -1,6 +1,7 @@
 package com.hesta.backend.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.hesta.backend.dto.request.CreateSceneRequest;
 import com.hesta.backend.dto.request.ReorderSceneActionsRequest;
 import com.hesta.backend.dto.request.SceneActionRequest;
@@ -15,6 +16,7 @@ import com.hesta.backend.enums.SceneActionType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.SceneActionRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
@@ -44,6 +46,7 @@ public class SceneServiceImpl implements SceneService {
     private final SceneRepository sceneRepository;
     private final SceneActionRepository sceneActionRepository;
     private final DeviceRepository deviceRepository;
+    private final AutomationRuleRepository automationRuleRepository;
 
     @Override
     @Transactional
@@ -58,6 +61,7 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = Scene.builder()
                 .home(home)
                 .name(name)
+                .icon(normalizeIcon(request.getIcon()))
                 .description(normalizeDescription(request.getDescription()))
                 .enabled(request.getEnabled())
                 .build();
@@ -103,6 +107,7 @@ public class SceneServiceImpl implements SceneService {
         }
 
         scene.setName(name);
+        scene.setIcon(normalizeIcon(request.getIcon()));
         scene.setDescription(normalizeDescription(request.getDescription()));
         scene.setEnabled(request.getEnabled());
         if (replacementActions != null) {
@@ -118,7 +123,11 @@ public class SceneServiceImpl implements SceneService {
     @Transactional
     public void deleteScene(UUID authenticatedUserId, UUID homeId, UUID sceneId) {
         homeAuthorizationService.requireSceneManagement(authenticatedUserId, homeId);
-        sceneRepository.delete(findSceneInHome(sceneId, homeId));
+        Scene scene = findSceneInHome(sceneId, homeId);
+        if (automationRuleRepository.existsActionForScene(sceneId)) {
+            throw new AppException(ErrorCode.SCENE_IN_USE);
+        }
+        sceneRepository.delete(scene);
     }
 
     @Override
@@ -221,7 +230,7 @@ public class SceneServiceImpl implements SceneService {
         if (device == null) {
             throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
         }
-        if (!home.getId().equals(device.getRoom().getHome().getId())) {
+        if (!home.getId().equals(device.getNode().getHome().getId())) {
             throw new AppException(ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
         }
         SceneActionType actionType = validateActionValue(request.getAction(), request.getValue());
@@ -283,7 +292,9 @@ public class SceneServiceImpl implements SceneService {
     }
 
     private JsonNode normalizeValue(JsonNode value) {
-        return value == null || value.isNull() ? null : value;
+        // Avoid relying on how JSON null is bound to PostgreSQL JSONB.
+        // An empty object is non-null even on databases missing the nullability migration.
+        return value == null || value.isNull() ? JsonNodeFactory.instance.objectNode() : value;
     }
 
     private void validateReorderPayload(List<SceneAction> actions, List<UUID> requestedIds) {
@@ -333,6 +344,11 @@ public class SceneServiceImpl implements SceneService {
         return description == null || description.isBlank() ? null : description.trim();
     }
 
+    private String normalizeIcon(String icon) {
+        if (icon != null && icon.length() > 50) throw new AppException(ErrorCode.SCENE_ICON_INVALID);
+        return icon == null || icon.isBlank() ? null : icon.trim();
+    }
+
     private SceneResponse toResponse(Scene scene) {
         List<SceneActionResponse> actions = scene.getActions().stream()
                 .sorted(Comparator.comparingInt(SceneAction::getOrder))
@@ -342,6 +358,7 @@ public class SceneServiceImpl implements SceneService {
                 .id(scene.getId())
                 .homeId(scene.getHome().getId())
                 .name(scene.getName())
+                .icon(scene.getIcon())
                 .description(scene.getDescription())
                 .enabled(scene.isEnabled())
                 .actions(actions)
@@ -351,12 +368,17 @@ public class SceneServiceImpl implements SceneService {
     }
 
     private SceneActionResponse toActionResponse(SceneAction action) {
+        JsonNode value = action.getValue();
+        if ("TURN_ON".equals(action.getAction()) || "TURN_OFF".equals(action.getAction())
+                || value == null || value.isNull()) {
+            value = null;
+        }
         return SceneActionResponse.builder()
                 .id(action.getId())
                 .targetDeviceId(action.getTargetDevice().getId())
                 .targetDeviceName(action.getTargetDevice().getName())
                 .action(action.getAction())
-                .value(action.getValue())
+                .value(value)
                 .order(action.getOrder())
                 .createdAt(action.getCreatedAt())
                 .updatedAt(action.getUpdatedAt())
