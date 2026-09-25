@@ -7,7 +7,9 @@ import com.hesta.backend.dto.response.BehaviorPatternResponse;
 import com.hesta.backend.dto.response.BehaviorPredictionResponse;
 import com.hesta.backend.entity.AutomationRecommendation;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.repository.AutomationRecommendationRepository;
 import com.hesta.backend.repository.DeviceRepository;
@@ -48,7 +50,8 @@ class RecommendationServiceTest {
     private final UUID deviceId = UUID.randomUUID();
     private final UUID recommendationId = UUID.randomUUID();
     private final Home home = Home.builder().id(homeId).build();
-    private final Device device = Device.builder().id(deviceId).home(home).name("Living room light").build();
+    private final Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+            .room(Room.builder().home(home).build()).name("Living room light").build();
 
     @Test
     void generatesOnlyReliableSupportedPatterns() {

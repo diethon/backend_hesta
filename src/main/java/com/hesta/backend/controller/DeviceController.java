@@ -12,6 +12,7 @@ import com.hesta.backend.service.DeviceService;
 import com.hesta.backend.service.ManualControlService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,7 +36,9 @@ import java.time.OffsetDateTime;
 public class DeviceController {
 
     private final DeviceService deviceService;
-    private final ManualControlService manualControlService;
+    @Autowired
+    private  ManualControlService manualControlService;
+
 
     @PostMapping("/devices/{deviceId}/commands")
     public ResponseEntity<ApiResponse<ManualCommandResponse>> command(

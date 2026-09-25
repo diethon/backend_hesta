@@ -43,7 +43,8 @@ class AutomationRuleServiceTest {
     @BeforeEach
     void setUp() {
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).home(home).name("Fan").deviceType(DeviceType.FAN)
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Fan").deviceType(DeviceType.FAN)
                 .capabilities(List.of("TURN_ON", "SET_SPEED")).build();
     }
 

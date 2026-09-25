@@ -2,15 +2,12 @@ package com.hesta.backend.config.mqtt;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.request.AutomationEventRequest;
+import com.hesta.backend.dto.request.TelemetryPayload;
 import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
-import lombok.RequiredArgsConstructor;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hesta.backend.dto.command.CommandResult;
-import com.hesta.backend.dto.request.TelemetryPayload;
 import com.hesta.backend.service.DeviceService;
 import com.hesta.backend.service.TelemetryService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
@@ -18,13 +15,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.mqtt.support.MqttHeaders;
-import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-
 import java.util.Map;
 import java.util.UUID;
 
@@ -168,10 +162,40 @@ public class MqttMessageReceiver {
                 telemetryPayload
         );
 
+        if (topic.endsWith("/sensor")) {
+            processSensorAutomation(topic, payload);
+        }
+
         log.debug(
                 "Telemetry processed successfully. Topic: [{}]",
                 topic
         );
+    }
+
+    private void processSensorAutomation(String topic, String payload) throws Exception {
+        String[] parts = topic.split("/");
+        if (parts.length != 6 || !"hesta".equals(parts[0]) || !"nodes".equals(parts[1])
+                || !"devices".equals(parts[3]) || !"sensor".equals(parts[5])) {
+            return;
+        }
+
+        UUID nodeId;
+        UUID deviceId;
+        try {
+            nodeId = UUID.fromString(parts[2]);
+            deviceId = UUID.fromString(parts[4]);
+        } catch (IllegalArgumentException exception) {
+            return;
+        }
+
+        Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+        devices.findById(deviceId)
+                .filter(device -> device.getDeviceType() == DeviceType.SENSOR)
+                .filter(device -> device.getNode() != null && nodeId.equals(device.getNode().getId()))
+                .filter(device -> device.getRoom() != null && device.getRoom().getHome() != null)
+                .ifPresent(device -> automationEngine.process(device.getRoom().getHome().getId(),
+                        AutomationEventRequest.builder().sourceDeviceId(deviceId)
+                                .eventType("SENSOR").data(data).build()));
     }
 
 

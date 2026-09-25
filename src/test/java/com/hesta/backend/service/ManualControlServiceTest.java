@@ -2,7 +2,9 @@ package com.hesta.backend.service;
 
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
@@ -42,7 +44,9 @@ class ManualControlServiceTest {
 
     @Test
     void manualPowerCommandActivatesOverrideBeforeSending() {
-        Device device = Device.builder().id(deviceId).home(Home.builder().id(homeId).build())
+        Home home = Home.builder().id(homeId).build();
+        Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build())
                 .capabilities(List.of("TURN_ON", "TURN_OFF")).build();
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
         OffsetDateTime until = OffsetDateTime.now().plusMinutes(30);
@@ -64,7 +68,9 @@ class ManualControlServiceTest {
 
     @Test
     void rejectsUnsupportedManualActionWithoutOverride() {
-        Device device = Device.builder().id(deviceId).home(Home.builder().id(homeId).build()).build();
+        Home home = Home.builder().id(homeId).build();
+        Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).build();
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
         assertThatThrownBy(() -> service.command(userId, deviceId, "SET_SPEED"))
                 .isInstanceOf(AppException.class);

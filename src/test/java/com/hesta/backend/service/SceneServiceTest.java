@@ -7,7 +7,9 @@ import com.hesta.backend.dto.request.SceneActionRequest;
 import com.hesta.backend.dto.response.SceneActionResponse;
 import com.hesta.backend.dto.response.SceneResponse;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.enums.DeviceType;
@@ -70,7 +72,8 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).home(home).name("Lamp").deviceType(DeviceType.LIGHT).build();
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Lamp").deviceType(DeviceType.LIGHT).build();
         scene = Scene.builder()
                 .id(sceneId)
                 .home(home)
@@ -125,7 +128,8 @@ class SceneServiceTest {
         Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
         Device foreignDevice = Device.builder()
                 .id(deviceId)
-                .home(anotherHome)
+                .node(EdgeNode.builder().home(anotherHome).build())
+                .room(Room.builder().home(anotherHome).build())
                 .name("Foreign lamp")
                 .deviceType(DeviceType.LIGHT)
                 .build();

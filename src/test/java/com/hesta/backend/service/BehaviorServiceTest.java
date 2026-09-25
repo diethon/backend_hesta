@@ -29,7 +29,7 @@ class BehaviorServiceTest {
         UUID homeId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).name("Home").build();
         Room room = Room.builder().id(UUID.randomUUID()).home(home).name("Bedroom").build();
-        Device lamp = Device.builder().id(UUID.randomUUID()).home(home).room(room).name("Lamp")
+        Device lamp = Device.builder().id(UUID.randomUUID()).room(room).name("Lamp")
                 .deviceType(DeviceType.LIGHT).build();
         OffsetDateTime from = OffsetDateTime.parse("2026-09-01T00:00:00+07:00");
         OffsetDateTime to = OffsetDateTime.parse("2026-09-03T23:59:00+07:00");
@@ -54,12 +54,13 @@ class BehaviorServiceTest {
         UUID userId = UUID.randomUUID();
         UUID homeId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        Device lamp = Device.builder().id(UUID.randomUUID()).home(home).name("Lamp")
+        Room room = Room.builder().id(UUID.randomUUID()).home(home).name("Bedroom").build();
+        Device lamp = Device.builder().id(UUID.randomUUID()).room(room).name("Lamp")
                 .currentState(Map.of("power", "OFF")).build();
         OffsetDateTime from = OffsetDateTime.parse("2026-09-01T00:00:00+07:00");
         OffsetDateTime to = OffsetDateTime.parse("2026-09-03T23:59:00+07:00");
         when(authorizationService.requireAccess(userId, homeId)).thenReturn(home);
-        when(deviceRepository.findAllByHomeIdOrderByNameAsc(homeId)).thenReturn(List.of(lamp));
+        when(deviceRepository.findAllByRoom_Home_IdOrderByNameAsc(homeId)).thenReturn(List.of(lamp));
         when(eventRepository.findAllByHomeIdAndOccurredAtBetweenOrderByOccurredAtAsc(homeId, from, to))
                 .thenReturn(List.of(behavior(home, lamp, "2026-09-01T07:00:00+07:00"),
                         behavior(home, lamp, "2026-09-02T07:00:00+07:00"),

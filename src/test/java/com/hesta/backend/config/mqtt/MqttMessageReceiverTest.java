@@ -5,9 +5,12 @@ import com.hesta.backend.dto.request.AutomationEventRequest;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
+import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.service.TelemetryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -27,6 +30,8 @@ import static org.mockito.Mockito.*;
 class MqttMessageReceiverTest {
     @Mock DeviceRepository devices;
     @Mock AutomationEngine engine;
+    @Mock TelemetryService telemetryService;
+    @Mock DeviceService deviceService;
     @Spy ObjectMapper mapper = new ObjectMapper();
     @InjectMocks MqttMessageReceiver receiver;
 
@@ -35,8 +40,10 @@ class MqttMessageReceiverTest {
         UUID homeId = UUID.randomUUID();
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
+        Home home = Home.builder().id(homeId).build();
         when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
-                .home(Home.builder().id(homeId).build()).node(EdgeNode.builder().id(nodeId).build())
+                .node(EdgeNode.builder().id(nodeId).home(home).build())
+                .room(Room.builder().home(home).build())
                 .deviceType(DeviceType.SENSOR).build()));
         receiver.handleMessage(MessageBuilder.withPayload("{\"temperature\":31}")
                 .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/sensor")

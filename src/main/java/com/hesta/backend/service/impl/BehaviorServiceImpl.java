@@ -33,7 +33,7 @@ public class BehaviorServiceImpl implements BehaviorService {
         if (request == null || request.getStartDate() == null || request.getDays() < 2 || request.getDays() > 365) {
             throw new AppException(ErrorCode.BEHAVIOR_DATASET_INVALID);
         }
-        List<Device> devices = deviceRepository.findAllByHomeIdOrderByNameAsc(homeId);
+        List<Device> devices = deviceRepository.findAllByRoom_Home_IdOrderByNameAsc(homeId);
         if (devices.isEmpty()) throw new AppException(ErrorCode.BEHAVIOR_DEVICE_REQUIRED);
         User user = userRepository.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
         String datasetKey = "sim-%s-%d-%d".formatted(request.getStartDate(), request.getDays(), request.getSeed());
@@ -85,7 +85,7 @@ public class BehaviorServiceImpl implements BehaviorService {
                                                      OffsetDateTime from, OffsetDateTime to, OffsetDateTime at) {
         if (at == null) throw new AppException(ErrorCode.BEHAVIOR_DATASET_INVALID);
         LocalTime now = at.toLocalTime();
-        Map<UUID, Device> devices = deviceRepository.findAllByHomeIdOrderByNameAsc(homeId).stream()
+        Map<UUID, Device> devices = deviceRepository.findAllByRoom_Home_IdOrderByNameAsc(homeId).stream()
                 .collect(Collectors.toMap(Device::getId, device -> device));
         return detectPatterns(userId, homeId, from, to).stream()
                 .filter(pattern -> pattern.getConfidence() >= 0.6)

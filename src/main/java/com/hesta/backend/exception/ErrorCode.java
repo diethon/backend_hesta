@@ -76,7 +76,6 @@ public enum ErrorCode {
     DEVICE_MQTT_TOPIC_MISSING(1034, "Thiết bị chưa được cấu hình MQTT topic", HttpStatus.BAD_REQUEST),
     MQTT_PUBLISH_FAILED(1035, "Không thể gửi lệnh điều khiển tới thiết bị qua MQTT broker", HttpStatus.INTERNAL_SERVER_ERROR),
     // Notification Core
-    NOTIFICATION_NOT_FOUND(1024, "Không tìm thấy thông báo", HttpStatus.NOT_FOUND),
     NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST);
 
     private final int code;

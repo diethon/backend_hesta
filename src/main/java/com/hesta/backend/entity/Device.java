@@ -16,7 +16,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
+        @UniqueConstraint(columnNames = {"node_id"})
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter

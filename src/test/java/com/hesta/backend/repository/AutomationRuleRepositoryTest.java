@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.hesta.backend.entity.AutomationRule;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.RuleAction;
 import com.hesta.backend.entity.RuleCondition;
 import com.hesta.backend.entity.Scene;
@@ -34,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AutomationRuleRepositoryTest {
     @Autowired private UserRepository userRepository;
     @Autowired private HomeRepository homeRepository;
+    @Autowired private RoomRepository roomRepository;
     @Autowired private DeviceRepository deviceRepository;
     @Autowired private AutomationRuleRepository ruleRepository;
     @Autowired private SceneRepository sceneRepository;
@@ -45,7 +47,8 @@ class AutomationRuleRepositoryTest {
                 .email("automation-owner@example.com").passwordHash("hash")
                 .provider(AuthProvider.LOCAL).build());
         Home home = homeRepository.save(Home.builder().name("Automation Home").createdBy(owner).build());
-        Device device = deviceRepository.save(Device.builder().home(home).name("Fan")
+        Room room = roomRepository.save(Room.builder().home(home).name("Living room").build());
+        Device device = deviceRepository.save(Device.builder().room(room).name("Fan")
                 .deviceType(DeviceType.FAN).status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
         UUID firstId = saveRule(home, device, "A rule");
         saveRule(home, device, "B rule");
@@ -73,7 +76,8 @@ class AutomationRuleRepositoryTest {
                 .email("scene-rule-owner@example.com").passwordHash("hash")
                 .provider(AuthProvider.LOCAL).build());
         Home home = homeRepository.save(Home.builder().name("Scene Rule Home").createdBy(owner).build());
-        Device device = deviceRepository.save(Device.builder().home(home).name("Lamp")
+        Room room = roomRepository.save(Room.builder().home(home).name("Living room").build());
+        Device device = deviceRepository.save(Device.builder().room(room).name("Lamp")
                 .deviceType(DeviceType.LIGHT).status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
         Scene scene = Scene.builder().home(home).name("Evening").enabled(true).build();
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)

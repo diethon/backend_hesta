@@ -3,6 +3,7 @@ package com.hesta.backend.repository;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
@@ -30,6 +31,8 @@ class SceneActionLegacySchemaTest {
     @Autowired
     private HomeRepository homeRepository;
     @Autowired
+    private RoomRepository roomRepository;
+    @Autowired
     private DeviceRepository deviceRepository;
     @Autowired
     private SceneRepository sceneRepository;
@@ -49,8 +52,9 @@ class SceneActionLegacySchemaTest {
                 .provider(AuthProvider.LOCAL)
                 .build());
         Home home = homeRepository.save(Home.builder().name("Legacy Home").createdBy(owner).build());
+        Room room = roomRepository.save(Room.builder().home(home).name("Living room").build());
         Device device = deviceRepository.save(Device.builder()
-                .home(home)
+                .room(room)
                 .name("Light")
                 .deviceType(DeviceType.LIGHT)
                 .status(DeviceStatus.UNKNOWN)

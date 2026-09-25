@@ -40,7 +40,8 @@ class AutomationEngineTest {
     void setUp() {
         engine = new AutomationEngineImpl(ruleRepository, executionRepository, deviceRepository, commandService, new ObjectMapper(), behaviorEventRecorder, manualOverrideService, sceneExecutionService);
         Home home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).home(home).name("Fan").deviceType(DeviceType.FAN).build();
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Fan").deviceType(DeviceType.FAN).build();
         rule = AutomationRule.builder().id(UUID.randomUUID()).home(home).name("Hot").enabled(true)
                 .triggerType(TriggerType.SENSOR).build();
         rule.getConditions().add(RuleCondition.builder().rule(rule).device(device).attribute("temperature")
