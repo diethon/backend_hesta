@@ -33,7 +33,10 @@ INSERT INTO public.users (
      'USER', 'ACTIVE', 0, now() - interval '1 day', now() - interval '45 days', now()),
     ('00000000-0000-4000-8000-000000000105', 'HESTA Local Admin', 'admin@hesta.local',
      crypt(gen_random_uuid()::text, gen_salt('bf', 10)), NULL, 'LOCAL',
-     'ADMIN', 'ACTIVE', 0, now() - interval '3 days', now() - interval '30 days', now())
+     'ADMIN', 'ACTIVE', 0, now() - interval '3 days', now() - interval '30 days', now()),
+    ('00000000-0000-4000-8000-000000000107', 'Người dùng mới', 'fresh@hesta.local',
+     crypt(gen_random_uuid()::text, gen_salt('bf', 10)), NULL, 'LOCAL',
+     'USER', 'ACTIVE', 0, NULL, now(), now())
 ON CONFLICT DO NOTHING;
 
 -- --------------------------------------------------------------------------
@@ -440,5 +443,185 @@ FROM (VALUES
      'Tài khoản quản trị local', 'Tài khoản này chỉ dùng để kiểm thử chức năng ADMIN.')
 ) AS source(id, title, message)
 WHERE target.id = source.id;
+
+-- Digital Twin 2D: additional edge cases and normalized canvas placement.
+-- Runtime freshness is refreshed only by the explicit demo simulator, not on
+-- every seed run. Existing user-edited layouts are preserved in their entirety.
+INSERT INTO public.devices (
+    id, home_id, room_id, name, device_type, status, current_state,
+    capabilities, icon, last_seen, is_deleted
+) VALUES
+    ('00000000-0000-4000-8000-000000000609',
+     '00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000403',
+     'Cảm biến nhiệt độ nhà bếp', 'SENSOR', 'ONLINE', '{"temperature":31.2}',
+     '["temperature"]', 'thermometer', now() - interval '2 minutes', false),
+    ('00000000-0000-4000-8000-000000000610',
+     '00000000-0000-4000-8000-000000000201', NULL,
+     'Ổ cắm chưa gán phòng', 'SOCKET', 'UNKNOWN', '{}',
+     '["power"]', 'plug', NULL, false)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.sensor_readings (id, device_id, metric_type, value, unit, recorded_at)
+VALUES (900006, '00000000-0000-4000-8000-000000000609', 'TEMPERATURE', 31.200, '°C',
+        now() - interval '2 minutes')
+ON CONFLICT DO NOTHING;
+
+-- Explicit seed IDs must never collide with subsequent API-generated readings.
+SELECT setval(pg_get_serial_sequence('public.sensor_readings', 'id'),
+    GREATEST((SELECT COALESCE(MAX(id), 1) FROM public.sensor_readings),
+             nextval(pg_get_serial_sequence('public.sensor_readings', 'id'))));
+
+DO $$
+DECLARE
+    demo_layout UUID;
+BEGIN
+    INSERT INTO public.twin_layouts (home_id, revision)
+    VALUES ('00000000-0000-4000-8000-000000000201', 1)
+    ON CONFLICT (home_id) DO NOTHING
+    RETURNING id INTO demo_layout;
+
+    IF demo_layout IS NOT NULL THEN
+        INSERT INTO public.twin_room_layouts (layout_id, room_id, x, y, width, height)
+        VALUES
+            (demo_layout, '00000000-0000-4000-8000-000000000401', .050, .050, .500, .450),
+            (demo_layout, '00000000-0000-4000-8000-000000000402', .600, .050, .350, .450),
+            (demo_layout, '00000000-0000-4000-8000-000000000403', .050, .550, .500, .400),
+            (demo_layout, '00000000-0000-4000-8000-000000000404', .600, .550, .350, .400);
+
+        INSERT INTO public.twin_node_layouts (layout_id, node_type, node_id, room_id, x, y)
+        VALUES
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000601', '00000000-0000-4000-8000-000000000401', .200, .200),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000602', '00000000-0000-4000-8000-000000000401', .400, .200),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000605', '00000000-0000-4000-8000-000000000402', .700, .180),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000607', '00000000-0000-4000-8000-000000000402', .850, .180),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000605:TEMPERATURE', '00000000-0000-4000-8000-000000000402', .700, .370),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000605:HUMIDITY', '00000000-0000-4000-8000-000000000402', .850, .370),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000606', '00000000-0000-4000-8000-000000000403', .200, .680),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000609', '00000000-0000-4000-8000-000000000403', .400, .680),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000609:TEMPERATURE', '00000000-0000-4000-8000-000000000403', .400, .850),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000603', '00000000-0000-4000-8000-000000000404', .700, .680),
+            (demo_layout, 'DEVICE', '00000000-0000-4000-8000-000000000604', '00000000-0000-4000-8000-000000000404', .850, .680),
+            (demo_layout, 'SENSOR', '00000000-0000-4000-8000-000000000603:MOTION', '00000000-0000-4000-8000-000000000404', .700, .850);
+    END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- Digital Twin 3D: isolated three-floor home for end-to-end UI testing.
+--
+-- The password starts as an unknown random BCrypt value. The local initializer
+-- replaces it with the password chosen interactively, like the other accounts.
+-- Existing rows and user-edited layouts are never overwritten on a rerun.
+-- --------------------------------------------------------------------------
+INSERT INTO public.users (
+    id, full_name, email, password_hash, phone_number, provider,
+    platform_role, status, failed_login_attempts, last_active_at,
+    created_at, updated_at
+) VALUES (
+    '00000000-0000-4000-8000-000000001301', 'Đỗ Minh Khang',
+    'multifloor.owner@hesta.local', crypt(gen_random_uuid()::text, gen_salt('bf', 10)),
+    '0900000013', 'LOCAL', 'USER', 'ACTIVE', 0,
+    now() - interval '4 minutes', now() - interval '30 days', now()
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO public.homes (id, name, address, created_by, created_at, updated_at)
+VALUES (
+    '00000000-0000-4000-8000-000000001302', 'Nhà thông minh 3 tầng',
+    '36 Đường Mây Xanh, TP. Hồ Chí Minh',
+    '00000000-0000-4000-8000-000000001301', now() - interval '28 days', now()
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO public.home_members (
+    id, home_id, user_id, role, status,
+    allow_voice_override, allow_scene_creation, allow_remote_control,
+    invited_by, joined_at
+) VALUES (
+    '00000000-0000-4000-8000-000000001303',
+    '00000000-0000-4000-8000-000000001302',
+    '00000000-0000-4000-8000-000000001301',
+    'OWNER', 'ACTIVE', true, true, true, NULL, now() - interval '28 days'
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO public.rooms (id, home_id, name, layout_x, layout_y, icon, created_at)
+VALUES
+    ('00000000-0000-4000-8000-000000001311', '00000000-0000-4000-8000-000000001302', 'Phòng khách tầng 1', 1, 1, 'sofa', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001312', '00000000-0000-4000-8000-000000001302', 'Nhà bếp tầng 1', 6, 1, 'cooking', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001313', '00000000-0000-4000-8000-000000001302', 'Phòng tắm tầng 1', 6, 4, 'bath', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001314', '00000000-0000-4000-8000-000000001302', 'Phòng ngủ chính tầng 2', 1, 1, 'bed', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001315', '00000000-0000-4000-8000-000000001302', 'Phòng ngủ nhỏ tầng 2', 6, 1, 'bed', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001316', '00000000-0000-4000-8000-000000001302', 'Phòng tắm tầng 2', 6, 4, 'bath', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001317', '00000000-0000-4000-8000-000000001302', 'Phòng làm việc tầng 3', 1, 1, 'desk', now() - interval '27 days'),
+    ('00000000-0000-4000-8000-000000001318', '00000000-0000-4000-8000-000000001302', 'Sân thượng tầng 3', 6, 1, 'terrace', now() - interval '27 days')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.devices (
+    id, home_id, room_id, name, device_type, status, current_state,
+    capabilities, icon, digital_twin_x, digital_twin_y, digital_twin_z,
+    last_seen, created_at, updated_at, is_deleted
+) VALUES
+    ('00000000-0000-4000-8000-000000001331', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001311',
+     'Đèn phòng khách T1', 'LIGHT', 'ONLINE', '{"power":"ON","brightness":78}', '["power","brightness"]', 'lightbulb', 2, 2, 1, now() - interval '20 seconds', now() - interval '24 days', now(), false),
+    ('00000000-0000-4000-8000-000000001332', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001312',
+     'Quạt thông gió bếp T1', 'FAN', 'ONLINE', '{"power":"ON","speed":2}', '["power","speed"]', 'fan', 7, 2, 1, now() - interval '35 seconds', now() - interval '24 days', now(), false),
+    ('00000000-0000-4000-8000-000000001333', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001313',
+     'Cảm biến môi trường T1', 'SENSOR', 'ONLINE', '{"temperature":27.2,"humidity":68}', '["temperature","humidity"]', 'thermometer', 7, 5, 1, now() - interval '50 seconds', now() - interval '24 days', now(), false),
+    ('00000000-0000-4000-8000-000000001334', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001314',
+     'Máy lạnh phòng ngủ chính T2', 'AC', 'ONLINE', '{"power":"ON","temperature":25,"mode":"COOL"}', '["power","temperature","mode"]', 'air-conditioner', 2, 2, 4, now() - interval '25 seconds', now() - interval '23 days', now(), false),
+    ('00000000-0000-4000-8000-000000001335', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001315',
+     'Đèn phòng ngủ nhỏ T2', 'LIGHT', 'OFFLINE', '{"power":"OFF","brightness":0}', '["power","brightness"]', 'bedside-lamp', 7, 2, 4, now() - interval '9 minutes', now() - interval '23 days', now(), false),
+    ('00000000-0000-4000-8000-000000001336', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001316',
+     'Cảm biến môi trường T2', 'SENSOR', 'ONLINE', '{"temperature":26.1,"humidity":63}', '["temperature","humidity"]', 'thermometer', 7, 5, 4, now() - interval '70 seconds', now() - interval '23 days', now(), false),
+    ('00000000-0000-4000-8000-000000001337', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001317',
+     'Đèn bàn làm việc T3', 'LIGHT', 'ONLINE', '{"power":"ON","brightness":65}', '["power","brightness"]', 'desk-lamp', 2, 2, 7, now() - interval '40 seconds', now() - interval '22 days', now(), false),
+    ('00000000-0000-4000-8000-000000001338', '00000000-0000-4000-8000-000000001302', '00000000-0000-4000-8000-000000001318',
+     'Cảm biến sân thượng T3', 'SENSOR', 'ONLINE', '{"temperature":30.4,"humidity":55}', '["temperature","humidity"]', 'thermometer', 7, 2, 7, now() - interval '95 seconds', now() - interval '22 days', now(), false)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.sensor_readings (id, device_id, metric_type, value, unit, recorded_at)
+VALUES
+    (901001, '00000000-0000-4000-8000-000000001333', 'TEMPERATURE', 27.200, '°C', now() - interval '50 seconds'),
+    (901002, '00000000-0000-4000-8000-000000001333', 'HUMIDITY', 68.000, '%', now() - interval '50 seconds'),
+    (901003, '00000000-0000-4000-8000-000000001336', 'TEMPERATURE', 26.100, '°C', now() - interval '70 seconds'),
+    (901004, '00000000-0000-4000-8000-000000001336', 'HUMIDITY', 63.000, '%', now() - interval '70 seconds'),
+    (901005, '00000000-0000-4000-8000-000000001338', 'TEMPERATURE', 30.400, '°C', now() - interval '95 seconds'),
+    (901006, '00000000-0000-4000-8000-000000001338', 'HUMIDITY', 55.000, '%', now() - interval '95 seconds')
+ON CONFLICT DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('public.sensor_readings', 'id'),
+    GREATEST((SELECT COALESCE(MAX(id), 1) FROM public.sensor_readings),
+             nextval(pg_get_serial_sequence('public.sensor_readings', 'id'))));
+
+INSERT INTO public.twin_layouts (id, home_id, revision)
+VALUES ('00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001302', 1)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.twin_room_layouts (id, layout_id, room_id, floor_number, x, y, width, height)
+VALUES
+    ('00000000-0000-4000-8000-000000001361', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001311', 1, .050, .050, .550, .550),
+    ('00000000-0000-4000-8000-000000001362', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001312', 1, .620, .050, .330, .300),
+    ('00000000-0000-4000-8000-000000001363', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001313', 1, .620, .380, .330, .220),
+    ('00000000-0000-4000-8000-000000001364', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001314', 2, .050, .050, .550, .550),
+    ('00000000-0000-4000-8000-000000001365', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001315', 2, .620, .050, .330, .300),
+    ('00000000-0000-4000-8000-000000001366', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001316', 2, .620, .380, .330, .220),
+    ('00000000-0000-4000-8000-000000001367', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001317', 3, .050, .050, .550, .550),
+    ('00000000-0000-4000-8000-000000001368', '00000000-0000-4000-8000-000000001350', '00000000-0000-4000-8000-000000001318', 3, .620, .050, .330, .550)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.twin_node_layouts (id, layout_id, node_type, node_id, room_id, x, y)
+VALUES
+    ('00000000-0000-4000-8000-000000001371', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001331', '00000000-0000-4000-8000-000000001311', .250, .250),
+    ('00000000-0000-4000-8000-000000001372', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001332', '00000000-0000-4000-8000-000000001312', .760, .180),
+    ('00000000-0000-4000-8000-000000001373', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001333', '00000000-0000-4000-8000-000000001313', .760, .480),
+    ('00000000-0000-4000-8000-000000001374', '00000000-0000-4000-8000-000000001350', 'SENSOR', '00000000-0000-4000-8000-000000001333:TEMPERATURE', '00000000-0000-4000-8000-000000001313', .700, .520),
+    ('00000000-0000-4000-8000-000000001375', '00000000-0000-4000-8000-000000001350', 'SENSOR', '00000000-0000-4000-8000-000000001333:HUMIDITY', '00000000-0000-4000-8000-000000001313', .860, .520),
+    ('00000000-0000-4000-8000-000000001376', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001334', '00000000-0000-4000-8000-000000001314', .250, .250),
+    ('00000000-0000-4000-8000-000000001377', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001335', '00000000-0000-4000-8000-000000001315', .760, .180),
+    ('00000000-0000-4000-8000-000000001378', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001336', '00000000-0000-4000-8000-000000001316', .760, .480),
+    ('00000000-0000-4000-8000-000000001379', '00000000-0000-4000-8000-000000001350', 'SENSOR', '00000000-0000-4000-8000-000000001336:TEMPERATURE', '00000000-0000-4000-8000-000000001316', .700, .520),
+    ('00000000-0000-4000-8000-000000001380', '00000000-0000-4000-8000-000000001350', 'SENSOR', '00000000-0000-4000-8000-000000001336:HUMIDITY', '00000000-0000-4000-8000-000000001316', .860, .520),
+    ('00000000-0000-4000-8000-000000001381', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001337', '00000000-0000-4000-8000-000000001317', .250, .250),
+    ('00000000-0000-4000-8000-000000001382', '00000000-0000-4000-8000-000000001350', 'DEVICE', '00000000-0000-4000-8000-000000001338', '00000000-0000-4000-8000-000000001318', .760, .250),
+    ('00000000-0000-4000-8000-000000001383', '00000000-0000-4000-8000-000000001350', 'SENSOR', '00000000-0000-4000-8000-000000001338:TEMPERATURE', '00000000-0000-4000-8000-000000001318', .700, .420),
+    ('00000000-0000-4000-8000-000000001384', '00000000-0000-4000-8000-000000001350', 'SENSOR', '00000000-0000-4000-8000-000000001338:HUMIDITY', '00000000-0000-4000-8000-000000001318', .860, .420)
+ON CONFLICT DO NOTHING;
 
 COMMIT;

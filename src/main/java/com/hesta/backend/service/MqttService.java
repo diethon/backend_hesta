@@ -21,10 +21,17 @@ public class MqttService {
     @Value("${mqtt.topic.device.command}")
     private String deviceCommandTopic;
 
+    @Value("${mqtt.direct.auto-connect:true}")
+    private boolean autoConnect;
+
     private MqttClient mqttClient;
 
     @PostConstruct
     public void connect() {
+        if (!autoConnect) {
+            log.info("[MQTT] Direct client auto-connect is disabled");
+            return;
+        }
         try {
             mqttClient = new MqttClient(
                     brokerUrl,
@@ -51,7 +58,7 @@ public class MqttService {
     public void publish(String topic, String payload) {
 
         try {
-            if (!mqttClient.isConnected()) {
+            if (mqttClient == null || !mqttClient.isConnected()) {
                 throw new IllegalStateException(
                         "MQTT client is not connected"
                 );

@@ -5,6 +5,13 @@ import org.springframework.http.HttpStatus;
 
 @Getter
 public enum ErrorCode {
+    // Sensor reading validation (codes are part of the published mock-sensor contract)
+    SENSOR_DEVICE_REQUIRED(1120, "Device ID is required", HttpStatus.BAD_REQUEST),
+    SENSOR_METRIC_INVALID(1121, "Metric type must be non-blank and at most 50 characters", HttpStatus.BAD_REQUEST),
+    SENSOR_VALUE_INVALID(1122, "Value must fit NUMERIC(10,3) without rounding", HttpStatus.BAD_REQUEST),
+    SENSOR_UNIT_INVALID(1123, "Unit must be at most 20 characters", HttpStatus.BAD_REQUEST),
+    SENSOR_TIME_INVALID(1124, "Observation time is required, with year 1-9999 and at most microsecond precision", HttpStatus.BAD_REQUEST),
+
     // Scene management
     HOME_NOT_FOUND(1100, "Home not found", HttpStatus.NOT_FOUND),
     SCENE_NOT_FOUND(1101, "Scene not found", HttpStatus.NOT_FOUND),
@@ -26,8 +33,8 @@ public enum ErrorCode {
     SCENE_ICON_INVALID(1117, "Scene icon must not exceed 50 characters", HttpStatus.BAD_REQUEST),
     SCENE_DISABLED(1118, "Scene is disabled", HttpStatus.BAD_REQUEST),
     SCENE_SCHEDULE_INVALID(1119, "Scene schedule is invalid", HttpStatus.BAD_REQUEST),
-    SCENE_SCHEDULE_NOT_FOUND(1120, "Scene schedule not found", HttpStatus.NOT_FOUND),
-    SCENE_IN_USE(1121, "Scene is used by an automation rule", HttpStatus.CONFLICT),
+    SCENE_SCHEDULE_NOT_FOUND(1131, "Scene schedule not found", HttpStatus.NOT_FOUND),
+    SCENE_IN_USE(1132, "Scene is used by an automation rule", HttpStatus.CONFLICT),
 
     // Automation and behavior prototypes
     AUTOMATION_RULE_NOT_FOUND(1200, "Automation rule not found", HttpStatus.NOT_FOUND),
@@ -44,6 +51,12 @@ public enum ErrorCode {
     RECOMMENDATION_NOT_FOUND(1302, "Recommendation not found", HttpStatus.NOT_FOUND),
     RECOMMENDATION_ALREADY_RESOLVED(1303, "Recommendation is already resolved", HttpStatus.CONFLICT),
     NOTIFICATION_NOT_FOUND(1400, "Notification not found", HttpStatus.NOT_FOUND),
+    TWIN_LAYOUT_GEOMETRY_INVALID(1125, "Twin layout geometry must use finite normalized coordinates", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_ROOM_INVALID(1126, "Twin layout references an invalid room", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_DEVICE_INVALID(1127, "Twin layout references an invalid device", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_SENSOR_INVALID(1128, "Twin layout references an invalid sensor stream", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_DUPLICATE_ENTRY(1129, "Twin layout contains a duplicate entry", HttpStatus.BAD_REQUEST),
+    TWIN_LAYOUT_REVISION_CONFLICT(1130, "Twin layout revision is out of date", HttpStatus.CONFLICT),
 
     // Các mã lỗi chung
     UNCATEGORIZED_EXCEPTION(9999, "Lỗi không xác định", HttpStatus.INTERNAL_SERVER_ERROR),
@@ -67,6 +80,10 @@ public enum ErrorCode {
     PASSWORD_REQUIRED(1021, "Mật khẩu không được để trống", HttpStatus.BAD_REQUEST),
     PASSWORD_TOO_SHORT(1022, "Mật khẩu phải có ít nhất 8 ký tự", HttpStatus.BAD_REQUEST),
     GOOGLE_TOKEN_REQUIRED(1023, "Google ID Token không được để trống", HttpStatus.BAD_REQUEST),
+    AVATAR_FILE_REQUIRED(1026, "Vui lòng chọn ảnh đại diện", HttpStatus.BAD_REQUEST),
+    AVATAR_FILE_TYPE_INVALID(1027, "Ảnh đại diện phải có định dạng JPEG, PNG, WebP hoặc GIF", HttpStatus.BAD_REQUEST),
+    AVATAR_FILE_TOO_LARGE(1028, "Ảnh đại diện không được vượt quá 5 MB", HttpStatus.BAD_REQUEST),
+    AVATAR_UPLOAD_FAILED(1029, "Không thể tải ảnh đại diện lên, vui lòng thử lại sau", HttpStatus.BAD_GATEWAY),
 
     // Các mã lỗi điều khiển thiết bị (Device & Command)
 

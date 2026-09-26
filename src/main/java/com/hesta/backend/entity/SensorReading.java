@@ -36,7 +36,7 @@ public class SensorReading {
     @Column(name = "metric_type", nullable = false, length = 50)
     private String metricType;
 
-    @Column(name = "value", nullable = false, precision = 15, scale = 4)
+    @Column(name = "\"value\"", nullable = false, precision = 15, scale = 4)
     private BigDecimal value;
 
     @Column(name = "unit", nullable = false, length = 20)

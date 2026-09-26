@@ -1,0 +1,287 @@
+@import "tailwindcss";
+
+.twin-canvas {
+  height: clamp(28rem, 55vw, 42rem);
+  background-image:
+    linear-gradient(rgb(91 192 235 / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(91 192 235 / 0.055) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.twin-canvas-node { width: 6.5rem; }
+@media (min-width: 640px) {
+  .twin-canvas-node { width: 9rem; }
+}
+
+@theme {
+  --color-app: #f8fcff;
+  --color-surface: #ffffff;
+  --color-sidebar: #eef7fb;
+  --color-sidebar-hover: #dff1f8;
+  --color-sidebar-active: #cdeffa;
+  --color-line: #dceaf2;
+  --color-primary: #5bc0eb;
+  --color-primary-hover: #3dafd9;
+  --color-mint: #7bdcb5;
+  --color-mint-hover: #5ecfa2;
+  --color-text: #3a4a5a;
+  --color-muted: #6b7c8f;
+  --color-icon: #7a93a6;
+  --color-success: #6edfa3;
+  --color-success-soft: #e8faf0;
+  --color-off: #d6e4ec;
+  --color-off-soft: #f4f8fb;
+  --color-warning: #ffd166;
+  --color-warning-soft: #fff7e0;
+  --color-error: #ff8a8a;
+  --color-error-soft: #fff0f0;
+  --color-info: #8ed8f8;
+  --color-info-soft: #eef9ff;
+
+  /* Keep legacy utilities on the product palette while components migrate. */
+  --color-slate-950: #f8fcff;
+  --color-slate-900: #ffffff;
+  --color-slate-800: #dceaf2;
+  --color-slate-700: #d6e4ec;
+  --color-slate-600: #7a93a6;
+  --color-slate-500: #6b7c8f;
+  --color-slate-400: #6b7c8f;
+  --color-slate-300: #3a4a5a;
+  --color-slate-200: #3a4a5a;
+  --color-slate-100: #3a4a5a;
+  --color-cyan-400: #3dafd9;
+  --color-cyan-300: #5bc0eb;
+  --color-cyan-500: #5bc0eb;
+  --color-cyan-600: #3dafd9;
+  --color-cyan-950: #eef9ff;
+  --color-blue-300: #5bc0eb;
+  --color-blue-400: #5bc0eb;
+  --color-blue-500: #5bc0eb;
+  --color-blue-600: #3dafd9;
+  --color-blue-950: #eef9ff;
+  --color-indigo-500: #5bc0eb;
+  --color-indigo-600: #3dafd9;
+  --color-indigo-950: #eef9ff;
+  --color-emerald-300: #5ecfa2;
+  --color-emerald-400: #5ecfa2;
+  --color-emerald-500: #6edfa3;
+  --color-emerald-600: #5ecfa2;
+  --color-emerald-900: #6edfa3;
+  --color-emerald-950: #e8faf0;
+  --color-teal-400: #5ecfa2;
+  --color-teal-500: #7bdcb5;
+  --color-teal-600: #5ecfa2;
+  --color-rose-300: #ff8a8a;
+  --color-rose-400: #ff8a8a;
+  --color-rose-500: #ff8a8a;
+  --color-rose-600: #ef7070;
+  --color-rose-800: #ff8a8a;
+  --color-rose-900: #ff8a8a;
+  --color-rose-950: #fff0f0;
+  --color-amber-400: #e5ad32;
+  --color-amber-500: #ffd166;
+  --color-amber-900: #ffd166;
+  --color-amber-950: #fff7e0;
+  --color-orange-600: #e5ad32;
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --shadow-soft: 0 12px 32px rgb(91 192 235 / 0.1);
+  --shadow-float: 0 20px 56px rgb(58 74 90 / 0.14);
+}
+
+:root {
+  color: #3a4a5a;
+  background: #f8fcff;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: #f8fcff;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 9% 2%, rgb(142 216 248 / 0.2), transparent 25rem),
+    radial-gradient(circle at 96% 96%, rgb(123 220 181 / 0.13), transparent 30rem),
+    #f8fcff;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: #3a4a5a !important;
+}
+
+input.text-white,
+select.text-white,
+textarea.text-white,
+.auth-surface span.text-white {
+  color: #3a4a5a;
+}
+
+button.bg-slate-800.text-white,
+button.bg-slate-700.text-white {
+  color: #4b6475;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+select,
+input[type="checkbox"],
+input[type="file"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+a,
+select:not(:disabled),
+input[type="checkbox"]:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  color: #3a4a5a;
+  background: #cdeffa;
+}
+
+:focus-visible {
+  outline: 3px solid rgb(91 192 235 / 0.42);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 200;
+  transform: translateY(-160%);
+  border-radius: 0.75rem;
+  background: #3dafd9;
+  padding: 0.65rem 0.9rem;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: transform 150ms ease-out;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.app-shell {
+  min-height: 100dvh;
+  background: transparent;
+  color: #3a4a5a;
+}
+
+.app-sidebar {
+  border-right: 1px solid #dceaf2;
+  background: rgb(238 247 251 / 0.92);
+  box-shadow: 10px 0 32px rgb(91 192 235 / 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.surface-card {
+  border: 1px solid #dceaf2;
+  border-radius: 1.25rem;
+  background: #ffffff;
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-surface {
+  max-width: calc(100vw - 2rem);
+  min-width: 0;
+  border: 1px solid #dceaf2;
+  border-radius: 1.5rem;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(18px);
+}
+
+.soft-grid {
+  background-image:
+    linear-gradient(rgb(91 192 235 / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(91 192 235 / 0.055) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, black, transparent 90%);
+}
+
+.status-pulse {
+  box-shadow: 0 0 0 5px rgb(110 223 163 / 0.16);
+}
+
+.custom-scrollbar {
+  scrollbar-color: #d6e4ec transparent;
+  scrollbar-width: thin;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #d6e4ec;
+  background-clip: padding-box;
+}
+
+@keyframes gentle-rise {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.gentle-rise {
+  animation: gentle-rise 240ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-sidebar,
+  .auth-surface {
+    background: #ffffff;
+    backdrop-filter: none;
+  }
+}
