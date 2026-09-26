@@ -16,7 +16,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id"})
+        @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
@@ -31,7 +31,11 @@ public class Device {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "room_id", nullable = false)
+    @JoinColumn(name = "home_id", nullable = false)
+    private Home home;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "room_id")
     private Room room;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -47,6 +51,9 @@ public class Device {
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
+
+    @Column(name = "gpio_pin")
+    private Short gpioPin;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -73,6 +80,9 @@ public class Device {
     @Column(name = "digital_twin_z", precision = 10, scale = 3)
     private BigDecimal digitalTwinZ;
 
+    @Column(name = "last_seen")
+    private OffsetDateTime lastSeen;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -84,4 +94,15 @@ public class Device {
     @Column(name = "is_deleted", nullable = false)
     @Builder.Default
     private boolean isDeleted = false;
+
+    @PrePersist
+    @PreUpdate
+    private void synchronizeHome() {
+        if (home == null && room != null) {
+            home = room.getHome();
+        }
+        if (home == null && node != null) {
+            home = node.getHome();
+        }
+    }
 }

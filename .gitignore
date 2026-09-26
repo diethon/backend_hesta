@@ -47,3 +47,4 @@ logs/
 !src/test/resources/.env.properties
 
 /agents
+.tmp/

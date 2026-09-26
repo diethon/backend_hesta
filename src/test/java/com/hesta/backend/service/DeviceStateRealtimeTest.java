@@ -26,6 +26,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class DeviceStateRealtimeTest {
     @Mock DeviceRepository devices;
+    @Mock HomeRepository homes;
     @Mock HomeMemberRepository members;
     @Mock RoomRepository rooms;
     @Mock DeviceStateHistoryRepository history;
@@ -35,7 +36,7 @@ class DeviceStateRealtimeTest {
 
     @BeforeEach
     void setUp() {
-        service = new DeviceServiceImpl(devices, members, rooms, history, events,
+        service = new DeviceServiceImpl(devices, new HomeAuthorizationService(homes, members), rooms, history, events,
                 TwinHealthTestSupport.mapper(new ObjectMapper()));
     }
 
