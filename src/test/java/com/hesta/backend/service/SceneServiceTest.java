@@ -7,13 +7,16 @@ import com.hesta.backend.dto.request.SceneActionRequest;
 import com.hesta.backend.dto.response.SceneActionResponse;
 import com.hesta.backend.dto.response.SceneResponse;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.SceneActionRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.service.impl.SceneServiceImpl;
@@ -47,6 +50,8 @@ class SceneServiceTest {
     private SceneActionRepository sceneActionRepository;
     @Mock
     private DeviceRepository deviceRepository;
+    @Mock
+    private AutomationRuleRepository automationRuleRepository;
 
     @InjectMocks
     private SceneServiceImpl sceneService;
@@ -67,7 +72,8 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).home(home).name("Lamp").deviceType(DeviceType.LIGHT).build();
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Lamp").deviceType(DeviceType.LIGHT).build();
         scene = Scene.builder()
                 .id(sceneId)
                 .home(home)
@@ -90,6 +96,8 @@ class SceneServiceTest {
         when(sceneRepository.saveAndFlush(any(Scene.class))).thenAnswer(invocation -> {
             Scene saved = invocation.getArgument(0);
             saved.setId(sceneId);
+            assertThat(saved.getActions().getFirst().getValue().isObject()).isTrue();
+            assertThat(saved.getActions().getFirst().getValue().isEmpty()).isTrue();
             saved.getActions().getFirst().setId(UUID.randomUUID());
             return saved;
         });
@@ -120,7 +128,8 @@ class SceneServiceTest {
         Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
         Device foreignDevice = Device.builder()
                 .id(deviceId)
-                .home(anotherHome)
+                .node(EdgeNode.builder().home(anotherHome).build())
+                .room(Room.builder().home(anotherHome).build())
                 .name("Foreign lamp")
                 .deviceType(DeviceType.LIGHT)
                 .build();
@@ -175,10 +184,14 @@ class SceneServiceTest {
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
         when(sceneRepository.saveAndFlush(scene)).thenReturn(scene);
 
-        sceneService.addAction(userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
+        SceneActionResponse added = sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
 
         assertThat(existing.getOrder()).isEqualTo(1);
         assertThat(scene.getActions()).extracting(SceneAction::getOrder).containsExactlyInAnyOrder(0, 1);
+        assertThat(added.getValue()).isNull();
+        assertThat(scene.getActions().stream().filter(action -> action.getOrder() == 0).findFirst().orElseThrow()
+                .getValue().isObject()).isTrue();
         verify(sceneActionRepository).deferOrderConstraint();
     }
 
@@ -245,6 +258,16 @@ class SceneServiceTest {
         assertError(() -> sceneService.deleteScene(userId, homeId, sceneId), ErrorCode.UNAUTHORIZED);
 
         verify(sceneRepository, never()).findByIdAndHomeId(any(), any());
+    }
+
+    @Test
+    void sceneUsedByRuleCannotBeDeleted() {
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(automationRuleRepository.existsActionForScene(sceneId)).thenReturn(true);
+
+        assertError(() -> sceneService.deleteScene(userId, homeId, sceneId), ErrorCode.SCENE_IN_USE);
+        verify(sceneRepository, never()).delete(any());
     }
 
     private SceneActionRequest actionRequest(

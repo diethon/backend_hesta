@@ -5,13 +5,6 @@ import org.springframework.http.HttpStatus;
 
 @Getter
 public enum ErrorCode {
-    // Mock sensor input / reusable reading validation
-    SENSOR_DEVICE_REQUIRED(1120, "Device ID is required", HttpStatus.BAD_REQUEST),
-    SENSOR_METRIC_INVALID(1121, "Metric type must be non-blank and at most 50 characters", HttpStatus.BAD_REQUEST),
-    SENSOR_VALUE_INVALID(1122, "Value must fit NUMERIC(10,3) without rounding", HttpStatus.BAD_REQUEST),
-    SENSOR_UNIT_INVALID(1123, "Unit must be at most 20 characters", HttpStatus.BAD_REQUEST),
-    SENSOR_TIME_INVALID(1124, "Observation time is required, with year 1-9999 and at most microsecond precision", HttpStatus.BAD_REQUEST),
-
     // Scene management
     HOME_NOT_FOUND(1100, "Home not found", HttpStatus.NOT_FOUND),
     SCENE_NOT_FOUND(1101, "Scene not found", HttpStatus.NOT_FOUND),
@@ -30,6 +23,27 @@ public enum ErrorCode {
     SCENE_ACTIONS_INVALID(1114, "Scene actions must use unique contiguous order values starting at zero", HttpStatus.BAD_REQUEST),
     SCENE_REORDER_INVALID(1115, "Reorder payload must contain every scene action exactly once", HttpStatus.BAD_REQUEST),
     INVALID_REQUEST(1116, "Request body is invalid", HttpStatus.BAD_REQUEST),
+    SCENE_ICON_INVALID(1117, "Scene icon must not exceed 50 characters", HttpStatus.BAD_REQUEST),
+    SCENE_DISABLED(1118, "Scene is disabled", HttpStatus.BAD_REQUEST),
+    SCENE_SCHEDULE_INVALID(1119, "Scene schedule is invalid", HttpStatus.BAD_REQUEST),
+    SCENE_SCHEDULE_NOT_FOUND(1120, "Scene schedule not found", HttpStatus.NOT_FOUND),
+    SCENE_IN_USE(1121, "Scene is used by an automation rule", HttpStatus.CONFLICT),
+
+    // Automation and behavior prototypes
+    AUTOMATION_RULE_NOT_FOUND(1200, "Automation rule not found", HttpStatus.NOT_FOUND),
+    AUTOMATION_NAME_INVALID(1201, "Automation rule name is invalid", HttpStatus.BAD_REQUEST),
+    AUTOMATION_NAME_ALREADY_EXISTS(1202, "An automation rule with this name already exists", HttpStatus.CONFLICT),
+    AUTOMATION_TRIGGER_INVALID(1203, "Automation trigger type is invalid", HttpStatus.BAD_REQUEST),
+    AUTOMATION_ENABLED_REQUIRED(1204, "Automation enabled status is required", HttpStatus.BAD_REQUEST),
+    AUTOMATION_CONDITION_INVALID(1205, "Automation condition is invalid", HttpStatus.BAD_REQUEST),
+    AUTOMATION_ACTION_INVALID(1206, "Automation action is invalid", HttpStatus.BAD_REQUEST),
+    AUTOMATION_DEVICE_HOME_MISMATCH(1207, "Automation device must belong to the rule home", HttpStatus.BAD_REQUEST),
+    AUTOMATION_EVENT_INVALID(1208, "Automation event is invalid", HttpStatus.BAD_REQUEST),
+    BEHAVIOR_DATASET_INVALID(1300, "Behavior dataset request is invalid", HttpStatus.BAD_REQUEST),
+    BEHAVIOR_DEVICE_REQUIRED(1301, "At least one device is required to generate behavior data", HttpStatus.BAD_REQUEST),
+    RECOMMENDATION_NOT_FOUND(1302, "Recommendation not found", HttpStatus.NOT_FOUND),
+    RECOMMENDATION_ALREADY_RESOLVED(1303, "Recommendation is already resolved", HttpStatus.CONFLICT),
+    NOTIFICATION_NOT_FOUND(1400, "Notification not found", HttpStatus.NOT_FOUND),
     TWIN_LAYOUT_GEOMETRY_INVALID(1125, "Twin layout geometry must use finite normalized coordinates", HttpStatus.BAD_REQUEST),
     TWIN_LAYOUT_ROOM_INVALID(1126, "Twin layout references an invalid room", HttpStatus.BAD_REQUEST),
     TWIN_LAYOUT_DEVICE_INVALID(1127, "Twin layout references an invalid device", HttpStatus.BAD_REQUEST),
@@ -60,8 +74,14 @@ public enum ErrorCode {
     PASSWORD_TOO_SHORT(1022, "Mật khẩu phải có ít nhất 8 ký tự", HttpStatus.BAD_REQUEST),
     GOOGLE_TOKEN_REQUIRED(1023, "Google ID Token không được để trống", HttpStatus.BAD_REQUEST),
 
+    // Các mã lỗi điều khiển thiết bị (Device & Command)
+
+    INVALID_DEVICE_ACTION(1031, "Hành động điều khiển không hợp lệ", HttpStatus.BAD_REQUEST),
+    INVALID_RGB_VALUE(1032, "Giá trị RGB không hợp lệ (phải từ 0 đến 255)", HttpStatus.BAD_REQUEST),
+    INVALID_BRIGHTNESS_VALUE(1033, "Giá trị độ sáng không hợp lệ (phải từ 0 đến 100)", HttpStatus.BAD_REQUEST),
+    DEVICE_MQTT_TOPIC_MISSING(1034, "Thiết bị chưa được cấu hình MQTT topic", HttpStatus.BAD_REQUEST),
+    MQTT_PUBLISH_FAILED(1035, "Không thể gửi lệnh điều khiển tới thiết bị qua MQTT broker", HttpStatus.INTERNAL_SERVER_ERROR),
     // Notification Core
-    NOTIFICATION_NOT_FOUND(1024, "Không tìm thấy thông báo", HttpStatus.NOT_FOUND),
     NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST);
 
     private final int code;

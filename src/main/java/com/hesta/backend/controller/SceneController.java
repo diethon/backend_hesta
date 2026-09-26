@@ -4,11 +4,16 @@ import com.hesta.backend.dto.request.CreateSceneRequest;
 import com.hesta.backend.dto.request.ReorderSceneActionsRequest;
 import com.hesta.backend.dto.request.SceneActionRequest;
 import com.hesta.backend.dto.request.UpdateSceneRequest;
+import com.hesta.backend.dto.request.ScheduleRequest;
 import com.hesta.backend.dto.response.ApiResponse;
 import com.hesta.backend.dto.response.SceneActionResponse;
 import com.hesta.backend.dto.response.SceneResponse;
+import com.hesta.backend.dto.response.SceneExecutionResponse;
+import com.hesta.backend.dto.response.ScheduleResponse;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.SceneService;
+import com.hesta.backend.service.SceneExecutionService;
+import com.hesta.backend.service.ScheduleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +36,59 @@ import java.util.UUID;
 public class SceneController {
 
     private final SceneService sceneService;
+    private final SceneExecutionService sceneExecutionService;
+    private final ScheduleService scheduleService;
+
+    @GetMapping("/{sceneId}/schedules")
+    public ResponseEntity<ApiResponse<List<ScheduleResponse>>> schedules(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId) {
+        return ResponseEntity.ok(ApiResponse.<List<ScheduleResponse>>builder().code(1000)
+                .result(scheduleService.sceneSchedules(userDetails.getId(), homeId, sceneId)).build());
+    }
+
+    @PostMapping("/{sceneId}/schedules")
+    public ResponseEntity<ApiResponse<ScheduleResponse>> createSchedule(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId,
+            @Valid @RequestBody ScheduleRequest request) {
+        return ResponseEntity.ok(ApiResponse.<ScheduleResponse>builder().code(1000)
+                .result(scheduleService.saveSceneSchedule(userDetails.getId(), homeId, sceneId, null, request)).build());
+    }
+
+    @PutMapping("/{sceneId}/schedules/{scheduleId}")
+    public ResponseEntity<ApiResponse<ScheduleResponse>> updateSchedule(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId, @PathVariable UUID scheduleId,
+            @Valid @RequestBody ScheduleRequest request) {
+        return ResponseEntity.ok(ApiResponse.<ScheduleResponse>builder().code(1000)
+                .result(scheduleService.saveSceneSchedule(userDetails.getId(), homeId, sceneId, scheduleId, request)).build());
+    }
+
+    @DeleteMapping("/{sceneId}/schedules/{scheduleId}")
+    public ResponseEntity<ApiResponse<Void>> deleteSchedule(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId, @PathVariable UUID scheduleId) {
+        scheduleService.deleteSceneSchedule(userDetails.getId(), homeId, sceneId, scheduleId);
+        return ResponseEntity.ok(ApiResponse.<Void>builder().code(1000).build());
+    }
+
+    @PostMapping("/{sceneId}/execute")
+    public ResponseEntity<ApiResponse<SceneExecutionResponse>> executeScene(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId) {
+        return ResponseEntity.ok(ApiResponse.<SceneExecutionResponse>builder().code(1000)
+                .message("Đã chạy kịch bản")
+                .result(sceneExecutionService.execute(userDetails.getId(), homeId, sceneId)).build());
+    }
+
+    @GetMapping("/{sceneId}/executions")
+    public ResponseEntity<ApiResponse<List<SceneExecutionResponse>>> sceneExecutions(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId) {
+        return ResponseEntity.ok(ApiResponse.<List<SceneExecutionResponse>>builder().code(1000)
+                .result(sceneExecutionService.history(userDetails.getId(), homeId, sceneId)).build());
+    }
 
     @PostMapping
     public ResponseEntity<ApiResponse<SceneResponse>> createScene(

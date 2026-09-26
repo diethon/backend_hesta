@@ -1,12 +1,9 @@
 package com.hesta.backend.repository;
 
 import com.hesta.backend.entity.Device;
-import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -15,29 +12,19 @@ import java.util.UUID;
 
 @Repository
 public interface DeviceRepository extends JpaRepository<Device, UUID> {
-    @Query("""
-            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, device.lastSeen as referenceTime
-            from Device device where device.isDeleted = false
-            """)
-    List<TwinHealthReference> findHealthReferences();
 
-    @Query("""
-            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, device.lastSeen as referenceTime
-            from Device device where device.id = :id and device.isDeleted = false
-            """)
-    Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);
+    @Query("SELECT d FROM Device d WHERE d.node.home.id = :homeId")
+    List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
-    // Serializes latest-state decisions for concurrent submissions on one device.
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select device from Device device where device.id = :id and device.isDeleted = false")
-    Optional<Device> findForSensorReading(@Param("id") UUID id);
+    @Query("SELECT d FROM Device d WHERE d.node.id = :roomId")
+    List<Device> findByRoomId(@Param("roomId") UUID roomId);
 
-    List<Device> findByHomeId(UUID homeId);
-    @EntityGraph(attributePaths = "room")
-    List<Device> findByHomeIdOrderByIdAsc(UUID homeId);
-    List<Device> findByRoomId(UUID roomId);
-    Optional<Device> findByNodeIdAndGpioPin(UUID nodeId, Short gpioPin);
-    List<Device> findAllByHomeIdOrderByNameAsc(UUID homeId);
+    @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.name = :name")
+    Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);
+
+    Optional<Device> findByMqttTopic(String mqttTopic);
+    List<Device> findAllByRoom_Home_IdOrderByNameAsc(UUID homeId);
+
+    @Query("SELECT CASE WHEN COUNT(d) > 0 THEN true ELSE false END FROM Device d JOIN HomeMember hm ON d.room.home.id = hm.home.id WHERE d.id = :deviceId AND hm.user.id = :userId")
+    boolean hasAccessToDevice(@Param("deviceId") UUID deviceId, @Param("userId") UUID userId);
 }
