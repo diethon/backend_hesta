@@ -8,7 +8,6 @@ import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,9 +58,9 @@ class SceneRepositoryTest {
                 .createdBy(owner)
                 .build());
         device = deviceRepository.save(Device.builder()
-                .home(home)
+                
                 .name("Living room light")
-                .deviceType(DeviceType.LIGHT)
+                .deviceType("LIGHT")
                 .status(DeviceStatus.UNKNOWN)
                 .currentState(Map.of())
                 .build());
@@ -70,7 +69,7 @@ class SceneRepositoryTest {
     @Test
     void createFindUpdateAndDeleteScene() {
         Scene scene = sceneRepository.saveAndFlush(Scene.builder()
-                .home(home)
+                
                 .name("Movie time")
                 .description("Dim the living room")
                 .enabled(true)
@@ -96,7 +95,7 @@ class SceneRepositoryTest {
     @Test
     void createsMultipleActionsAndReturnsThemInOrder() throws Exception {
         Scene scene = sceneRepository.save(Scene.builder()
-                .home(home)
+                
                 .name("Ordered scene")
                 .enabled(true)
                 .build());
@@ -128,7 +127,7 @@ class SceneRepositoryTest {
     @Test
     void rejectsDuplicateOrderWithinScene() throws Exception {
         Scene scene = sceneRepository.save(Scene.builder()
-                .home(home)
+                
                 .name("Unique order scene")
                 .enabled(true)
                 .build());
@@ -153,7 +152,7 @@ class SceneRepositoryTest {
     @Test
     void deletingSceneRemovesItsActions() throws Exception {
         Scene scene = sceneRepository.save(Scene.builder()
-                .home(home)
+                
                 .name("Temporary scene")
                 .enabled(true)
                 .build());

@@ -1,7 +1,6 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.command.CommandResult;
-import com.hesta.backend.dto.request.LedCommandRequest;
 import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.service.DeviceCommandService;
@@ -21,10 +20,7 @@ import java.util.concurrent.CompletableFuture;
 @Service
 public class MockDeviceCommandServiceImpl implements DeviceCommandService {
 
-    @Override
-    public void sendCommand(UUID deviceId, LedCommandRequest request) {
-        log.info("Mock sending DeviceCommandRequest to Device [{}]: Action [{}]", deviceId, request != null ? request.getAction() : null);
-    }
+
 
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
@@ -63,6 +59,17 @@ public class MockDeviceCommandServiceImpl implements DeviceCommandService {
         
         if (action == DeviceAction.TURN_ON) ackState.put("power", "ON");
         if (action == DeviceAction.TURN_OFF) ackState.put("power", "OFF");
+        
+        if (action == DeviceAction.SET_COLOR) {
+            ackState.put("power", "ON");
+            Map<String, Object> colorState = new HashMap<>();
+            if (parameters != null) {
+                if (parameters.containsKey("r")) colorState.put("r", parameters.get("r"));
+                if (parameters.containsKey("g")) colorState.put("g", parameters.get("g"));
+                if (parameters.containsKey("b")) colorState.put("b", parameters.get("b"));
+            }
+            ackState.put("color", colorState);
+        }
 
         return CompletableFuture.completedFuture(
                 CommandResult.builder()

@@ -3,7 +3,6 @@ package com.hesta.backend.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
-import com.hesta.backend.dto.request.LedCommandRequest;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
@@ -44,10 +43,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
 
 
-    @Override
-    public void sendCommand(UUID deviceId, LedCommandRequest request) {
 
-    }
 
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {

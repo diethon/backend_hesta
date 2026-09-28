@@ -3,7 +3,6 @@ package com.hesta.backend.integration;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.NluService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
@@ -65,9 +64,8 @@ public class DeviceMqttNluIntegrationTest {
         // Setup mock device for test
         testLight = new Device();
         testLight.setName("Đèn phòng khách");
-        testLight.setDeviceType(DeviceType.LIGHT);
+        testLight.setDeviceType("LIGHT");
         testLight.setStatus(DeviceStatus.ONLINE);
-        testLight.setHome(home);
         Map<String, Object> state = new HashMap<>();
         state.put("status", "OFF");
         testLight.setCurrentState(state);
@@ -94,6 +92,6 @@ public class DeviceMqttNluIntegrationTest {
         
         // Cleanup
         deviceRepository.delete(testLight);
-        homeRepository.delete(testLight.getHome());
+        homeRepository.deleteAll();
     }
 }

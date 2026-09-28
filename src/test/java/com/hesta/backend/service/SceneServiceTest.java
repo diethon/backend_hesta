@@ -10,7 +10,6 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -67,10 +66,10 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).home(home).name("Lamp").deviceType(DeviceType.LIGHT).build();
+        device = Device.builder().id(deviceId).name("Lamp").deviceType("LIGHT").build();
         scene = Scene.builder()
                 .id(sceneId)
-                .home(home)
+                
                 .name("Evening")
                 .enabled(true)
                 .actions(new ArrayList<>())
@@ -120,9 +119,9 @@ class SceneServiceTest {
         Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
         Device foreignDevice = Device.builder()
                 .id(deviceId)
-                .home(anotherHome)
+                
                 .name("Foreign lamp")
-                .deviceType(DeviceType.LIGHT)
+                .deviceType("LIGHT")
                 .build();
         when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
@@ -146,7 +145,7 @@ class SceneServiceTest {
         assertThat(response.getAction()).isEqualTo("SET_BRIGHTNESS");
         assertThat(response.getValue().intValue()).isEqualTo(75);
 
-        Scene emptyScene = Scene.builder().id(sceneId).home(home).name("Empty").actions(new ArrayList<>()).build();
+        Scene emptyScene = Scene.builder().id(sceneId).name("Empty").actions(new ArrayList<>()).build();
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(emptyScene));
         assertError(() -> sceneService.addAction(userId, homeId, sceneId,
                 actionRequest(deviceId, "OPEN_PORTAL", null, 0)), ErrorCode.SCENE_ACTION_INVALID);

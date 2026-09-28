@@ -6,5 +6,6 @@ public enum DeviceAction {
     SET_BRIGHTNESS,
     SET_TEMPERATURE,
     SET_MODE,
-    TOGGLE
+    TOGGLE,
+    SET_COLOR
 }

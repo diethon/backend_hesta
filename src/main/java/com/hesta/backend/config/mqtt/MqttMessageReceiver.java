@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.request.TelemetryPayload;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.repository.EdgeNodeRepository;
+import com.hesta.backend.entity.EdgeNode;
+import java.util.List;
 import com.hesta.backend.service.TelemetryService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +27,7 @@ public class MqttMessageReceiver {
 
     private final ObjectMapper objectMapper;
     private final TelemetryService telemetryService;
+    private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
 
     /**
@@ -78,11 +82,11 @@ public class MqttMessageReceiver {
             // 3. TELEMETRY / SENSOR
             // =====================================================
 
-            if (topic.endsWith("/telemetry")
-                    || topic.endsWith("/sensor")) {
-
+            if (topic.endsWith("/catalog")) {
+                handleCatalog(topic, payload);
+            }
+            else if (topic.endsWith("/telemetry") || topic.endsWith("/sensor")) {
                 handleTelemetry(topic, payload);
-
             }
 
             // =====================================================
@@ -495,5 +499,27 @@ public class MqttMessageReceiver {
         );
 
         return null;
+    }
+    private void handleCatalog(String topic, String payload) {
+        log.info("Processing catalog. Topic: [{}]", topic);
+        try {
+            // Topic format: hesta/nodes/{nodeId}/catalog
+            String[] parts = topic.split("/");
+            if (parts.length >= 4) {
+                String nodeId = parts[2];
+                java.util.Optional<EdgeNode> nodeOpt = edgeNodeRepository.findByNodeCode(nodeId);
+                if (nodeOpt.isPresent()) {
+                    EdgeNode node = nodeOpt.get();
+                    List<Map<String, String>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, String>>>() {});
+                    node.setSupportedTypes(supportedTypes);
+                    edgeNodeRepository.save(node);
+                    log.info("Updated catalog for node [{}]: {}", nodeId, supportedTypes);
+                } else {
+                    log.warn("Node not found for catalog update: {}", nodeId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse catalog payload", e);
+        }
     }
 }

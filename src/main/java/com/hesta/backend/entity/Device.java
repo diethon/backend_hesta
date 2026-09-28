@@ -1,7 +1,6 @@
 package com.hesta.backend.entity;
 
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -16,7 +15,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
+        @UniqueConstraint(columnNames = {"node_id"})
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
@@ -41,9 +40,8 @@ public class Device {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "device_type", nullable = false, length = 50)
-    private DeviceType deviceType;
+    private String deviceType;
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;

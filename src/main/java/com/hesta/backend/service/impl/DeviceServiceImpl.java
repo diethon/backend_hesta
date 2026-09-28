@@ -16,7 +16,6 @@ import com.hesta.backend.service.DeviceService;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
 import com.hesta.backend.realtime.model.RealtimeEvent;
 import com.hesta.backend.realtime.model.RealtimeEventType;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.entity.DeviceStateHistory;
 import lombok.RequiredArgsConstructor;
@@ -130,7 +129,7 @@ public class DeviceServiceImpl implements DeviceService {
 
             // 3. Throttling cho CẢM BIẾN (Chỉ lưu History 5 phút 1 lần)
             boolean shouldSaveHistory = true;
-            if (device.getDeviceType() == DeviceType.SENSOR) {
+            if ("SENSOR".equals(device.getDeviceType())) {
                 OffsetDateTime lastSave = lastSensorSaveTime.get(deviceId);
                 if (lastSave != null && Duration.between(lastSave, OffsetDateTime.now()).toMinutes() < 5) {
                     shouldSaveHistory = false; // Bỏ qua ghi DB Lịch sử

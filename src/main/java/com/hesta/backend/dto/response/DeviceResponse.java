@@ -50,7 +50,7 @@ public class DeviceResponse {
                 .nodeId(device.getNode() != null ? device.getNode().getId() : null)
                 .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())
-                .deviceType(device.getDeviceType() != null ? device.getDeviceType().name() : null)
+                .deviceType(device.getDeviceType())
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
                 .currentState(device.getCurrentState())
