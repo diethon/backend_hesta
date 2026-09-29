@@ -510,7 +510,7 @@ public class MqttMessageReceiver {
                 java.util.Optional<EdgeNode> nodeOpt = edgeNodeRepository.findByNodeCode(nodeId);
                 if (nodeOpt.isPresent()) {
                     EdgeNode node = nodeOpt.get();
-                    List<Map<String, String>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, String>>>() {});
+                    List<Map<String, Object>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, Object>>>() {});
                     node.setSupportedTypes(supportedTypes);
                     edgeNodeRepository.save(node);
                     log.info("Updated catalog for node [{}]: {}", nodeId, supportedTypes);

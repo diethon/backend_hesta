@@ -18,7 +18,7 @@ public class EdgeNodeResponse {
     private UUID id;
     private String nodeCode;
     private String status;
-    private List<Map<String, String>> supportedTypes;
+    private List<Map<String, Object>> supportedTypes;
     private OffsetDateTime pairedAt;
 
     public static EdgeNodeResponse fromEntity(EdgeNode node) {

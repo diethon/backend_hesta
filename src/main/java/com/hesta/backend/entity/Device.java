@@ -15,7 +15,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id"})
+        @UniqueConstraint(columnNames = {"node_id", "local_id"})
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
@@ -36,6 +36,9 @@ public class Device {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "node_id")
     private EdgeNode node;
+
+    @Column(name = "local_id", length = 50)
+    private String localId;
 
     @Column(name = "name", nullable = false, length = 150)
     private String name;

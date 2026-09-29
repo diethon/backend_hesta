@@ -60,11 +60,13 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             Device device = deviceRepository.findById(deviceId)
                     .orElseThrow(() -> new RuntimeException("Device not found"));
             
-            String nodeId = device.getNode() != null ? device.getNode().getId().toString() : "unknown";
-            String topic = String.format("%s/%s/devices/%s/command", topicPrefix, nodeId, deviceId.toString());
+            String nodeCode = device.getNode() != null ? device.getNode().getNodeCode() : "unknown";
+            String localId = device.getLocalId() != null ? device.getLocalId() : device.getId().toString();
+            String topic = String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, localId);
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("commandId", commandId);
+            payload.put("target", localId);
             payload.put("action", action);
             payload.put("parameters", parameters == null ? new HashMap<>() : parameters);
             payload.put("timestamp", System.currentTimeMillis());
