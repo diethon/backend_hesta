@@ -2,6 +2,7 @@ package com.hesta.backend.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;

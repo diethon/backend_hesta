@@ -2,6 +2,7 @@ package com.hesta.backend.integration;
 
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.DeviceStatus;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.NluService;
