@@ -36,6 +36,10 @@ public class Scene {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    @Size(max = 50)
+    @Column(name = "icon", length = 50)
+    private String icon;
+
     @Size(max = 2000)
     @Column(name = "description", length = 2000)
     private String description;
@@ -48,6 +52,11 @@ public class Scene {
     @OrderBy("order ASC, id ASC")
     @Builder.Default
     private List<SceneAction> actions = new ArrayList<>();
+
+    @OneToMany(mappedBy = "scene", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("scheduledTime ASC, id ASC")
+    @Builder.Default
+    private List<SceneSchedule> schedules = new ArrayList<>();
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

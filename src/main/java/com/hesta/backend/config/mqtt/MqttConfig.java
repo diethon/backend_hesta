@@ -40,6 +40,9 @@ public class MqttConfig {
     @Value("${mqtt.topic.prefix:hesta/nodes}")
     private String topicPrefix;
 
+    @Value("${mqtt.inbound.auto-startup:true}")
+    private boolean inboundAutoStartup;
+
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
@@ -100,6 +103,7 @@ public class MqttConfig {
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(mqttInputChannel());
+        adapter.setAutoStartup(inboundAutoStartup);
         return adapter;
     }
 }

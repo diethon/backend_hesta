@@ -1,10 +1,12 @@
 package com.hesta.backend.config.mqtt;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
+@EnabledIfEnvironmentVariable(named = "RUN_MQTT_SMOKE_TEST", matches = "true")
 class MqttSmokeTest {
 
     @Autowired

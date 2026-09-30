@@ -3,8 +3,14 @@ package com.hesta.backend.config.mqtt;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.command.CommandResult;
+import com.hesta.backend.dto.request.AutomationEventRequest;
 import com.hesta.backend.dto.request.TelemetryPayload;
+import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.repository.EdgeNodeRepository;
+import com.hesta.backend.entity.EdgeNode;
+import java.util.List;
 import com.hesta.backend.service.TelemetryService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
 import lombok.RequiredArgsConstructor;
@@ -14,16 +20,21 @@ import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class MqttMessageReceiver {
-
+    private final DeviceRepository devices;
+    private final AutomationEngine automationEngine;
     private final ObjectMapper objectMapper;
+
+
     private final TelemetryService telemetryService;
+    private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
 
     /**
@@ -78,11 +89,11 @@ public class MqttMessageReceiver {
             // 3. TELEMETRY / SENSOR
             // =====================================================
 
-            if (topic.endsWith("/telemetry")
-                    || topic.endsWith("/sensor")) {
-
+            if (topic.endsWith("/catalog")) {
+                handleCatalog(topic, payload);
+            }
+            else if (topic.endsWith("/telemetry") || topic.endsWith("/sensor")) {
                 handleTelemetry(topic, payload);
-
             }
 
             // =====================================================
@@ -92,6 +103,7 @@ public class MqttMessageReceiver {
             else if (topic.endsWith("/state")) {
 
                 handleDeviceState(topic, payload);
+                processSensorAutomation(topic, payload);
 
             }
 
@@ -154,10 +166,45 @@ public class MqttMessageReceiver {
                 telemetryPayload
         );
 
+        if (topic.endsWith("/sensor")) {
+            processSensorAutomation(topic, payload);
+        }
+
         log.debug(
                 "Telemetry processed successfully. Topic: [{}]",
                 topic
         );
+    }
+
+    private void processSensorAutomation(String topic, String payload) throws Exception {
+        String[] parts = topic.split("/");
+        if (parts.length != 6 || !"hesta".equals(parts[0]) || !"nodes".equals(parts[1])
+                || !"devices".equals(parts[3])) {
+            return;
+        }
+
+        String nodeCode = parts[2];
+        String deviceIdStr = parts[4];
+
+        Map<String, Object> parsedData = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+        if (parsedData.containsKey("state") && parsedData.get("state") instanceof Map<?, ?>) {
+            parsedData = (Map<String, Object>) parsedData.get("state");
+        }
+        final Map<String, Object> finalData = parsedData;
+
+        java.util.Optional<com.hesta.backend.entity.Device> deviceOpt;
+        try {
+            deviceOpt = devices.findById(java.util.UUID.fromString(deviceIdStr));
+        } catch (IllegalArgumentException e) {
+            deviceOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+        }
+
+        deviceOpt
+                .filter(device -> device.getDeviceType() != null && (device.getDeviceType().endsWith("SENSOR") || device.getDeviceType().equals("CAMERA_AI")))
+                .filter(device -> device.getRoom() != null && device.getRoom().getHome() != null)
+                .ifPresent(device -> automationEngine.process(device.getRoom().getHome().getId(),
+                        AutomationEventRequest.builder().sourceDeviceId(device.getId())
+                                .eventType("SENSOR").data(finalData).build()));
     }
 
 
@@ -236,7 +283,9 @@ public class MqttMessageReceiver {
             Map<String, Object> state =
                     (Map<String, Object>) stateObject;
 
+            String nodeCode = extractNodeCodeFromTopic(topic);
             deviceService.updateDeviceStateFromMqtt(
+                    nodeCode,
                     deviceId,
                     state
             );
@@ -272,7 +321,9 @@ public class MqttMessageReceiver {
 
             if (!data.isEmpty()) {
 
+                String nodeCode = extractNodeCodeFromTopic(topic);
                 deviceService.updateDeviceStateFromMqtt(
+                        nodeCode,
                         deviceId,
                         data
                 );
@@ -451,7 +502,10 @@ public class MqttMessageReceiver {
                 state
         );
 
+        // Cannot easily determine nodeCode here without fetching device by UUID
+        // Assuming late ACK deviceId is a UUID since commands are initiated by backend using UUID
         deviceService.updateDeviceStateFromMqtt(
+                null,
                 deviceId,
                 state
         );
@@ -461,6 +515,14 @@ public class MqttMessageReceiver {
     // =============================================================
     // EXTRACT DEVICE ID FROM TOPIC
     // =============================================================
+
+    private String extractNodeCodeFromTopic(String topic) {
+        String[] parts = topic.split("/");
+        if (parts.length >= 6 && "nodes".equals(parts[1])) {
+            return parts[2];
+        }
+        return null;
+    }
 
     private String extractDeviceIdFromTopic(
             String topic
@@ -496,4 +558,27 @@ public class MqttMessageReceiver {
 
         return null;
     }
+    private void handleCatalog(String topic, String payload) {
+        log.info("Processing catalog. Topic: [{}]", topic);
+        try {
+            // Topic format: hesta/nodes/{nodeId}/catalog
+            String[] parts = topic.split("/");
+            if (parts.length >= 4) {
+                String nodeId = parts[2];
+                java.util.Optional<EdgeNode> nodeOpt = edgeNodeRepository.findByNodeCode(nodeId);
+                if (nodeOpt.isPresent()) {
+                    EdgeNode node = nodeOpt.get();
+                    List<Map<String, Object>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, Object>>>() {});
+                    node.setSupportedTypes(supportedTypes);
+                    edgeNodeRepository.save(node);
+                    log.info("Updated catalog for node [{}]: {}", nodeId, supportedTypes);
+                } else {
+                    log.warn("Node not found for catalog update: {}", nodeId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse catalog payload", e);
+        }
+    }
 }
+

@@ -8,5 +8,5 @@ package com.hesta.backend.enums;
  * - SKIPPED: Bị bỏ qua do điều kiện không thỏa mãn.
  */
 public enum ExecutionStatus {
-    SUCCESS, PARTIAL, FAILED, SKIPPED
+    PENDING, SUCCESS, PARTIAL, FAILED, SKIPPED
 }

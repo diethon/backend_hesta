@@ -21,6 +21,7 @@ public class SceneResponse {
     UUID id;
     UUID homeId;
     String name;
+    String icon;
     String description;
     boolean enabled;
     @Builder.Default
