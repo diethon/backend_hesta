@@ -135,10 +135,10 @@ class MockSensorPipelineIntegrationTest {
             em.persist(user);
             home = Home.builder().name("Mock pipeline test").createdBy(user).build();
             em.persist(home);
-            em.persist(HomeMember.builder().home(home).user(user).role(HomeRole.MEMBER).status(MemberStatus.ACTIVE).build());
+            em.persist(HomeMember.builder().user(user).role(HomeRole.MEMBER).status(MemberStatus.ACTIVE).build());
             room = Room.builder().home(home).name("Test room").build();
             em.persist(room);
-            device = Device.builder().home(home).room(room).name("Mock source device").deviceType(DeviceType.SENSOR)
+            device = Device.builder().room(room).name("Mock source device").deviceType("SENSOR")
                     .status(DeviceStatus.UNKNOWN).currentState(Map.of()).build();
             em.persist(device);
         });

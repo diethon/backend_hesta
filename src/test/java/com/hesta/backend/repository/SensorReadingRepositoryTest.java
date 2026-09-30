@@ -3,7 +3,6 @@ package com.hesta.backend.repository;
 import com.hesta.backend.entity.*;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -92,7 +91,7 @@ class SensorReadingRepositoryTest {
     }
 
     private Device device(Home home, Room room, boolean deleted) {
-        Device device = Device.builder().home(home).room(room).name("Sensor").deviceType(DeviceType.SENSOR)
+        Device device = Device.builder().room(room).name("Sensor").deviceType("SENSOR")
                 .status(DeviceStatus.UNKNOWN).currentState(Map.of()).isDeleted(deleted).build();
         entityManager.persist(device);
         return device;

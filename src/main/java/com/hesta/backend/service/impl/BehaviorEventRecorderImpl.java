@@ -7,7 +7,6 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.DeviceStateHistory;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.User;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.BehaviorEventRepository;
 import com.hesta.backend.repository.DeviceStateHistoryRepository;
@@ -34,7 +33,7 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordCommand(Device device, DeviceAction action, StateChangeSource source, CommandResult result) {
+    public void recordCommand(Device device, String action, StateChangeSource source, CommandResult result) {
         if (result == null || !result.isSuccess()) return;
         Device recordedDevice = devices.findById(device.getId()).orElse(device);
         Map<String, Object> previous = recordedDevice.getCurrentState() == null
@@ -44,7 +43,7 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
         deviceHistory.save(DeviceStateHistory.builder().device(recordedDevice).previousState(previous)
                 .newState(current).source(source).isTest(false).build());
         behaviorEvents.save(BehaviorEvent.builder().home(recordedDevice.getNode().getHome()).device(recordedDevice).room(recordedDevice.getRoom())
-                .eventType("DEVICE_ACTION").action(action.name()).eventSource(source.name())
+                .eventType("DEVICE_ACTION").action(action).eventSource(source.name())
                 .previousState(previous).currentState(current).occurredAt(OffsetDateTime.now()).build());
         recordedDevice.setCurrentState(current);
         devices.save(recordedDevice);

@@ -9,7 +9,9 @@ import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.DeviceStateHistoryRepository;
 import com.hesta.backend.repository.RoomRepository;
 import com.hesta.backend.service.DeviceService;
-import com.hesta.backend.enums.DeviceType;
+import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
+import com.hesta.backend.realtime.model.RealtimeEvent;
+import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.entity.DeviceStateHistory;
 import com.hesta.backend.service.HomeAuthorizationService;
@@ -81,24 +83,22 @@ public class DeviceServiceImpl implements DeviceService {
 
     @Override
     @Transactional
-    public void updateDeviceStateFromMqtt(String deviceIdStr, Map<String, Object> payload) {
+    public void updateDeviceStateFromMqtt(String nodeCode, String deviceIdStr, Map<String, Object> payload) {
         try {
-            UUID deviceId = UUID.fromString(deviceIdStr);
-            Device device = deviceRepository.findById(deviceId)
-                    .orElseThrow(() -> new RuntimeException("Device not found"));
-
-            List<String> allowedKeys = device.getCapabilities();
-            Map<String, Object> newState = new HashMap<>();
-
-            if (allowedKeys == null || allowedKeys.isEmpty()) {
-                newState.putAll(payload);
-            } else {
-                for (Map.Entry<String, Object> entry : payload.entrySet()) {
-                    if (allowedKeys.contains(entry.getKey())) {
-                        newState.put(entry.getKey(), entry.getValue());
-                    }
+            Device device = null;
+            try {
+                UUID deviceId = UUID.fromString(deviceIdStr);
+                device = deviceRepository.findById(deviceId).orElse(null);
+            } catch (IllegalArgumentException e) {
+                if (nodeCode != null) {
+                    device = deviceRepository.findByNodeCodeAndLocalId(nodeCode, deviceIdStr).orElse(null);
                 }
             }
+            if (device == null) {
+                throw new RuntimeException("Device not found");
+            }
+
+            Map<String, Object> newState = new HashMap<>(payload);
 
             Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
             device.setLastSeen(OffsetDateTime.now());
@@ -117,12 +117,12 @@ public class DeviceServiceImpl implements DeviceService {
 
             // 3. Throttling cho CẢM BIẾN (Chỉ lưu History 5 phút 1 lần)
             boolean shouldSaveHistory = true;
-            if (device.getDeviceType() == DeviceType.SENSOR) {
-                OffsetDateTime lastSave = lastSensorSaveTime.get(deviceId);
+            if (device.getDeviceType() != null && device.getDeviceType().endsWith("SENSOR")) {
+                OffsetDateTime lastSave = lastSensorSaveTime.get(device.getId());
                 if (lastSave != null && Duration.between(lastSave, OffsetDateTime.now()).toMinutes() < 5) {
                     shouldSaveHistory = false; // Bỏ qua ghi DB Lịch sử
                 } else {
-                    lastSensorSaveTime.put(deviceId, OffsetDateTime.now());
+                    lastSensorSaveTime.put(device.getId(), OffsetDateTime.now());
                 }
             }
 

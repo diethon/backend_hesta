@@ -17,15 +17,15 @@ import java.util.UUID;
 public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("""
-            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, device.lastSeen as referenceTime
+            select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+                   null as metricType, null as referenceTime
             from Device device where device.isDeleted = false
             """)
     List<TwinHealthReference> findHealthReferences();
 
     @Query("""
-            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, device.lastSeen as referenceTime
+            select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+                   null as metricType, null as referenceTime
             from Device device where device.id = :id and device.isDeleted = false
             """)
     Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);
@@ -34,24 +34,29 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("select device from Device device where device.id = :id and device.isDeleted = false")
     Optional<Device> findForSensorReading(@Param("id") UUID id);
 
-    List<Device> findByHomeId(UUID homeId);
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId")
+    List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
     @EntityGraph(attributePaths = "room")
-    List<Device> findByHomeIdOrderByIdAsc(UUID homeId);
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.id ASC")
+    List<Device> findByHomeIdOrderByIdAsc(@Param("homeId") UUID homeId);
 
     List<Device> findByRoomId(UUID roomId);
 
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.name = :name")
     Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);
 
+    @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.localId = :localId")
+    Optional<Device> findByNodeCodeAndLocalId(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
+
     Optional<Device> findByMqttTopic(String mqttTopic);
 
-    Optional<Device> findByNodeIdAndGpioPin(UUID nodeId, Short gpioPin);
-
-    List<Device> findAllByHomeIdOrderByNameAsc(UUID homeId);
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.name ASC")
+    List<Device> findAllByHomeIdOrderByNameAsc(@Param("homeId") UUID homeId);
 
     List<Device> findAllByRoom_Home_IdOrderByNameAsc(UUID homeId);
 
-    @Query("SELECT CASE WHEN COUNT(d) > 0 THEN true ELSE false END FROM Device d JOIN HomeMember hm ON d.home.id = hm.home.id WHERE d.id = :deviceId AND hm.user.id = :userId")
+    @Query("SELECT CASE WHEN COUNT(d) > 0 THEN true ELSE false END FROM Device d JOIN HomeMember hm ON d.room.home.id = hm.home.id WHERE d.id = :deviceId AND hm.user.id = :userId")
     boolean hasAccessToDevice(@Param("deviceId") UUID deviceId, @Param("userId") UUID userId);
+
 }

@@ -42,9 +42,9 @@ class DeviceStateRealtimeTest {
 
     @Test
     void stateUpdate_afterSaving_queuesDetachedSingleNodePayload() {
-        fixture.light.setCapabilities(List.of("power", "brightness"));
+        fixture.light.setCapabilities(java.util.Map.of("LIGHT", java.util.List.of("power", "brightness")));
         when(devices.findById(fixture.light.getId())).thenReturn(Optional.of(fixture.light));
-        service.updateDeviceStateFromMqtt(fixture.light.getId().toString(),
+        service.updateDeviceStateFromMqtt(null, fixture.light.getId().toString(),
                 Map.of("power", "OFF", "brightness", 0, "unsupported", 42));
 
         var captor = ArgumentCaptor.forClass(DeviceStateChangedEvent.class);
@@ -65,7 +65,7 @@ class DeviceStateRealtimeTest {
 
     @Test
     void stateUpdate_invalidDeviceId_doesNotQueueEvent() {
-        service.updateDeviceStateFromMqtt("invalid", Map.of());
+        service.updateDeviceStateFromMqtt(null, "invalid", Map.of());
         verifyNoInteractions(devices, events);
     }
 }

@@ -26,7 +26,7 @@ public class DeviceResponse {
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
-    private List<String> capabilities;
+    private java.util.Map<String, java.util.List<String>> capabilities;
     private String icon;
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
@@ -52,7 +52,7 @@ public class DeviceResponse {
                 .nodeId(device.getNode() != null ? device.getNode().getId() : null)
                 .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())
-                .deviceType(device.getDeviceType() != null ? device.getDeviceType().name() : null)
+                .deviceType(device.getDeviceType())
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
 

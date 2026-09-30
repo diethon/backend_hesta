@@ -10,7 +10,6 @@ import com.hesta.backend.entity.SensorReading;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.service.impl.TwinLayoutServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,7 +62,7 @@ class TwinLayoutServiceIntegrationTest {
         entityManager.persist(home);
         room = Room.builder().home(home).name("Living").build();
         entityManager.persist(room);
-        device = Device.builder().home(home).room(room).name("Layout device").deviceType(DeviceType.LIGHT)
+        device = Device.builder().room(room).name("Layout device").deviceType("LIGHT")
                 .status(DeviceStatus.UNKNOWN).currentState(Map.of()).build();
         entityManager.persist(device);
         entityManager.persist(SensorReading.builder().device(device).metricType("TEMPERATURE")

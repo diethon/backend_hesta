@@ -55,7 +55,7 @@ class DeviceSensorRealtimeTransactionTest {
         assertThat(event.data()).isEqualTo(payload).isInstanceOf(TwinDeviceSnapshotResponse.class);
         assertThat(payload.roomId()).isEqualTo(fixture.living.getId());
         assertThat(payload.currentState().path("power").asText()).isEqualTo("ON");
-        assertThat(payload.lastSeen()).isEqualTo(TwinFixtures.TIME);
+        assertThat(payload.lastSeen()).isNull();
     }
 
     @Test

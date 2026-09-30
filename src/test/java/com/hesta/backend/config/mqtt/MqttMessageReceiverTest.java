@@ -6,7 +6,6 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
@@ -44,7 +43,7 @@ class MqttMessageReceiverTest {
         when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
-                .deviceType(DeviceType.SENSOR).build()));
+                .deviceType("SENSOR").build()));
         receiver.handleMessage(MessageBuilder.withPayload("{\"temperature\":31}")
                 .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/sensor")
                 .build());
