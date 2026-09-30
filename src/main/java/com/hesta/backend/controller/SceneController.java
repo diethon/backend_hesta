@@ -10,6 +10,7 @@ import com.hesta.backend.dto.response.SceneActionResponse;
 import com.hesta.backend.dto.response.SceneResponse;
 import com.hesta.backend.dto.response.SceneExecutionResponse;
 import com.hesta.backend.dto.response.ScheduleResponse;
+
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.SceneService;
 import com.hesta.backend.service.SceneExecutionService;
@@ -38,6 +39,14 @@ public class SceneController {
     private final SceneService sceneService;
     private final SceneExecutionService sceneExecutionService;
     private final ScheduleService scheduleService;
+
+    @GetMapping("/action-types")
+    public ResponseEntity<ApiResponse<List<String>>> actionTypes(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId) {
+        return ResponseEntity.ok(ApiResponse.<List<String>>builder().code(1000)
+                .result(sceneService.getActionTypes(userDetails.getId(), homeId)).build());
+    }
 
     @GetMapping("/{sceneId}/schedules")
     public ResponseEntity<ApiResponse<List<ScheduleResponse>>> schedules(

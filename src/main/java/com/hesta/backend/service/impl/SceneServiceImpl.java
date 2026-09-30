@@ -12,7 +12,7 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
-import com.hesta.backend.enums.SceneActionType;
+
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -47,6 +47,19 @@ public class SceneServiceImpl implements SceneService {
     private final SceneActionRepository sceneActionRepository;
     private final DeviceRepository deviceRepository;
     private final AutomationRuleRepository automationRuleRepository;
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> getActionTypes(UUID authenticatedUserId, UUID homeId) {
+        homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
+        return deviceRepository.findByHomeId(homeId).stream()
+                .filter(d -> d.getCapabilities() != null)
+                .flatMap(d -> d.getCapabilities().values().stream())
+                .flatMap(java.util.List::stream)
+                .distinct()
+                .sorted()
+                .toList();
+    }
 
     @Override
     @Transactional
@@ -230,14 +243,15 @@ public class SceneServiceImpl implements SceneService {
         if (device == null) {
             throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
         }
-        if (!home.getId().equals(device.getNode().getHome().getId())) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null
+                || !home.getId().equals(device.getRoom().getHome().getId())) {
             throw new AppException(ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
         }
-        SceneActionType actionType = validateActionValue(request.getAction(), request.getValue());
+        String validAction = validateActionValue(request.getAction(), request.getValue(), device);
         return SceneAction.builder()
                 .scene(scene)
                 .targetDevice(device)
-                .action(actionType.name())
+                .action(validAction)
                 .value(normalizeValue(request.getValue()))
                 .order(request.getOrder())
                 .build();
@@ -273,22 +287,28 @@ public class SceneServiceImpl implements SceneService {
         }
     }
 
-    private SceneActionType validateActionValue(String action, JsonNode value) {
-        SceneActionType actionType = SceneActionType.from(action)
-                .orElseThrow(() -> new AppException(ErrorCode.SCENE_ACTION_INVALID));
-        boolean valid = switch (actionType) {
-            case TURN_ON, TURN_OFF -> value == null || value.isNull();
-            case SET_BRIGHTNESS, SET_SPEED -> value != null
+    private String validateActionValue(String action, JsonNode value, Device device) {
+        if (action == null || action.isBlank()) {
+            throw new AppException(ErrorCode.SCENE_ACTION_INVALID);
+        }
+        String upperAction = action.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!device.supportsAction(upperAction)) {
+            throw new AppException(ErrorCode.SCENE_ACTION_INVALID);
+        }
+        boolean valid = switch (upperAction) {
+            case "TURN_ON", "TURN_OFF" -> value == null || value.isNull();
+            case "SET_BRIGHTNESS", "SET_SPEED" -> value != null
                     && value.isIntegralNumber()
                     && value.intValue() >= 0
                     && value.intValue() <= 100;
-            case SET_TEMPERATURE -> value != null && value.isNumber();
-            case SET_STATE -> value != null && value.isObject() && !value.isEmpty();
+            case "SET_TEMPERATURE" -> value != null && value.isNumber();
+            case "SET_STATE" -> value != null && value.isObject() && !value.isEmpty();
+            default -> true;
         };
         if (!valid) {
             throw new AppException(ErrorCode.SCENE_ACTION_VALUE_INVALID);
         }
-        return actionType;
+        return upperAction;
     }
 
     private JsonNode normalizeValue(JsonNode value) {

@@ -200,7 +200,7 @@ public class MqttMessageReceiver {
         }
 
         deviceOpt
-                .filter(device -> device.getDeviceType() != null && device.getDeviceType().endsWith("SENSOR"))
+                .filter(device -> device.getDeviceType() != null && (device.getDeviceType().endsWith("SENSOR") || device.getDeviceType().equals("CAMERA_AI")))
                 .filter(device -> device.getRoom() != null && device.getRoom().getHome() != null)
                 .ifPresent(device -> automationEngine.process(device.getRoom().getHome().getId(),
                         AutomationEventRequest.builder().sourceDeviceId(device.getId())
