@@ -152,13 +152,13 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         if (request == null || request.getAction() == null) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        DeviceAction action;
+        String action;
         try {
-            action = DeviceAction.valueOf(request.getAction().trim().toUpperCase(Locale.ROOT));
+            action = request.getAction().trim().toUpperCase(Locale.ROOT);
         } catch (RuntimeException exception) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        if (action == DeviceAction.EXECUTE_SCENE) {
+        if ("EXECUTE_SCENE".equals(action)) {
             if (request.getSceneId() == null || request.getDeviceId() != null
                     || (request.getParameters() != null && !request.getParameters().isEmpty())) {
                 throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
@@ -176,8 +176,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         Device device = devices.get(request.getDeviceId());
         validateHome(device, home);
         validateActionParameters(action, request.getParameters());
-        if (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
-                && device.getCapabilities().stream().noneMatch(capability -> capability.equalsIgnoreCase(action.name()))) {
+        if (!device.supportsAction(action)) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
         return RuleAction.builder().rule(rule).device(device).action(action)
@@ -185,16 +184,17 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 .order(request.getOrder()).build();
     }
 
-    private void validateActionParameters(DeviceAction action, Map<String, Object> parameters) {
+    private void validateActionParameters(String action, Map<String, Object> parameters) {
         Map<String, Object> values = parameters == null ? Map.of() : parameters;
         boolean valid = switch (action) {
-            case TURN_ON, TURN_OFF, TOGGLE -> true;
-            case SET_BRIGHTNESS -> percentage(values.get("level"));
-            case SET_SPEED -> percentage(values.get("speed"));
-            case SET_TEMPERATURE -> values.get("temperature") instanceof Number;
-            case SET_MODE -> values.get("mode") instanceof String mode && !mode.isBlank();
-            case SET_STATE -> !values.isEmpty();
-            case EXECUTE_SCENE -> false;
+            case "TURN_ON", "TURN_OFF", "TOGGLE" -> true;
+            case "SET_BRIGHTNESS" -> percentage(values.get("level"));
+            case "SET_SPEED" -> percentage(values.get("speed"));
+            case "SET_TEMPERATURE" -> values.get("temperature") instanceof Number;
+            case "SET_MODE" -> values.get("mode") instanceof String mode && !mode.isBlank();
+            case "SET_STATE" -> !values.isEmpty();
+            case "EXECUTE_SCENE" -> false;
+            default -> false;
         };
         if (!valid) throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
     }
@@ -279,7 +279,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                                 .deviceName(action.getDevice() == null ? null : action.getDevice().getName())
                                 .sceneId(action.getScene() == null ? null : action.getScene().getId())
                                 .sceneName(action.getScene() == null ? null : action.getScene().getName())
-                                .action(action.getAction().name())
+                                .action(action.getAction())
                                 .parameters(action.getParameters()).order(action.getOrder()).build()).toList())
                 .build();
     }
@@ -291,4 +291,5 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 .startedAt(execution.getStartedAt()).completedAt(execution.getCompletedAt())
                 .resultDetail(execution.getResultDetail()).build();
     }
+
 }

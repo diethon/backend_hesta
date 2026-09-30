@@ -123,7 +123,8 @@ class SensorReadingIngestionServiceTest {
         when(devices.findForSensorReading(input.deviceId())).thenReturn(Optional.of(fixture.environment));
         when(authorization.requireAccess(userId, fixture.home.getId())).thenThrow(new AppException(ErrorCode.UNAUTHORIZED));
         assertRejected(input, ErrorCode.UNAUTHORIZED);
-        fixture.environment.setHome(null);
+        fixture.environment.getRoom().setHome(null);
+        fixture.environment.getRoom().setHome(null);
         assertRejected(input, ErrorCode.HOME_NOT_FOUND);
         verifyNoInteractions(readings, events);
     }
@@ -175,3 +176,5 @@ class SensorReadingIngestionServiceTest {
 
     record InvalidInput(SensorReadingInput input, ErrorCode code) { }
 }
+
+

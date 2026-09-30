@@ -1,7 +1,6 @@
 package com.hesta.backend.entity;
 
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -16,7 +15,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id", "gpio_pin"})
+        @UniqueConstraint(columnNames = {"node_id", "local_id"})
 })
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
 @Getter
@@ -31,10 +30,6 @@ public class Device {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "home_id", nullable = false)
-    private Home home;
-
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "room_id")
     private Room room;
 
@@ -42,18 +37,17 @@ public class Device {
     @JoinColumn(name = "node_id")
     private EdgeNode node;
 
+    @Column(name = "local_id", length = 50)
+    private String localId;
+
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "device_type", nullable = false, length = 50)
-    private DeviceType deviceType;
+    private String deviceType;
 
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
-
-    @Column(name = "gpio_pin")
-    private Short gpioPin;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -66,7 +60,7 @@ public class Device {
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "capabilities", columnDefinition = "jsonb")
     @Builder.Default
-    private List<String> capabilities = new ArrayList<>();
+    private java.util.Map<String, java.util.List<String>> capabilities = new java.util.HashMap<>();
 
     @Column(name = "icon", length = 50)
     private String icon;
@@ -80,9 +74,6 @@ public class Device {
     @Column(name = "digital_twin_z", precision = 10, scale = 3)
     private BigDecimal digitalTwinZ;
 
-    @Column(name = "last_seen")
-    private OffsetDateTime lastSeen;
-
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -95,14 +86,17 @@ public class Device {
     @Builder.Default
     private boolean isDeleted = false;
 
-    @PrePersist
-    @PreUpdate
-    private void synchronizeHome() {
-        if (home == null && room != null) {
-            home = room.getHome();
-        }
-        if (home == null && node != null) {
-            home = node.getHome();
-        }
+    public Home getHome() { return room != null ? room.getHome() : (node != null ? node.getHome() : null); }
+
+    // DUMMY METHODS FOR COMPATIBILITY WITH TWIN HEALTH
+    public OffsetDateTime getLastSeen() { return null; }
+
+    public void setLastSeen(OffsetDateTime lastSeen) {}
+
+    public boolean supportsAction(String action) {
+        if (this.capabilities == null || this.capabilities.isEmpty()) return true;
+        return this.capabilities.values().stream().flatMap(java.util.List::stream).anyMatch(act -> act.equalsIgnoreCase(action));
     }
+
+
 }
