@@ -26,7 +26,7 @@ public class DeviceResponse {
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
-    private List<String> capabilities;
+    private java.util.Map<String, java.util.List<String>> capabilities;
     private String icon;
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
@@ -44,6 +44,8 @@ public class DeviceResponse {
 
         return DeviceResponse.builder()
                 .id(device.getId())
+                .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
+                .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
                 .homeId(home != null ? home.getId() : null)
                 .roomId(room != null ? room.getId() : null)
                 .roomName(room != null ? room.getName() : null)
@@ -53,6 +55,8 @@ public class DeviceResponse {
                 .deviceType(device.getDeviceType())
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
+
+                .status(device.getStatus().name())
                 .currentState(device.getCurrentState())
                 .capabilities(device.getCapabilities())
                 .icon(device.getIcon())

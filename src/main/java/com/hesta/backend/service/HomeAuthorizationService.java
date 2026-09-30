@@ -32,6 +32,10 @@ public class HomeAuthorizationService {
         return authorizedHome.home();
     }
 
+    public Home requireLayoutManagement(UUID userId, UUID homeId) {
+        return requireSceneManagement(userId, homeId);
+    }
+
     private AuthorizedHome loadAuthorizedHome(UUID userId, UUID homeId) {
         if (userId == null) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);

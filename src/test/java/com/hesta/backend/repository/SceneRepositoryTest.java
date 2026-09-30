@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Home;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
@@ -33,6 +34,9 @@ class SceneRepositoryTest {
     private HomeRepository homeRepository;
 
     @Autowired
+    private RoomRepository roomRepository;
+
+    @Autowired
     private DeviceRepository deviceRepository;
 
     @Autowired
@@ -58,8 +62,9 @@ class SceneRepositoryTest {
                 .name("Scene Home")
                 .createdBy(owner)
                 .build());
+        Room room = roomRepository.save(Room.builder().home(home).name("Living room").build());
         device = deviceRepository.save(Device.builder()
-                
+                .room(room)
                 .name("Living room light")
                 .deviceType("LIGHT")
                 .status(DeviceStatus.UNKNOWN)
@@ -69,7 +74,7 @@ class SceneRepositoryTest {
 
     @Test
     void createFindUpdateAndDeleteScene() {
-        Scene scene = sceneRepository.saveAndFlush(Scene.builder()
+        Scene scene = sceneRepository.saveAndFlush(Scene.builder().home(home)
                 
                 .name("Movie time")
                 .description("Dim the living room")
@@ -95,7 +100,7 @@ class SceneRepositoryTest {
 
     @Test
     void createsMultipleActionsAndReturnsThemInOrder() throws Exception {
-        Scene scene = sceneRepository.save(Scene.builder()
+        Scene scene = sceneRepository.save(Scene.builder().home(home)
                 
                 .name("Ordered scene")
                 .enabled(true)
@@ -127,7 +132,7 @@ class SceneRepositoryTest {
 
     @Test
     void rejectsDuplicateOrderWithinScene() throws Exception {
-        Scene scene = sceneRepository.save(Scene.builder()
+        Scene scene = sceneRepository.save(Scene.builder().home(home)
                 
                 .name("Unique order scene")
                 .enabled(true)
@@ -152,7 +157,7 @@ class SceneRepositoryTest {
 
     @Test
     void deletingSceneRemovesItsActions() throws Exception {
-        Scene scene = sceneRepository.save(Scene.builder()
+        Scene scene = sceneRepository.save(Scene.builder().home(home)
                 
                 .name("Temporary scene")
                 .enabled(true)

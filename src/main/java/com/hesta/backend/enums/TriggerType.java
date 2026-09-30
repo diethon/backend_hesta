@@ -6,5 +6,5 @@ package com.hesta.backend.enums;
  * - SCHEDULE: Kích hoạt dựa trên giờ hẹn.
  */
 public enum TriggerType {
-    SENSOR, SCHEDULE
+    SENSOR, EVENT, SCHEDULE
 }

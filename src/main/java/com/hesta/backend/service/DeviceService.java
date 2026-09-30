@@ -14,7 +14,7 @@ public interface DeviceService {
 
     DeviceResponse getDeviceDetail(UUID userId, UUID deviceId);
 
-    void updateDeviceStateFromMqtt(String deviceIdStr, java.util.Map<String, Object> payload);
+    void updateDeviceStateFromMqtt(String nodeCode, String deviceIdStr, java.util.Map<String, Object> payload);
 
     DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request);
 
