@@ -1,5 +1,13 @@
 # HESTA Backend
 
+## Collaboration and responses
+
+- Respond in Vietnamese by default and keep technical names, code, file names, and API identifiers in English where appropriate.
+- Lead with the result or direct answer. Be concise, relevant, and avoid repeating the request.
+- If the request is clear, proceed without asking for confirmation. State any small assumption you make.
+- After code changes, report the outcome, key files changed, checks actually run, and any remaining issue. Never claim an unrun test passed.
+- For review-only or explanation-only requests, do not modify files.
+
 ## Project baseline
 
 - Use the Java and Spring Boot versions declared in `pom.xml` (currently Java 21 and Spring Boot 3.4.3).
