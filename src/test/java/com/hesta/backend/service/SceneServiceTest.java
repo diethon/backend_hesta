@@ -71,11 +71,22 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build()).room(Room.builder().home(home).build()).name("Lamp").deviceType("LIGHT").build();
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build()).room(Room.builder().home(home).build()).name("Lamp").deviceType("LIGHT").capabilities(java.util.Map.of("LIGHT", java.util.List.of("TURN_ON", "TURN_OFF", "SET_BRIGHTNESS"))).build();
         scene = Scene.builder().id(sceneId).home(home).name("Evening")
                 .enabled(true)
                 .actions(new ArrayList<>())
                 .build();
+    }
+
+    @Test
+    void actionTypesComeFromDeviceCapabilitiesForAnAuthorizedHome() {
+        Device device1 = Device.builder().capabilities(java.util.Map.of("LIGHT", java.util.List.of("TURN_ON", "TURN_OFF"))).build();
+        Device device2 = Device.builder().capabilities(java.util.Map.of("FAN", java.util.List.of("SET_SPEED", "TURN_OFF"))).build();
+        when(deviceRepository.findByHomeId(homeId)).thenReturn(java.util.List.of(device1, device2));
+        java.util.List<String> types = sceneService.getActionTypes(userId, homeId);
+
+        assertThat(types).containsExactly("SET_SPEED", "TURN_OFF", "TURN_ON");
+        verify(homeAuthorizationService).requireAccess(userId, homeId);
     }
 
     @Test
@@ -128,6 +139,34 @@ class SceneServiceTest {
         when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(foreignDevice));
+
+        assertError(() -> sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0)),
+                ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
+        verify(sceneRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void acceptsDeviceWithoutNodeWhenItsRoomBelongsToSceneHome() {
+        device.setNode(null);
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+        when(sceneRepository.saveAndFlush(scene)).thenReturn(scene);
+
+        SceneActionResponse response = sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
+
+        assertThat(response.getAction()).isEqualTo("TURN_ON");
+    }
+
+    @Test
+    void rejectsDeviceWhoseRoomIsInAnotherHomeEvenWithSceneHomeNode() {
+        Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
+        device.setRoom(Room.builder().home(anotherHome).build());
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
 
         assertError(() -> sceneService.addAction(
                 userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0)),
