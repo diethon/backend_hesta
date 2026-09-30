@@ -5,7 +5,6 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.repository.DeviceRepository;
@@ -47,12 +46,12 @@ class ManualControlServiceTest {
         Home home = Home.builder().id(homeId).build();
         Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
                 .room(Room.builder().home(home).build())
-                .capabilities(List.of("TURN_ON", "TURN_OFF")).build();
+                .capabilities(java.util.Map.of("POWER", java.util.List.of("TURN_ON", "TURN_OFF"))).build();
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
         OffsetDateTime until = OffsetDateTime.now().plusMinutes(30);
         when(overrides.activate(device, userId, "OVERRIDE")).thenReturn(until);
         CommandResult command = CommandResult.builder().success(true).status("ACKNOWLEDGED").build();
-        when(commands.sendCommand(deviceId, DeviceAction.TURN_ON, Map.of(), StateChangeSource.MANUAL))
+        when(commands.sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL))
                 .thenReturn(CompletableFuture.completedFuture(command));
 
         var result = service.command(userId, deviceId, "TURN_ON");
@@ -62,8 +61,8 @@ class ManualControlServiceTest {
         var order = inOrder(authorization, overrides, commands, recorder);
         order.verify(authorization).requireAccess(userId, homeId);
         order.verify(overrides).activate(device, userId, "OVERRIDE");
-        order.verify(commands).sendCommand(deviceId, DeviceAction.TURN_ON, Map.of(), StateChangeSource.MANUAL);
-        order.verify(recorder).recordCommand(device, DeviceAction.TURN_ON, StateChangeSource.MANUAL, command);
+        order.verify(commands).sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL);
+        order.verify(recorder).recordCommand(device, "TURN_ON", StateChangeSource.MANUAL, command);
     }
 
     @Test

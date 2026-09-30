@@ -19,7 +19,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import com.hesta.backend.service.DeviceCommandService;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.dto.command.CommandResult;
 
@@ -156,10 +155,9 @@ public class DeviceController {
             @RequestBody Map<String, Object> request) {
 
         String actionStr = request.getOrDefault("action", "").toString();
-        DeviceAction action = DeviceAction.valueOf(actionStr);
+        
         Map<String, Object> params = (Map<String, Object>) request.get("parameters");
-
-        return deviceCommandService.sendCommand(deviceId, action, params, StateChangeSource.MANUAL)
+        return deviceCommandService.sendCommand(deviceId, actionStr, params, StateChangeSource.MANUAL)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
     }
 
@@ -171,10 +169,9 @@ public class DeviceController {
             @RequestBody Map<String, Object> request) {
 
         String actionStr = request.getOrDefault("action", "").toString();
-        DeviceAction action = DeviceAction.valueOf(actionStr);
+        
         Map<String, Object> params = (Map<String, Object>) request.get("parameters");
-
-        return deviceCommandService.sendRoomCommand(roomId, action, params, StateChangeSource.MANUAL)
+        return deviceCommandService.sendRoomCommand(roomId, actionStr, params, StateChangeSource.MANUAL)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<List<CommandResult>>builder().result(result).build()));
     }
 }

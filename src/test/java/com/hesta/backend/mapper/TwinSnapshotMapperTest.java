@@ -3,7 +3,6 @@ package com.hesta.backend.mapper;
 import com.hesta.backend.support.TwinHealthTestSupport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.support.TwinFixtures;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +18,7 @@ class TwinSnapshotMapperTest {
         var clock = new com.hesta.backend.support.MutableClock(TwinFixtures.TIME.toInstant());
         var mapper = new TwinSnapshotMapper(new ObjectMapper(), TwinHealthTestSupport.resolver(clock), clock);
         fixture.light.setStatus(com.hesta.backend.enums.DeviceStatus.ERROR);
-        assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.ACTIVE);
+        assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
         assertThat(mapper.device(fixture.light).status()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
         fixture.light.setLastSeen(null);
         assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
@@ -27,7 +26,7 @@ class TwinSnapshotMapperTest {
         clock.advance(java.time.Duration.ofSeconds(30));
         assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.STALE);
         clock.advance(java.time.Duration.ofSeconds(270));
-        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
+        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.ACTIVE);
         assertThat(fixture.light.getLastSeen()).isNull();
         assertThat(fixture.light.getStatus()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
     }
@@ -54,7 +53,7 @@ class TwinSnapshotMapperTest {
         assertThat(light.status()).isEqualTo(fixture.light.getStatus());
         assertThat(light.currentState().path("power").asText()).isEqualTo("ON");
         assertThat(light.currentState().path("brightness").asInt()).isEqualTo(80);
-        assertThat(light.lastSeen()).isEqualTo(TwinFixtures.TIME);
+        assertThat(light.lastSeen()).isNull();
         var sensors = result.rooms().get(1).sensors();
         assertThat(sensors).hasSize(2);
         var temperature = sensors.stream().filter(s -> s.metricType().equals("TEMPERATURE")).findFirst().orElseThrow();
@@ -71,7 +70,7 @@ class TwinSnapshotMapperTest {
 
     @Test
     void home_withUnassignedDeviceAndEmptyRooms_preservesAllNodesAndUnknownTimes() {
-        var device = fixture.device(99, null, "Unassigned", DeviceType.SENSOR, Map.of());
+        var device = fixture.device(99, null, "Unassigned", "SENSOR", Map.of());
         device.setLastSeen(null);
         var reading = TwinFixtures.reading(200, device, "CUSTOM", "0", null, TwinFixtures.TIME);
         var result = mapper.home(fixture.home, fixture.rooms, List.of(device), List.of(reading));

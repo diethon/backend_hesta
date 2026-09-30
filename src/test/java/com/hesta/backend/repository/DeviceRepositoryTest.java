@@ -6,7 +6,6 @@ import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -42,7 +41,7 @@ class DeviceRepositoryTest {
     }
 
     private void saveDevice(Room room, String name) {
-        devices.save(Device.builder().room(room).name(name).deviceType(DeviceType.LIGHT)
+        devices.save(Device.builder().room(room).name(name).deviceType("LIGHT")
                 .status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
     }
 }

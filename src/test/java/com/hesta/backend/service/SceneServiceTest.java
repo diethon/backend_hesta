@@ -12,7 +12,6 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -72,12 +71,8 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-                .room(Room.builder().home(home).build()).name("Lamp").deviceType(DeviceType.LIGHT).build();
-        scene = Scene.builder()
-                .id(sceneId)
-                .home(home)
-                .name("Evening")
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build()).room(Room.builder().home(home).build()).name("Lamp").deviceType("LIGHT").build();
+        scene = Scene.builder().id(sceneId).home(home).name("Evening")
                 .enabled(true)
                 .actions(new ArrayList<>())
                 .build();
@@ -128,10 +123,7 @@ class SceneServiceTest {
         Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
         Device foreignDevice = Device.builder()
                 .id(deviceId)
-                .node(EdgeNode.builder().home(anotherHome).build())
-                .room(Room.builder().home(anotherHome).build())
-                .name("Foreign lamp")
-                .deviceType(DeviceType.LIGHT)
+                .node(EdgeNode.builder().home(anotherHome).build()).room(Room.builder().home(anotherHome).build()).name("Foreign lamp").deviceType("LIGHT")
                 .build();
         when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));

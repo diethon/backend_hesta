@@ -41,13 +41,13 @@ class AutomationEngineTest {
         engine = new AutomationEngineImpl(ruleRepository, executionRepository, deviceRepository, commandService, new ObjectMapper(), behaviorEventRecorder, manualOverrideService, sceneExecutionService);
         Home home = Home.builder().id(homeId).name("Home").build();
         device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-                .room(Room.builder().home(home).build()).name("Fan").deviceType(DeviceType.FAN).build();
+                .room(Room.builder().home(home).build()).name("Fan").deviceType("FAN").build();
         rule = AutomationRule.builder().id(UUID.randomUUID()).home(home).name("Hot").enabled(true)
                 .triggerType(TriggerType.SENSOR).build();
         rule.getConditions().add(RuleCondition.builder().rule(rule).device(device).attribute("temperature")
                 .operator(ConditionOperator.GT).expectedValue(JsonNodeFactory.instance.numberNode(30))
                 .logicalOperator(LogicalOperator.AND).order(0).build());
-        rule.getActions().add(RuleAction.builder().rule(rule).device(device).action(DeviceAction.TURN_ON)
+        rule.getActions().add(RuleAction.builder().rule(rule).device(device).action("TURN_ON")
                 .parameters(Map.of()).order(0).build());
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
         lenient().when(ruleRepository.findAllByHomeIdAndEnabledTrueAndTriggerTypeIn(eq(homeId), anyList())).thenReturn(List.of(rule));
@@ -55,7 +55,7 @@ class AutomationEngineTest {
 
     @Test
     void matchingConditionCallsMockBoundaryAndStoresSuccess() {
-        when(commandService.sendCommand(eq(deviceId), eq(DeviceAction.TURN_ON), anyMap(), eq(StateChangeSource.AUTOMATION)))
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), eq(StateChangeSource.AUTOMATION)))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
         when(executionRepository.save(any())).thenAnswer(invocation -> {
             AutomationExecution execution = invocation.getArgument(0); execution.setId(UUID.randomUUID()); return execution;
@@ -66,7 +66,7 @@ class AutomationEngineTest {
         assertThat(response.getMatchedRules()).isEqualTo(1);
         assertThat(response.getExecutions().getFirst().getStatus()).isEqualTo("SUCCESS");
         verify(ruleRepository).fetchActionsByIdIn(List.of(rule.getId()));
-        verify(commandService).sendCommand(eq(deviceId), eq(DeviceAction.TURN_ON), anyMap(), eq(StateChangeSource.AUTOMATION));
+        verify(commandService).sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), eq(StateChangeSource.AUTOMATION));
     }
 
     @Test
@@ -125,7 +125,7 @@ class AutomationEngineTest {
         Scene scene = Scene.builder().id(sceneId).home(rule.getHome()).name("Evening").enabled(true).build();
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
         rule.getActions().clear();
-        rule.getActions().add(RuleAction.builder().rule(rule).scene(scene).action(DeviceAction.EXECUTE_SCENE).order(0).build());
+        rule.getActions().add(RuleAction.builder().rule(rule).scene(scene).action("EXECUTE_SCENE").order(0).build());
         when(sceneExecutionService.executeFromAutomation(homeId, sceneId)).thenReturn(SceneExecutionResponse.builder()
                 .id(UUID.randomUUID()).sceneId(sceneId).status("SUCCESS")
                 .resultDetail(new ObjectMapper().createArrayNode()).build());
@@ -146,10 +146,10 @@ class AutomationEngineTest {
                 .home(rule.getHome()).name("Cold").enabled(true).triggerType(TriggerType.SENSOR).build();
         second.getConditions().add(rule.getConditions().getFirst());
         second.getActions().add(RuleAction.builder().rule(second).device(device)
-                .action(DeviceAction.TURN_OFF).parameters(Map.of()).order(0).build());
+                .action("TURN_OFF").parameters(Map.of()).order(0).build());
         when(ruleRepository.findAllByHomeIdAndEnabledTrueAndTriggerTypeIn(eq(homeId), anyList()))
                 .thenReturn(List.of(second, rule));
-        when(commandService.sendCommand(eq(deviceId), eq(DeviceAction.TURN_ON), anyMap(), any()))
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any()))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
         when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -160,8 +160,8 @@ class AutomationEngineTest {
                 .containsExactly("SUCCESS", "SKIPPED");
         assertThat(response.getExecutions().get(1).getResultDetail().get(0).get("status").asText())
                 .isEqualTo("SKIPPED_CONFLICT");
-        verify(commandService, times(1)).sendCommand(eq(deviceId), eq(DeviceAction.TURN_ON), anyMap(), any());
-        verify(commandService, never()).sendCommand(eq(deviceId), eq(DeviceAction.TURN_OFF), anyMap(), any());
+        verify(commandService, times(1)).sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any());
+        verify(commandService, never()).sendCommand(eq(deviceId), eq("TURN_OFF"), anyMap(), any());
     }
 
     private AutomationEventRequest event(int temperature) {

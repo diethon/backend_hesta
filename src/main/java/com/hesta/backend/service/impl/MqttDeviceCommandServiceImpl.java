@@ -3,9 +3,7 @@ package com.hesta.backend.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
-import com.hesta.backend.dto.request.LedCommandRequest;
 import com.hesta.backend.entity.Device;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
@@ -44,13 +42,10 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
 
 
-    @Override
-    public void sendCommand(UUID deviceId, LedCommandRequest request) {
 
-    }
 
     @Override
-    public CompletableFuture<CommandResult> sendCommand(UUID deviceId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
+    public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         if (existing != null && !existing.isDone()) {
             log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
@@ -65,12 +60,14 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             Device device = deviceRepository.findById(deviceId)
                     .orElseThrow(() -> new RuntimeException("Device not found"));
             
-            String nodeId = device.getNode() != null ? device.getNode().getId().toString() : "unknown";
-            String topic = String.format("%s/%s/devices/%s/command", topicPrefix, nodeId, deviceId.toString());
+            String nodeCode = device.getNode() != null ? device.getNode().getNodeCode() : "unknown";
+            String localId = device.getLocalId() != null ? device.getLocalId() : device.getId().toString();
+            String topic = String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, localId);
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("commandId", commandId);
-            payload.put("action", action.name());
+            payload.put("target", localId);
+            payload.put("action", action);
             payload.put("parameters", parameters == null ? new HashMap<>() : parameters);
             payload.put("timestamp", System.currentTimeMillis());
             
@@ -118,7 +115,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     }
 
     @Override
-    public CompletableFuture<List<CommandResult>> sendRoomCommand(UUID roomId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
+    public CompletableFuture<List<CommandResult>> sendRoomCommand(UUID roomId, String action, Map<String, Object> parameters, StateChangeSource source) {
         List<Device> devices = deviceRepository.findByRoomId(roomId);
         if (devices.isEmpty()) {
             return CompletableFuture.completedFuture(new ArrayList<>());

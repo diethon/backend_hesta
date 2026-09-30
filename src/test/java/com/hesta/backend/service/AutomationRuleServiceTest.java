@@ -4,11 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.hesta.backend.dto.request.*;
 import com.hesta.backend.entity.*;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.enums.ConditionOperator;
 import com.hesta.backend.enums.LogicalOperator;
 import com.hesta.backend.enums.TriggerType;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.*;
@@ -44,8 +42,8 @@ class AutomationRuleServiceTest {
     void setUp() {
         home = Home.builder().id(homeId).name("Home").build();
         device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-                .room(Room.builder().home(home).build()).name("Fan").deviceType(DeviceType.FAN)
-                .capabilities(List.of("TURN_ON", "SET_SPEED")).build();
+                .room(Room.builder().home(home).build()).name("Fan").deviceType("FAN")
+                .capabilities(java.util.Map.of("FAN", java.util.List.of("TURN_ON", "SET_SPEED"))).build();
     }
 
     @Test
@@ -217,7 +215,7 @@ class AutomationRuleServiceTest {
                 .expectedValue(JsonNodeFactory.instance.numberNode(30))
                 .logicalOperator(LogicalOperator.AND).order(0).build());
         rule.getActions().add(RuleAction.builder().id(UUID.randomUUID()).rule(rule).device(device)
-                .action(DeviceAction.SET_SPEED).parameters(Map.of("speed", 80)).order(0).build());
+                .action("SET_SPEED").parameters(Map.of("speed", 80)).order(0).build());
         return rule;
     }
 }

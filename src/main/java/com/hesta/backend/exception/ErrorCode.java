@@ -15,6 +15,7 @@ public enum ErrorCode {
     // Scene management
     HOME_NOT_FOUND(1100, "Home not found", HttpStatus.NOT_FOUND),
     SCENE_NOT_FOUND(1101, "Scene not found", HttpStatus.NOT_FOUND),
+    NODE_NOT_FOUND(1103, "Edge node not found", HttpStatus.NOT_FOUND),
     DEVICE_NOT_FOUND(1102, "Device not found", HttpStatus.NOT_FOUND),
     SCENE_NAME_INVALID(1103, "Scene name must be between 1 and 150 characters", HttpStatus.BAD_REQUEST),
     SCENE_DESCRIPTION_INVALID(1104, "Scene description must not exceed 2000 characters", HttpStatus.BAD_REQUEST),

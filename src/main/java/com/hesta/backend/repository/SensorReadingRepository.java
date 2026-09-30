@@ -13,7 +13,7 @@ import java.util.UUID;
 @Repository
 public interface SensorReadingRepository extends JpaRepository<SensorReading, Long> {
     String HEALTH_REFERENCES = """
-            select device.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+            select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
                    reading.metricType as metricType, reading.recordedAt as referenceTime
             from SensorReading reading join reading.device device
             where device.isDeleted = false and not exists (
@@ -38,7 +38,7 @@ public interface SensorReadingRepository extends JpaRepository<SensorReading, Lo
             select reading from SensorReading reading
             join fetch reading.device device
             left join fetch device.room
-            where device.home.id = :homeId and device.isDeleted = false
+            where device.room.home.id = :homeId and device.isDeleted = false
               and not exists (
                 select newer.id from SensorReading newer
                 where newer.device.id = device.id and newer.metricType = reading.metricType
