@@ -83,9 +83,9 @@ python -m pytest tests/ -v
 
 | Model | Load (ms) | STT avg (ms) | Trạng thái |
 |-------|-----------|---------------|------------|
-| tiny  | 1320 (Dev)| 392 (Dev)     | OK (Dev)   |
-| base  | TBD       | TBD           | TBD        |
-| small | TBD       | TBD           | TBD        |
+| tiny  | 1125 (Dev)| 372 (Dev)     | OK (Dev)   |
+| base  | 676 (Dev) | 718 (Dev)     | OK (Dev)   |
+| small | 1369 (Dev)| 2025 (Dev)    | CHẬM (Dev) |
 
 **Ngân sách latency (Mục 2.5):** STT ≤ 900ms, tổng pipeline ≤ 1.5s
 
