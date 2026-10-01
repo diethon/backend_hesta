@@ -83,7 +83,7 @@ python -m pytest tests/ -v
 
 | Model | Load (ms) | STT avg (ms) | Trạng thái |
 |-------|-----------|---------------|------------|
-| tiny  | TBD       | TBD           | TBD        |
+| tiny  | 1320 (Dev)| 392 (Dev)     | OK (Dev)   |
 | base  | TBD       | TBD           | TBD        |
 | small | TBD       | TBD           | TBD        |
 
@@ -93,10 +93,10 @@ python -m pytest tests/ -v
 
 | # | Việc | Ai cần làm | Khi nào |
 |---|------|-----------|---------|
-| 1 | Tạo endpoint `GET /internal/devices?homeId=...` trong Spring Boot | Người phụ trách Java | Trước khi test device resolution thật |
-| 2 | Tạo endpoint `POST /internal/devices/{deviceId}/actions` trong Spring Boot | Người phụ trách Java | Trước khi test dispatch thật |
-| 3 | Tạo filter xác thực `X-Internal-Api-Key` cho prefix `/internal/**` | Người phụ trách Java | Trước khi test auth thật |
-| 4 | Thống nhất giá trị `INTERNAL_API_KEY` | Cả 2 bên | Trước khi tích hợp |
+| 1 | Tạo endpoint `GET /internal/devices?homeId=...` trong Spring Boot | Người phụ trách Java | ✅ Hoàn thành |
+| 2 | Tạo endpoint `POST /internal/devices/{deviceId}/actions` trong Spring Boot | Người phụ trách Java | ✅ Hoàn thành |
+| 3 | Tạo filter xác thực `X-Internal-Api-Key` cho prefix `/internal/**` | Người phụ trách Java | ✅ Hoàn thành |
+| 4 | Thống nhất giá trị `INTERNAL_API_KEY` | Cả 2 bên | ✅ Hoàn thành |
 | 5 | Cắm micro vào Pi, xác nhận `arecord -l` | Bạn | Trước khi test audio thật |
 | 6 | Đo nhiễu nền, hiệu chỉnh `rms_threshold` | Bạn | Trước khi deploy |
 | 7 | Benchmark STT trên Pi thật | Bạn | Quyết định model size |
