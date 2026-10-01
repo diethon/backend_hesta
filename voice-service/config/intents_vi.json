@@ -1,0 +1,70 @@
+{
+  "intents": [
+    {
+      "action": "TURN_ON",
+      "device_type": "light",
+      "patterns": ["bật đèn", "mở đèn", "bật điện", "mở điện", "bật sáng"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "light",
+      "patterns": ["tắt đèn", "tắt hết đèn", "tắt điện", "tắt sáng"]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "fan",
+      "patterns": ["bật quạt", "mở quạt"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "fan",
+      "patterns": ["tắt quạt", "tắt hết quạt"]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "air_conditioner",
+      "patterns": ["bật điều hòa", "mở điều hòa", "bật máy lạnh", "mở máy lạnh"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "air_conditioner",
+      "patterns": ["tắt điều hòa", "tắt máy lạnh"]
+    },
+    {
+      "action": "SET_TEMPERATURE",
+      "device_type": "air_conditioner",
+      "patterns": ["chỉnh điều hòa", "đặt nhiệt độ", "chỉnh nhiệt độ", "để nhiệt độ"],
+      "has_parameter": "temperature"
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "door_lock",
+      "patterns": ["mở khóa cửa", "mở cửa"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "door_lock",
+      "patterns": ["khóa cửa", "đóng cửa", "khoá cửa"]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "curtain",
+      "patterns": ["mở rèm", "kéo rèm ra", "mở màn"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "curtain",
+      "patterns": ["đóng rèm", "kéo rèm vào", "đóng màn"]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "water_heater",
+      "patterns": ["bật bình nóng lạnh", "mở bình nóng lạnh", "bật nước nóng"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "water_heater",
+      "patterns": ["tắt bình nóng lạnh", "tắt nước nóng"]
+    }
+  ]
+}
