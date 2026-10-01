@@ -54,7 +54,7 @@ class MqttMessageReceiverTest {
     @Test
     void invalidTopicNeverRunsAutomation() {
         receiver.handleMessage(MessageBuilder.withPayload("{\"temperature\":31}")
-                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/unknown/devices/unknown/state")
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/invalid/topic/format")
                 .build());
         verifyNoInteractions(devices, engine);
     }

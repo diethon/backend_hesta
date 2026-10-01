@@ -26,7 +26,7 @@ class TwinSnapshotMapperTest {
         clock.advance(java.time.Duration.ofSeconds(30));
         assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.STALE);
         clock.advance(java.time.Duration.ofSeconds(270));
-        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.ACTIVE);
+        assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
         assertThat(fixture.light.getLastSeen()).isNull();
         assertThat(fixture.light.getStatus()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
     }

@@ -41,7 +41,11 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.id ASC")
     List<Device> findByHomeIdOrderByIdAsc(@Param("homeId") UUID homeId);
 
-    List<Device> findByRoomId(UUID roomId);
+    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId")
+    List<Device> findByRoomId(@Param("roomId") UUID roomId);
+
+    @Query("SELECT d FROM Device d JOIN FETCH d.room r JOIN FETCH r.home WHERE d.id = :deviceId")
+    Optional<Device> findByIdWithRoomHome(@Param("deviceId") UUID deviceId);
 
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.name = :name")
     Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);

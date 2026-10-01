@@ -16,6 +16,7 @@ import com.hesta.backend.service.ManualControlService;
 import com.hesta.backend.service.ManualOverrideService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
+@Transactional
 @RequiredArgsConstructor
 public class ManualControlServiceImpl implements ManualControlService {
     private final HomeAuthorizationService authorization;
@@ -70,7 +72,7 @@ public class ManualControlServiceImpl implements ManualControlService {
 
     private Device authorizedDevice(UUID userId, UUID deviceId) {
         Device device = devices.findById(deviceId).orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        authorization.requireAccess(userId, device.getNode().getHome().getId());
+        authorization.requireAccess(userId, device.getHome().getId());
         return device;
     }
 

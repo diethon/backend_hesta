@@ -21,8 +21,8 @@
               "power": "ON",
               "brightness": 80
             },
-            "lastSeen": "2026-09-17T09:00:00Z",
-            "healthStatus": "ACTIVE"
+            "lastSeen": null,
+            "healthStatus": "OFFLINE"
           },
           {
             "deviceId": "00000000-0000-4000-8000-000000000023",
@@ -34,8 +34,8 @@
             "currentState": {
               "motion": true
             },
-            "lastSeen": "2026-09-17T09:00:00Z",
-            "healthStatus": "ACTIVE"
+            "lastSeen": null,
+            "healthStatus": "OFFLINE"
           }
         ],
         "sensors": [
@@ -68,8 +68,8 @@
               "temperature": 26.4,
               "humidity": 61
             },
-            "lastSeen": "2026-09-17T09:00:00Z",
-            "healthStatus": "ACTIVE"
+            "lastSeen": null,
+            "healthStatus": "OFFLINE"
           }
         ],
         "sensors": [
@@ -89,7 +89,7 @@
             "deviceId": "00000000-0000-4000-8000-000000000022",
             "metricType": "TEMPERATURE",
             "latestValue": 26.4,
-            "unit": "°C",
+            "unit": "\u00b0C",
             "observedAt": "2026-09-17T09:00:00Z",
             "healthStatus": "ACTIVE"
           }
