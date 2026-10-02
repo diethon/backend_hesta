@@ -60,18 +60,18 @@ public class GateServiceImpl implements GateService {
     }
 
     @Override
-    public CompletableFuture<CommandResult> open(UUID userId, UUID deviceId) {
-        return sendCommand(userId, deviceId, GateCommandRequest.builder().action("OPEN").build());
+    public CompletableFuture<CommandResult> open(UUID userId, UUID deviceId, String nodeId) {
+        return sendCommand(userId, deviceId, GateCommandRequest.builder().action("OPEN").nodeId(nodeId).build());
     }
 
     @Override
-    public CompletableFuture<CommandResult> close(UUID userId, UUID deviceId) {
-        return sendCommand(userId, deviceId, GateCommandRequest.builder().action("CLOSE").build());
+    public CompletableFuture<CommandResult> close(UUID userId, UUID deviceId, String nodeId) {
+        return sendCommand(userId, deviceId, GateCommandRequest.builder().action("CLOSE").nodeId(nodeId).build());
     }
 
     @Override
-    public CompletableFuture<CommandResult> stop(UUID userId, UUID deviceId) {
-        return sendCommand(userId, deviceId, GateCommandRequest.builder().action("STOP").build());
+    public CompletableFuture<CommandResult> stop(UUID userId, UUID deviceId, String nodeId) {
+        return sendCommand(userId, deviceId, GateCommandRequest.builder().action("STOP").nodeId(nodeId).build());
     }
 
     @Override
@@ -86,14 +86,10 @@ public class GateServiceImpl implements GateService {
 
         Map<String, Object> current = device.getCurrentState();
         String state = current.getOrDefault("state", "UNKNOWN").toString();
-        Boolean limitOpen = current.containsKey("limit_open") ? Boolean.valueOf(String.valueOf(current.get("limit_open"))) : null;
-        Boolean limitClose = current.containsKey("limit_close") ? Boolean.valueOf(String.valueOf(current.get("limit_close"))) : null;
 
         return GateStateResponse.builder()
                 .deviceId(deviceId)
                 .state(state)
-                .limitOpen(limitOpen)
-                .limitClose(limitClose)
                 .currentState(current)
                 .build();
     }

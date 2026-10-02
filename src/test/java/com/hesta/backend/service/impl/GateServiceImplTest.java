@@ -51,7 +51,7 @@ class GateServiceImplTest {
     void setUp() {
         gateService = new GateServiceImpl(deviceRepository, homeAuthorizationService, deviceCommandService);
         userId = UUID.randomUUID();
-        deviceId = UUID.fromString("2d566d0a-f7d6-4fac-a0bf-18912da4ab28");
+        deviceId = UUID.randomUUID();
         homeId = UUID.randomUUID();
 
         Home home = Home.builder().id(homeId).build();
@@ -61,7 +61,7 @@ class GateServiceImplTest {
                 .name("Smart Sliding Gate")
                 .deviceType("GATE")
                 .room(room)
-                .currentState(new HashMap<>(Map.of("state", "CLOSED", "limit_open", false, "limit_close", true)))
+                .currentState(new HashMap<>(Map.of("state", "CLOSED")))
                 .build();
     }
 
@@ -113,14 +113,15 @@ class GateServiceImplTest {
 
     @Test
     void sendCommand_WithNodeId_PassesParameters() {
+        String testNodeId = UUID.randomUUID().toString();
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
         CommandResult expectedResult = CommandResult.builder().commandId("cmd-4").success(true).status("SUCCESS").build();
-        when(deviceCommandService.sendCommand(eq(deviceId), eq("OPEN"), argThat(p -> "8d1cdd82-b339-469e-be13-7e91070f7ae5".equals(p.get("nodeId"))), eq(StateChangeSource.MANUAL)))
+        when(deviceCommandService.sendCommand(eq(deviceId), eq("OPEN"), argThat(p -> testNodeId.equals(p.get("nodeId"))), eq(StateChangeSource.MANUAL)))
                 .thenReturn(CompletableFuture.completedFuture(expectedResult));
 
         GateCommandRequest request = GateCommandRequest.builder()
                 .action("OPEN")
-                .nodeId("8d1cdd82-b339-469e-be13-7e91070f7ae5")
+                .nodeId(testNodeId)
                 .build();
 
         CompletableFuture<CommandResult> future = gateService.sendCommand(userId, deviceId, request);
@@ -150,7 +151,6 @@ class GateServiceImplTest {
         assertNotNull(response);
         assertEquals(deviceId, response.getDeviceId());
         assertEquals("CLOSED", response.getState());
-        assertEquals(false, response.getLimitOpen());
-        assertEquals(true, response.getLimitClose());
+        assertEquals(Map.of("state", "CLOSED"), response.getCurrentState());
     }
 }

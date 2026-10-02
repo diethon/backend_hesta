@@ -40,10 +40,11 @@ public class GateController {
     @PostMapping("/open")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> open(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID deviceId) {
+            @PathVariable UUID deviceId,
+            @RequestParam(required = false) String nodeId) {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
-        return gateService.open(userId, deviceId)
+        return gateService.open(userId, deviceId, nodeId)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
                         .code(1000)
                         .message("Gửi lệnh mở cổng thành công")
@@ -54,10 +55,11 @@ public class GateController {
     @PostMapping("/close")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> close(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID deviceId) {
+            @PathVariable UUID deviceId,
+            @RequestParam(required = false) String nodeId) {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
-        return gateService.close(userId, deviceId)
+        return gateService.close(userId, deviceId, nodeId)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
                         .code(1000)
                         .message("Gửi lệnh đóng cổng thành công")
@@ -68,10 +70,11 @@ public class GateController {
     @PostMapping("/stop")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> stop(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID deviceId) {
+            @PathVariable UUID deviceId,
+            @RequestParam(required = false) String nodeId) {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
-        return gateService.stop(userId, deviceId)
+        return gateService.stop(userId, deviceId, nodeId)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
                         .code(1000)
                         .message("Gửi lệnh dừng cổng thành công")

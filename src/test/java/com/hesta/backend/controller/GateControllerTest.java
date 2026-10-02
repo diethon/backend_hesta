@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -54,7 +55,7 @@ class GateControllerTest {
     private CustomUserDetailsService customUserDetailsService;
 
     private final UUID userId = UUID.randomUUID();
-    private final UUID deviceId = UUID.fromString("2d566d0a-f7d6-4fac-a0bf-18912da4ab28");
+    private final UUID deviceId = UUID.randomUUID();
 
     private UsernamePasswordAuthenticationToken auth() {
         List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
@@ -65,7 +66,7 @@ class GateControllerTest {
     @Test
     void open_ReturnsOk() throws Exception {
         CommandResult result = CommandResult.builder().commandId("cmd-1").success(true).status("SUCCESS").build();
-        when(gateService.open(eq(userId), eq(deviceId))).thenReturn(CompletableFuture.completedFuture(result));
+        when(gateService.open(eq(userId), eq(deviceId), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         MvcResult mvcResult = mvc.perform(post("/api/v1/devices/{deviceId}/gate/open", deviceId)
                         .with(authentication(auth())))
@@ -77,13 +78,13 @@ class GateControllerTest {
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result.success").value(true));
 
-        verify(gateService).open(eq(userId), eq(deviceId));
+        verify(gateService).open(eq(userId), eq(deviceId), any());
     }
 
     @Test
     void close_ReturnsOk() throws Exception {
         CommandResult result = CommandResult.builder().commandId("cmd-2").success(true).status("SUCCESS").build();
-        when(gateService.close(eq(userId), eq(deviceId))).thenReturn(CompletableFuture.completedFuture(result));
+        when(gateService.close(eq(userId), eq(deviceId), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         MvcResult mvcResult = mvc.perform(post("/api/v1/devices/{deviceId}/gate/close", deviceId)
                         .with(authentication(auth())))
@@ -95,13 +96,13 @@ class GateControllerTest {
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result.success").value(true));
 
-        verify(gateService).close(eq(userId), eq(deviceId));
+        verify(gateService).close(eq(userId), eq(deviceId), any());
     }
 
     @Test
     void stop_ReturnsOk() throws Exception {
         CommandResult result = CommandResult.builder().commandId("cmd-3").success(true).status("SUCCESS").build();
-        when(gateService.stop(eq(userId), eq(deviceId))).thenReturn(CompletableFuture.completedFuture(result));
+        when(gateService.stop(eq(userId), eq(deviceId), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         MvcResult mvcResult = mvc.perform(post("/api/v1/devices/{deviceId}/gate/stop", deviceId)
                         .with(authentication(auth())))
@@ -113,7 +114,7 @@ class GateControllerTest {
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result.success").value(true));
 
-        verify(gateService).stop(eq(userId), eq(deviceId));
+        verify(gateService).stop(eq(userId), eq(deviceId), any());
     }
 
     @Test
@@ -140,8 +141,7 @@ class GateControllerTest {
         GateStateResponse response = GateStateResponse.builder()
                 .deviceId(deviceId)
                 .state("OPEN")
-                .limitOpen(true)
-                .limitClose(false)
+                .currentState(Map.of("state", "OPEN"))
                 .build();
         when(gateService.getState(eq(userId), eq(deviceId))).thenReturn(response);
 
@@ -150,7 +150,6 @@ class GateControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result.state").value("OPEN"))
-                .andExpect(jsonPath("$.result.limitOpen").value(true))
-                .andExpect(jsonPath("$.result.limitClose").value(false));
+                .andExpect(jsonPath("$.result.currentState.state").value("OPEN"));
     }
 }

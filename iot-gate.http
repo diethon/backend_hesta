@@ -37,18 +37,18 @@
 ### Endpoint Base: /api/v1/devices/{{deviceId}}/gate/...
 ### ====================================================================
 
-### 1.1 Lệnh MỞ CỔNG (OPEN) qua shortcut endpoint
-POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/open
+### 1.1 Lệnh MỞ CỔNG (OPEN) qua shortcut endpoint (kèm ?nodeId={{nodeId}} nếu cần)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/open?nodeId={{nodeId}}
 Content-Type: application/json
 #Authorization: Bearer {{token}}
 
-### 1.2 Lệnh ĐÓNG CỔNG (CLOSE) qua shortcut endpoint
-POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/close
+### 1.2 Lệnh ĐÓNG CỔNG (CLOSE) qua shortcut endpoint (kèm ?nodeId={{nodeId}} nếu cần)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/close?nodeId={{nodeId}}
 Content-Type: application/json
 #Authorization: Bearer {{token}}
 
-### 1.3 Lệnh DỪNG CỔNG (STOP) qua shortcut endpoint
-POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/stop
+### 1.3 Lệnh DỪNG CỔNG (STOP) qua shortcut endpoint (kèm ?nodeId={{nodeId}} nếu cần)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/stop?nodeId={{nodeId}}
 Content-Type: application/json
 #Authorization: Bearer {{token}}
 

@@ -15,7 +15,6 @@ import java.util.UUID;
 public class GateStateResponse {
     private UUID deviceId;
     private String state;
-    private Boolean limitOpen;
-    private Boolean limitClose;
     private Map<String, Object> currentState;
 }
+

@@ -112,12 +112,33 @@ public class DeviceServiceImpl implements DeviceService {
                 return;
             }
 
+            boolean isGateOrDoor = device.getDeviceType() != null &&
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()));
+
             Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
-            Map<String, Object> newState = new HashMap<>(prevState);
-            if (payload != null) {
-                for (Map.Entry<String, Object> entry : payload.entrySet()) {
-                    if (!"source".equals(entry.getKey())) {
-                        newState.put(entry.getKey(), entry.getValue());
+            Map<String, Object> newState;
+
+            if (isGateOrDoor) {
+                newState = new HashMap<>();
+                Object stateVal = null;
+                if (payload != null) {
+                    stateVal = payload.get("state");
+                    if (stateVal == null) {
+                        stateVal = payload.get("status");
+                    }
+                }
+                if (stateVal != null) {
+                    newState.put("state", stateVal.toString().toUpperCase());
+                } else if (prevState.containsKey("state")) {
+                    newState.put("state", prevState.get("state"));
+                }
+            } else {
+                newState = new HashMap<>(prevState);
+                if (payload != null) {
+                    for (Map.Entry<String, Object> entry : payload.entrySet()) {
+                        if (!"source".equals(entry.getKey())) {
+                            newState.put(entry.getKey(), entry.getValue());
+                        }
                     }
                 }
             }
