@@ -47,6 +47,9 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d JOIN FETCH d.room r JOIN FETCH r.home WHERE d.id = :deviceId")
     Optional<Device> findByIdWithRoomHome(@Param("deviceId") UUID deviceId);
 
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node WHERE d.id = :id")
+    Optional<Device> findByIdWithNode(@Param("id") UUID id);
+
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.name = :name")
     Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);
 
@@ -54,6 +57,11 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     Optional<Device> findByNodeCodeAndLocalId(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
 
     Optional<Device> findByMqttTopic(String mqttTopic);
+
+    Optional<Device> findByLocalId(String localId);
+
+    @Query("SELECT d FROM Device d WHERE d.mqttTopic LIKE %:keyword%")
+    Optional<Device> findByMqttTopicContaining(@Param("keyword") String keyword);
 
     @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.name ASC")
     List<Device> findAllByHomeIdOrderByNameAsc(@Param("homeId") UUID homeId);
