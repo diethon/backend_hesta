@@ -156,7 +156,7 @@ public class DeviceServiceImpl implements DeviceService {
 
             // 3. Throttling cho CẢM BIẾN (Chỉ lưu History 5 phút 1 lần)
             boolean shouldSaveHistory = true;
-            if (device.getDeviceType() != null && device.getDeviceType().endsWith("SENSOR")) {
+            if (device.getDeviceType() != null && device.getDeviceType().endsWith("SENSOR")  && !"MOTION_SENSOR".equalsIgnoreCase(device.getDeviceType())) {
                 OffsetDateTime lastSave = lastSensorSaveTime.get(device.getId());
                 if (lastSave != null && Duration.between(lastSave, OffsetDateTime.now()).toMinutes() < 5) {
                     shouldSaveHistory = false; // Bỏ qua ghi DB Lịch sử
