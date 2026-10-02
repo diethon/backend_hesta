@@ -35,7 +35,7 @@ Tất cả các API tuân theo định dạng chuẩn `ApiResponse<T>`:
 {
   "code": 1000,
   "message": "Thông điệp thành công",
-  "result": { "..." }
+  "result": {  }
 }
 ```
 * **Mã thành công:** `1000`
