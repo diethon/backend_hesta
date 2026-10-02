@@ -97,8 +97,14 @@ public class DeviceServiceImpl implements DeviceService {
                 UUID deviceId = UUID.fromString(deviceIdStr);
                 device = deviceRepository.findById(deviceId).orElse(null);
             } catch (IllegalArgumentException e) {
-                if (nodeCode != null) {
+                if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)) {
                     device = deviceRepository.findByNodeCodeAndLocalId(nodeCode, deviceIdStr).orElse(null);
+                }
+                if (device == null) {
+                    device = deviceRepository.findByLocalId(deviceIdStr).orElse(null);
+                }
+                if (device == null) {
+                    device = deviceRepository.findByMqttTopicContaining(deviceIdStr).orElse(null);
                 }
             }
             if (device == null) {
@@ -106,17 +112,16 @@ public class DeviceServiceImpl implements DeviceService {
                 return;
             }
 
-            Map<String, Object> newState = new HashMap<>();
-            for (Map.Entry<String, Object> entry : payload.entrySet()) {
-                if (device.supportsAction(entry.getKey()) || "source".equals(entry.getKey())) {
-                    newState.put(entry.getKey(), entry.getValue());
+            Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
+            Map<String, Object> newState = new HashMap<>(prevState);
+            if (payload != null) {
+                for (Map.Entry<String, Object> entry : payload.entrySet()) {
+                    if (!"source".equals(entry.getKey())) {
+                        newState.put(entry.getKey(), entry.getValue());
+                    }
                 }
             }
-
-            Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
             device.setLastSeen(OffsetDateTime.now());
-
-
 
             // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau, không làm gì thêm)
             if (prevState.equals(newState)) {

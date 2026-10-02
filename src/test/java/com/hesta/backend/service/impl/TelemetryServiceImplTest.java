@@ -7,7 +7,6 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.SensorReading;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.enums.EdgeNodeStatus;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
 import com.hesta.backend.repository.DeviceRepository;
@@ -69,7 +68,7 @@ class TelemetryServiceImplTest {
         Device device = Device.builder()
                 .id(deviceId)
                 .name("DHT-01")
-                .deviceType(DeviceType.LIGHT)
+                .deviceType("LIGHT")
                 .room(room)
                 .node(node)
                 .status(DeviceStatus.UNKNOWN)
