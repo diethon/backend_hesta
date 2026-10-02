@@ -60,23 +60,27 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         
         try {
             Device device = deviceRepository.findByIdWithNode(deviceId)
-                    .orElseThrow(() -> new RuntimeException("Device not found"));
+                    .orElse(null);
             
             String nodeCode = "unknown";
             String nodeIdStr = null;
-            try {
-                if (device.getNode() != null) {
-                    nodeCode = device.getNode().getNodeCode();
-                    if (device.getNode().getId() != null) {
-                        nodeIdStr = device.getNode().getId().toString();
+            String localId = deviceId.toString();
+
+            if (device != null) {
+                try {
+                    if (device.getNode() != null) {
+                        nodeCode = device.getNode().getNodeCode();
+                        if (device.getNode().getId() != null) {
+                            nodeIdStr = device.getNode().getId().toString();
+                        }
                     }
+                } catch (Exception ex) {
+                    log.warn("Could not lazily load node for device {}: {}", deviceId, ex.getMessage());
                 }
-            } catch (Exception ex) {
-                log.warn("Could not lazily load node for device {}: {}", deviceId, ex.getMessage());
-            }
-            String localId = device.getLocalId();
-            if (localId == null || localId.isBlank()) {
-                if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
+                String dLocalId = device.getLocalId();
+                if (dLocalId != null && !dLocalId.isBlank()) {
+                    localId = dLocalId;
+                } else if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
                     String[] parts = device.getMqttTopic().split("/");
                     for (int i = 0; i < parts.length - 1; i++) {
                         if ("device".equals(parts[i]) || "devices".equals(parts[i])) {
@@ -85,9 +89,16 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                         }
                     }
                 }
-                if (localId == null || localId.isBlank()) {
-                    localId = device.getId().toString();
+            } else {
+                log.warn("Device {} not found in database. Using direct fallback for IoT command.", deviceId);
+                if (parameters != null && parameters.containsKey("nodeId")) {
+                    nodeCode = parameters.get("nodeId").toString();
+                } else if (parameters != null && parameters.containsKey("nodeCode")) {
+                    nodeCode = parameters.get("nodeCode").toString();
+                } else {
+                    nodeCode = "8d1cdd82-b339-469e-be13-7e91070f7ae5";
                 }
+                nodeIdStr = nodeCode;
             }
 
             java.util.Set<String> targetTopics = new java.util.LinkedHashSet<>();
@@ -95,25 +106,27 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
                 targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, localId));
             }
-            if (device.getId() != null && !device.getId().toString().equals(localId)) {
-                targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, device.getId()));
-                if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
-                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, device.getId()));
+            if (device != null) {
+                if (device.getId() != null && !device.getId().toString().equals(localId)) {
+                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, device.getId()));
+                    if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
+                        targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, device.getId()));
+                    }
                 }
-            }
-            if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
-                targetTopics.add(device.getMqttTopic());
-                if (!device.getMqttTopic().endsWith("/command")) {
-                    targetTopics.add(device.getMqttTopic() + "/command");
+                if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
+                    targetTopics.add(device.getMqttTopic());
+                    if (!device.getMqttTopic().endsWith("/command")) {
+                        targetTopics.add(device.getMqttTopic() + "/command");
+                    }
                 }
             }
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("commandId", commandId);
-            payload.put("deviceId", device.getId().toString());
+            payload.put("deviceId", device != null ? device.getId().toString() : deviceId.toString());
             payload.put("target", localId);
             
-            // Normalize action and parameters for devices (including Air Conditioner)
+            // Normalize action and parameters for devices (including Air Conditioner and Gate)
             String normalizedAction = normalizeAction(action, parameters);
             payload.put("action", normalizedAction);
 
@@ -133,8 +146,10 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
             payload.put("timestamp", System.currentTimeMillis());
             
-            // Cập nhật trạng thái vào database
-            updateDeviceState(device, normalizedAction, effectiveParams);
+            // Cập nhật trạng thái vào database nếu device tồn tại
+            if (device != null) {
+                updateDeviceState(device, normalizedAction, effectiveParams);
+            }
             
             String jsonPayload = objectMapper.writeValueAsString(payload);
             pendingCommands.put(commandId, future);
@@ -209,6 +224,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 return "TEMPERATURE_PLUS";
             case "TEMP_DOWN":
                 return "TEMPERATURE_MINUS";
+            case "GATE_OPEN":
+            case "OPEN":
+                return "OPEN";
+            case "GATE_CLOSE":
+            case "CLOSE":
+                return "CLOSE";
+            case "GATE_STOP":
+            case "STOP":
+                return "STOP";
             default:
                 return act;
         }
@@ -350,6 +374,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             } catch (Exception ignored) {}
                         }
                     }
+                    break;
+                case "OPEN":
+                    currentState.put("state", "OPENING");
+                    break;
+                case "CLOSE":
+                    currentState.put("state", "CLOSING");
+                    break;
+                case "STOP":
+                    currentState.put("state", "STOPPED");
                     break;
                 default:
                     if (parameters != null && !parameters.isEmpty()) {

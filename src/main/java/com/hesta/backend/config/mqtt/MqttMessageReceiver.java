@@ -371,6 +371,24 @@ public class MqttMessageReceiver {
                 );
             }
         }
+
+        try {
+            if (deviceId != null) {
+                Map<String, Object> resolvedState = (stateObject instanceof Map<?, ?>)
+                        ? (Map<String, Object>) stateObject
+                        : data;
+                try {
+                    UUID deviceUuid = UUID.fromString(deviceId);
+                    MqttDeviceCommandServiceImpl.completeDeviceCommand(deviceUuid, resolvedState);
+                } catch (IllegalArgumentException ignored) {
+                    String nodeCode = extractNodeCodeFromTopic(topic);
+                    devices.findByNodeCodeAndLocalId(nodeCode, deviceId)
+                            .ifPresent(d -> MqttDeviceCommandServiceImpl.completeDeviceCommand(d.getId(), resolvedState));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check active command resolution from state: {}", e.getMessage());
+        }
     }
 
 
