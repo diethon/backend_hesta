@@ -462,7 +462,7 @@ Dùng để hiển thị toàn bộ thiết bị và chỉ số cảm biến the
         "roomId": "8f8b1d91-23e5-4d2c-806d-cf7d6e5a41a2",
         "homeId": "7d91cb61-7e88-4ca3-b67f-44e4bb3c4379",
         "roomName": "Phòng Khách",
-        "devices": [ ... ],
+        "devices": [ ],
         "sensors": [
           {
             "sensorId": "0bb7dc6e-0556-413d-a507-66bc8225b4ba:temperature",
