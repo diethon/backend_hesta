@@ -5,6 +5,8 @@ import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.enums.StateChangeSource;
+import com.hesta.backend.exception.AppException;
+import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
 import lombok.RequiredArgsConstructor;
@@ -60,23 +62,36 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         
         try {
             Device device = deviceRepository.findByIdWithNode(deviceId)
-                    .orElseThrow(() -> new RuntimeException("Device not found"));
+                    .orElse(null);
             
             String nodeCode = "unknown";
             String nodeIdStr = null;
-            try {
-                if (device.getNode() != null) {
-                    nodeCode = device.getNode().getNodeCode();
-                    if (device.getNode().getId() != null) {
-                        nodeIdStr = device.getNode().getId().toString();
+            String localId = deviceId.toString();
+
+            if (device != null) {
+                try {
+                    if (device.getNode() != null) {
+                        nodeCode = device.getNode().getNodeCode();
+                        if (device.getNode().getId() != null) {
+                            nodeIdStr = device.getNode().getId().toString();
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.warn("Could not lazily load node for device {}: {}", deviceId, ex.getMessage());
+                }
+                if ((nodeCode == null || "unknown".equalsIgnoreCase(nodeCode)) && parameters != null) {
+                    if (parameters.containsKey("nodeId") && parameters.get("nodeId") != null) {
+                        nodeCode = parameters.get("nodeId").toString();
+                        nodeIdStr = nodeCode;
+                    } else if (parameters.containsKey("nodeCode") && parameters.get("nodeCode") != null) {
+                        nodeCode = parameters.get("nodeCode").toString();
+                        nodeIdStr = nodeCode;
                     }
                 }
-            } catch (Exception ex) {
-                log.warn("Could not lazily load node for device {}: {}", deviceId, ex.getMessage());
-            }
-            String localId = device.getLocalId();
-            if (localId == null || localId.isBlank()) {
-                if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
+                String dLocalId = device.getLocalId();
+                if (dLocalId != null && !dLocalId.isBlank()) {
+                    localId = dLocalId;
+                } else if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
                     String[] parts = device.getMqttTopic().split("/");
                     for (int i = 0; i < parts.length - 1; i++) {
                         if ("device".equals(parts[i]) || "devices".equals(parts[i])) {
@@ -85,56 +100,81 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                         }
                     }
                 }
-                if (localId == null || localId.isBlank()) {
-                    localId = device.getId().toString();
+            } else {
+                log.warn("Device {} not found in database. Checking parameters for IoT routing.", deviceId);
+                if (parameters != null && parameters.containsKey("nodeId") && parameters.get("nodeId") != null) {
+                    nodeCode = parameters.get("nodeId").toString();
+                    nodeIdStr = nodeCode;
+                } else if (parameters != null && parameters.containsKey("nodeCode") && parameters.get("nodeCode") != null) {
+                    nodeCode = parameters.get("nodeCode").toString();
+                    nodeIdStr = nodeCode;
+                } else {
+                    throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
                 }
             }
 
             java.util.Set<String> targetTopics = new java.util.LinkedHashSet<>();
-            targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, localId));
-            if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
-                targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, localId));
-            }
-            if (device.getId() != null && !device.getId().toString().equals(localId)) {
-                targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, device.getId()));
+            if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)) {
+                targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, localId));
                 if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
-                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, device.getId()));
+                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, localId));
                 }
             }
-            if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
-                targetTopics.add(device.getMqttTopic());
-                if (!device.getMqttTopic().endsWith("/command")) {
-                    targetTopics.add(device.getMqttTopic() + "/command");
+            if (device != null) {
+                if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode) && device.getId() != null && !device.getId().toString().equals(localId)) {
+                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, device.getId()));
+                    if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
+                        targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, device.getId()));
+                    }
+                }
+                if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
+                    targetTopics.add(device.getMqttTopic());
+                    if (!device.getMqttTopic().endsWith("/command")) {
+                        targetTopics.add(device.getMqttTopic() + "/command");
+                    }
                 }
             }
+
+            // Normalize action and parameters for devices (including Air Conditioner and Gate)
+            String normalizedAction = normalizeAction(action, parameters);
+            boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType())))
+                    || "OPEN".equalsIgnoreCase(normalizedAction)
+                    || "CLOSE".equalsIgnoreCase(normalizedAction)
+                    || "STOP".equalsIgnoreCase(normalizedAction);
+
+            Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
 
             Map<String, Object> payload = new HashMap<>();
-            payload.put("commandId", commandId);
-            payload.put("deviceId", device.getId().toString());
-            payload.put("target", localId);
-            
-            // Normalize action and parameters for devices (including Air Conditioner)
-            String normalizedAction = normalizeAction(action, parameters);
-            payload.put("action", normalizedAction);
+            if (isGateOrDoor) {
+                // Keep payload compact so PubSubClient on ESP32 does not overflow its 128-byte buffer
+                payload.put("action", normalizedAction);
+            } else {
+                payload.put("commandId", commandId);
+                payload.put("deviceId", device != null ? device.getId().toString() : deviceId.toString());
+                payload.put("target", localId);
+                payload.put("action", normalizedAction);
 
-            // Put parameters into nested parameters map for backend contract
-            Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
-            payload.put("parameters", effectiveParams);
+                // Put parameters into nested parameters map for backend contract
+                payload.put("parameters", effectiveParams);
 
-            // Flatten parameters to the root level of JSON so ESP32 (doc["power"], doc["temperature"], doc["fan"], etc.) can parse directly
-            for (Map.Entry<String, Object> entry : effectiveParams.entrySet()) {
-                if (!payload.containsKey(entry.getKey())) {
-                    payload.put(entry.getKey(), entry.getValue());
+                // Flatten parameters to the root level of JSON so ESP32 (doc["power"], doc["temperature"], doc["fan"], etc.) can parse directly
+                for (Map.Entry<String, Object> entry : effectiveParams.entrySet()) {
+                    if (!payload.containsKey(entry.getKey())) {
+                        payload.put(entry.getKey(), entry.getValue());
+                    }
                 }
+
+                // Normalization helpers for AC fields
+                applyAcPayloadConversions(normalizedAction, payload, effectiveParams);
+
+                payload.put("timestamp", System.currentTimeMillis());
             }
-
-            // Normalization helpers for AC fields
-            applyAcPayloadConversions(normalizedAction, payload, effectiveParams);
-
-            payload.put("timestamp", System.currentTimeMillis());
             
-            // Cập nhật trạng thái vào database
-            updateDeviceState(device, normalizedAction, effectiveParams);
+            // Cập nhật trạng thái vào database nếu device tồn tại
+            if (device != null) {
+                updateDeviceState(device, normalizedAction, effectiveParams);
+            }
             
             String jsonPayload = objectMapper.writeValueAsString(payload);
             pendingCommands.put(commandId, future);
@@ -209,6 +249,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 return "TEMPERATURE_PLUS";
             case "TEMP_DOWN":
                 return "TEMPERATURE_MINUS";
+            case "GATE_OPEN":
+            case "OPEN":
+                return "OPEN";
+            case "GATE_CLOSE":
+            case "CLOSE":
+                return "CLOSE";
+            case "GATE_STOP":
+            case "STOP":
+                return "STOP";
             default:
                 return act;
         }
@@ -351,11 +400,30 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                         }
                     }
                     break;
+                case "OPEN":
+                    currentState.put("state", "OPENING");
+                    break;
+                case "CLOSE":
+                    currentState.put("state", "CLOSING");
+                    break;
+                case "STOP":
+                    currentState.put("state", "STOPPED");
+                    break;
                 default:
                     if (parameters != null && !parameters.isEmpty()) {
                         currentState.putAll(parameters);
                     }
                     break;
+            }
+
+            boolean isGateOrDoor = device.getDeviceType() != null &&
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()));
+            if (isGateOrDoor) {
+                Object stateVal = currentState.get("state");
+                currentState.clear();
+                if (stateVal != null) {
+                    currentState.put("state", stateVal);
+                }
             }
 
             device.setCurrentState(currentState);
