@@ -8,7 +8,6 @@ import com.hesta.backend.dto.response.BehaviorPredictionResponse;
 import com.hesta.backend.dto.response.RecommendationResponse;
 import com.hesta.backend.entity.AutomationRecommendation;
 import com.hesta.backend.entity.Device;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.AutomationRecommendationRepository;
@@ -50,9 +49,8 @@ public class RecommendationServiceImpl implements RecommendationService {
         List<RecommendationResponse> created = new ArrayList<>();
         for (BehaviorPredictionResponse prediction : behavior.predict(userId, homeId, from, to, OffsetDateTime.now())) {
             Device device = devices.findById(prediction.getDeviceId()).orElse(null);
-            if (device == null || !homeId.equals(device.getNode().getHome().getId())
-                    || (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
-                    && device.getCapabilities().stream().noneMatch(cap -> cap.equalsIgnoreCase(prediction.getAction())))
+            if (device == null || !homeId.equals(device.getRoom().getHome().getId())
+                    || !device.supportsAction(prediction.getAction())
                     || duplicate(existing, device.getId(), prediction.getAction(), prediction.getPredictedTime().withSecond(0).toString())) continue;
             AutomationRecommendation saved = recommendations.save(AutomationRecommendation.builder()
                     .home(home).device(device).status("PENDING")
@@ -69,8 +67,7 @@ public class RecommendationServiceImpl implements RecommendationService {
                     && !"TURN_OFF".equals(pattern.getAction()))) continue;
             Device device = devices.findById(pattern.getDeviceId()).orElse(null);
             if (device == null || !homeId.equals(device.getNode().getHome().getId())
-                    || (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
-                    && device.getCapabilities().stream().noneMatch(cap -> cap.equalsIgnoreCase(pattern.getAction())))) continue;
+                    || !device.supportsAction(pattern.getAction())) continue;
             String time = pattern.getAverageTime().withSecond(0).withNano(0).toString();
             if (duplicate(existing, device.getId(), pattern.getAction(), time)) continue;
             AutomationRecommendation saved = recommendations.save(AutomationRecommendation.builder()
@@ -111,7 +108,6 @@ public class RecommendationServiceImpl implements RecommendationService {
         AutomationRecommendation recommendation = pending(homeId, recommendationId);
         Device device = recommendation.getDevice();
         String action = String.valueOf(recommendation.getProposedAction().get("action"));
-        DeviceAction.valueOf(action);
         String name = "Gợi ý " + recommendation.getId().toString().substring(0, 8);
         var rule = rules.create(userId, homeId, CreateAutomationRuleRequest.builder()
                 .name(name).description(recommendation.getExplanation()).triggerType("SCHEDULE").enabled(true)
@@ -161,4 +157,5 @@ public class RecommendationServiceImpl implements RecommendationService {
                 .status(item.getStatus()).createdAt(item.getCreatedAt())
                 .resolvedAt(item.getResolvedAt()).build();
     }
+
 }

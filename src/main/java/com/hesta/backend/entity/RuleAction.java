@@ -1,6 +1,5 @@
 package com.hesta.backend.entity;
 
-import com.hesta.backend.enums.DeviceAction;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -35,9 +34,8 @@ public class RuleAction {
     @JoinColumn(name = "scene_id")
     private Scene scene;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "action_command", nullable = false, length = 100)
-    private DeviceAction action;
+        @Column(name = "action_command", nullable = false, length = 100)
+    private String action;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "parameters", columnDefinition = "jsonb")

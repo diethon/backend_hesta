@@ -15,4 +15,5 @@ public interface EdgeNodeRepository extends JpaRepository<EdgeNode, UUID> {
     Optional<EdgeNode> findByHomeIdAndNodeCode(@Param("homeId") UUID homeId, @Param("nodeCode") String nodeCode);
 
     Optional<EdgeNode> findByNodeCode(String nodeCode);
+    java.util.List<EdgeNode> findByHome_Id(UUID homeId);
 }

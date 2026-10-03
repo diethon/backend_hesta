@@ -6,7 +6,6 @@ import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -33,16 +32,22 @@ class DeviceRepositoryTest {
         Room room = rooms.save(Room.builder().home(home).name("Living room").build());
         Room otherRoom = rooms.save(Room.builder().home(otherHome).name("Living room").build());
 
-        saveDevice(room, "Z lamp");
+        Device lamp = saveDevice(room, "Z lamp");
         saveDevice(room, "A fan");
         saveDevice(otherRoom, "Other device");
 
         assertThat(devices.findAllByRoom_Home_IdOrderByNameAsc(home.getId()))
                 .extracting(Device::getName).containsExactly("A fan", "Z lamp");
+        assertThat(devices.findByHomeId(home.getId()))
+                .extracting(Device::getName).containsExactlyInAnyOrder("A fan", "Z lamp");
+        assertThat(devices.findByRoomId(room.getId()))
+                .extracting(Device::getName).containsExactlyInAnyOrder("A fan", "Z lamp");
+        assertThat(devices.findByIdWithRoomHome(lamp.getId()).orElseThrow()
+                .getRoom().getHome().getId()).isEqualTo(home.getId());
     }
 
-    private void saveDevice(Room room, String name) {
-        devices.save(Device.builder().room(room).name(name).deviceType(DeviceType.LIGHT)
+    private Device saveDevice(Room room, String name) {
+        return devices.save(Device.builder().room(room).name(name).deviceType("LIGHT")
                 .status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
     }
 }

@@ -1,0 +1,7 @@
+{
+  "deviceId": "00000000-0000-4000-8000-000000000022",
+  "metricType": "TEMPERATURE",
+  "value": 29.4,
+  "unit": "°C",
+  "observedAt": "2026-09-17T09:00:00Z"
+}

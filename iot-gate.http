@@ -1,0 +1,155 @@
+### ====================================================================
+### HESTA Smart Home - Sliding Gate IoT & MQTT Test Suite
+### ====================================================================
+### Cấu hình thiết bị theo ESP32-CAM AI-Thinker:
+### - Node ID:   8d1cdd82-b339-469e-be13-7e91070f7ae5
+### - Device ID: 2d566d0a-f7d6-4fac-a0bf-18912da4ab28
+### - Topics:
+###   + Command:   hesta/nodes/{{nodeId}}/devices/{{deviceId}}/command
+###   + State:     hesta/nodes/{{nodeId}}/devices/{{deviceId}}/state
+###   + Telemetry: hesta/nodes/{{nodeId}}/devices/{{deviceId}}/telemetry
+### ====================================================================
+
+@baseUrl = http://localhost:8080
+@deviceId = 2d566d0a-f7d6-4fac-a0bf-18912da4ab28
+@nodeId = 8d1cdd82-b339-469e-be13-7e91070f7ae5
+@token = 
+
+### ====================================================================
+### 0. (Tùy chọn) Đăng nhập để lấy JWT Bearer Token nếu bật Security
+### ====================================================================
+#POST {{baseUrl}}/api/v1/auth/login
+#Content-Type: application/json
+#
+#{
+#  "email": "test_user@hesta.com",
+#  "password": "Password123!"
+#}
+#
+#> {%
+#    if (response.body && response.body.result && response.body.result.accessToken) {
+#        client.global.set("token", response.body.result.accessToken);
+#    }
+#%}
+
+### ====================================================================
+### PHẦN 1: ĐIỀU KHIỂN CỔNG QUA CHUYÊN BIỆT GATE CONTROLLER API
+### Endpoint Base: /api/v1/devices/{{deviceId}}/gate/...
+### ====================================================================
+
+### 1.1 Lệnh MỞ CỔNG (OPEN) qua shortcut endpoint (kèm ?nodeId={{nodeId}} nếu cần)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/open?nodeId={{nodeId}}
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+### 1.2 Lệnh ĐÓNG CỔNG (CLOSE) qua shortcut endpoint (kèm ?nodeId={{nodeId}} nếu cần)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/close?nodeId={{nodeId}}
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+### 1.3 Lệnh DỪNG CỔNG (STOP) qua shortcut endpoint (kèm ?nodeId={{nodeId}} nếu cần)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/stop?nodeId={{nodeId}}
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+### 1.4 Gửi lệnh qua endpoint Gate Command (Action: OPEN)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN"
+}
+
+### 1.5 Gửi lệnh qua endpoint Gate Command (Action: CLOSE kèm chỉ định Node ID)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "CLOSE",
+  "nodeId": "{{nodeId}}"
+}
+
+### 1.6 Gửi lệnh qua endpoint Gate Command (Action: STOP)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "STOP"
+}
+
+### 1.7 Lấy trạng thái hiện tại của cổng (State, Limit Switch Open/Close)
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/state
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+
+### ====================================================================
+### PHẦN 2: ĐIỀU KHIỂN CỔNG QUA GENERIC DEVICE COMMAND API
+### Endpoint Base: POST /api/v1/devices/{{deviceId}}/command
+### ====================================================================
+
+### 2.1 Generic Command - OPEN
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN"
+}
+
+### 2.2 Generic Command - CLOSE
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "CLOSE"
+}
+
+### 2.3 Generic Command - STOP
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "STOP"
+}
+
+
+### ====================================================================
+### PHẦN 3: KIỂM TRA THÔNG TIN THIẾT BỊ VÀ LỊCH SỬ TRẠNG THÁI (NẾU ĐÃ LƯU DB)
+### ====================================================================
+
+### 3.1 Xem chi tiết thiết bị
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}
+#Authorization: Bearer {{token}}
+
+### 3.2 Xem lịch sử thay đổi trạng thái (OPEN, CLOSING, STOPPED,...)
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}/history
+#Authorization: Bearer {{token}}
+
+
+### ====================================================================
+### PHẦN 4: KIỂM TRA VALIDATION VÀ XỬ LÝ LỖI (EXPECTED 400 BAD REQUEST)
+### ====================================================================
+
+### 4.1 Lỗi: Action không hợp lệ (Ví dụ: "FLY" -> Expected HTTP 400 GATE_ACTION_INVALID)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "FLY"
+}
+
+### 4.2 Lỗi: Action bị bỏ trống (Expected HTTP 400 INVALID_DEVICE_ACTION)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/gate/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": ""
+}

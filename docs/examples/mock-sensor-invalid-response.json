@@ -1,0 +1,4 @@
+{
+  "code": 1122,
+  "message": "Value must fit NUMERIC(10,3) without rounding"
+}

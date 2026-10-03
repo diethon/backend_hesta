@@ -1,8 +1,6 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.command.CommandResult;
-import com.hesta.backend.dto.request.LedCommandRequest;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.service.DeviceCommandService;
 import lombok.extern.slf4j.Slf4j;
@@ -21,13 +19,10 @@ import java.util.concurrent.CompletableFuture;
 @Service
 public class MockDeviceCommandServiceImpl implements DeviceCommandService {
 
-    @Override
-    public void sendCommand(UUID deviceId, LedCommandRequest request) {
-        log.info("Mock sending DeviceCommandRequest to Device [{}]: Action [{}]", deviceId, request != null ? request.getAction() : null);
-    }
+
 
     @Override
-    public CompletableFuture<CommandResult> sendCommand(UUID deviceId, DeviceAction action, Map<String, Object> parameters, StateChangeSource source) {
+    public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
         log.info("Mock sending command to Device [{}]: Action [{}], Source [{}]", deviceId, action, source);
         
         String commandId = UUID.randomUUID().toString();
@@ -45,7 +40,7 @@ public class MockDeviceCommandServiceImpl implements DeviceCommandService {
         }
 
         // Simulate unsupported action behavior
-        if (action == DeviceAction.SET_MODE && (parameters == null || !parameters.containsKey("mode"))) {
+        if ("SET_MODE".equals(action) && (parameters == null || !parameters.containsKey("mode"))) {
             return CompletableFuture.completedFuture(
                     CommandResult.builder()
                             .commandId(commandId)
@@ -61,8 +56,19 @@ public class MockDeviceCommandServiceImpl implements DeviceCommandService {
         Map<String, Object> ackState = new HashMap<>();
         if (parameters != null) ackState.putAll(parameters);
         
-        if (action == DeviceAction.TURN_ON) ackState.put("power", "ON");
-        if (action == DeviceAction.TURN_OFF) ackState.put("power", "OFF");
+        if ("TURN_ON".equals(action)) ackState.put("power", "ON");
+        if ("TURN_OFF".equals(action)) ackState.put("power", "OFF");
+        
+        if ("SET_COLOR".equals(action)) {
+            ackState.put("power", "ON");
+            Map<String, Object> colorState = new HashMap<>();
+            if (parameters != null) {
+                if (parameters.containsKey("r")) colorState.put("r", parameters.get("r"));
+                if (parameters.containsKey("g")) colorState.put("g", parameters.get("g"));
+                if (parameters.containsKey("b")) colorState.put("b", parameters.get("b"));
+            }
+            ackState.put("color", colorState);
+        }
 
         return CompletableFuture.completedFuture(
                 CommandResult.builder()
@@ -79,7 +85,7 @@ public class MockDeviceCommandServiceImpl implements DeviceCommandService {
     @Override
     public java.util.concurrent.CompletableFuture<java.util.List<CommandResult>> sendRoomCommand(
             java.util.UUID roomId, 
-            com.hesta.backend.enums.DeviceAction action, 
+            String action, 
             java.util.Map<String, Object> parameters, 
             com.hesta.backend.enums.StateChangeSource source) {
         return java.util.concurrent.CompletableFuture.completedFuture(new java.util.ArrayList<>());

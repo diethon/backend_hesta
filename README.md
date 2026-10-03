@@ -93,6 +93,6 @@ graph TD
 
 ## 📚 Tài liệu chức năng
 
-- [Shared Realtime Backend](docs/REALTIME.md)
-- [Notification Core Backend](docs/NOTIFICATION_CORE.md)
-- [Local Demo Data](docs/LOCAL_DEMO_DATA.md)
+- [Backend thời gian thực dùng chung](docs/REALTIME.md)
+- [Lõi thông báo phía backend](docs/NOTIFICATION_CORE.md)
+- [Dữ liệu demo cục bộ](docs/LOCAL_DEMO_DATA.md)

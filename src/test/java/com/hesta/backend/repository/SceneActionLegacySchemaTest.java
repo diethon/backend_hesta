@@ -9,7 +9,6 @@ import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -56,7 +55,7 @@ class SceneActionLegacySchemaTest {
         Device device = deviceRepository.save(Device.builder()
                 .room(room)
                 .name("Light")
-                .deviceType(DeviceType.LIGHT)
+                .deviceType("LIGHT")
                 .status(DeviceStatus.UNKNOWN)
                 .currentState(Map.of())
                 .build());
