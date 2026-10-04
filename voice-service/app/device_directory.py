@@ -92,17 +92,33 @@ class DeviceDirectory:
 
         for dev in devices:
             try:
-                info = DeviceInfo(
-                    device_id=str(dev["id"]),
-                    device_name=dev.get("name", ""),
-                    device_type=str(dev["type"]).lower(),
-                    room_name=str(dev["room"]).lower(),
-                    home_id=str(dev.get("homeId", dev.get("home_id", ""))),
-                )
-                key = (info.home_id, info.room_name, info.device_type)
-                if key not in cache:
-                    cache[key] = []
-                cache[key].append(info)
+                db_type = str(dev.get("deviceType", dev.get("type", ""))).lower()
+                db_name = dev.get("name", "").lower()
+                
+                # Bản thân nó là type gì thì lưu type đó
+                types_to_register = [db_type]
+                
+                # Nếu nó là bộ điều khiển hồng ngoại (IR_REMOTE), phân loại thêm dựa vào tên
+                if db_type == "ir_remote":
+                    if "điều hòa" in db_name or "điều hoà" in db_name or "máy lạnh" in db_name or "ac" in db_name:
+                        types_to_register.append("air_conditioner")
+                    if "tv" in db_name or "tivi" in db_name:
+                        types_to_register.append("tv")
+                    if "quạt" in db_name or "fan" in db_name:
+                        types_to_register.append("fan")
+
+                for t in types_to_register:
+                    info = DeviceInfo(
+                        device_id=str(dev["id"]),
+                        device_name=dev.get("name", ""),
+                        device_type=t,
+                        room_name=str(dev.get("roomName", dev.get("room", ""))).lower(),
+                        home_id=str(dev.get("homeId", dev.get("home_id", ""))),
+                    )
+                    key = (info.home_id, info.room_name, t)
+                    if key not in cache:
+                        cache[key] = []
+                    cache[key].append(info)
             except (KeyError, TypeError) as e:
                 logger.warning("Bỏ qua thiết bị lỗi dữ liệu: %s — %s", dev, e)
 

@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -45,6 +46,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
 
     @Override
+    @Transactional(readOnly = true)
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         if (existing != null && !existing.isDone()) {

@@ -1,12 +1,12 @@
 stt:
-  model_size: base          # tiny/base/small — theo kết quả benchmark Giai đoạn 1
+  model_size: small          # tiny/base/small — theo kết quả benchmark Giai đoạn 1
   language: vi
   compute_type: int8
   vad_filter: true
 audio_gate:
-  rms_threshold: 500         # hiệu chỉnh theo môi trường thật (Mục 8.4 bước 3)
-  min_speech_ms: 250
-  max_silence_ms: 800        # im lặng liên tục bao lâu thì coi là kết thúc câu nói
+  rms_threshold: 200        # hiệu chỉnh theo môi trường thật (Mục 8.4 bước 3)
+  min_speech_ms: 60
+  max_silence_ms: 1000        # im lặng liên tục bao lâu thì coi là kết thúc câu nói
 backend:
   base_url: "${BACKEND_BASE_URL}"
   internal_api_key_env: "INTERNAL_API_KEY"

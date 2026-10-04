@@ -74,6 +74,7 @@ class AudioGate:
     def __init__(self, config: AudioGateConfig | None = None):
         self.config = config or AudioGateConfig()
         self._buffer: list[np.ndarray] = []
+        self._preroll: list[np.ndarray] = []
         self._state = "waiting"  # "waiting" | "recording" | "complete"
         self._speech_chunk_count = 0
         self._silence_chunk_count = 0
@@ -81,6 +82,7 @@ class AudioGate:
     def reset(self):
         """Reset gate về trạng thái ban đầu, sẵn sàng cho câu nói tiếp theo."""
         self._buffer.clear()
+        self._preroll.clear()
         self._state = "waiting"
         self._speech_chunk_count = 0
         self._silence_chunk_count = 0
@@ -98,16 +100,21 @@ class AudioGate:
         is_speech = rms >= self.config.rms_threshold
 
         if self._state == "waiting":
+            # Luôn giữ 400ms gần nhất (13 chunks)
+            self._preroll.append(chunk.copy())
+            if len(self._preroll) > 13:
+                self._preroll.pop(0)
+
             if is_speech:
                 self._speech_chunk_count += 1
-                self._buffer.append(chunk.copy())
                 if self._speech_chunk_count >= self.config.min_speech_chunks:
                     self._state = "recording"
                     self._silence_chunk_count = 0
+                    # Toàn bộ 400ms quá khứ (bao gồm cả khúc min_speech_chunks vừa rồi) trở thành buffer
+                    self._buffer = self._preroll.copy()
+                    self._preroll.clear()
             else:
-                # Reset nếu chưa đủ liên tục
                 self._speech_chunk_count = 0
-                self._buffer.clear()
 
         elif self._state == "recording":
             self._buffer.append(chunk.copy())

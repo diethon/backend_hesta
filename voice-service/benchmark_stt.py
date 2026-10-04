@@ -62,10 +62,12 @@ def benchmark_model(model_size: str, audio_path: str, compute_type: str = "int8"
     segments, _ = model.transcribe(audio_path, language="vi", vad_filter=True)
     _ = list(segments)
 
-    # Đo thời gian transcribe thật (trung bình 3 lần)
+    import math
+
+    # Đo thời gian transcribe thật (trung bình 15 lần)
     transcribe_times = []
     transcript = ""
-    for _ in range(3):
+    for _ in range(15):
         t1 = time.perf_counter()
         segments, info = model.transcribe(audio_path, language="vi", vad_filter=True)
         result_segments = list(segments)
@@ -74,6 +76,7 @@ def benchmark_model(model_size: str, audio_path: str, compute_type: str = "int8"
         transcript = " ".join(seg.text.strip() for seg in result_segments)
 
     avg_transcribe_ms = sum(transcribe_times) / len(transcribe_times)
+    std_transcribe_ms = math.sqrt(sum((t - avg_transcribe_ms) ** 2 for t in transcribe_times) / len(transcribe_times))
 
     return {
         "model_size": model_size,
@@ -81,6 +84,7 @@ def benchmark_model(model_size: str, audio_path: str, compute_type: str = "int8"
         "load_time_ms": round(load_time_ms, 1),
         "transcribe_times_ms": [round(t, 1) for t in transcribe_times],
         "avg_transcribe_ms": round(avg_transcribe_ms, 1),
+        "std_transcribe_ms": round(std_transcribe_ms, 1),
         "transcript": transcript,
     }
 
@@ -135,8 +139,8 @@ def main():
                 budget_status += " (tham khảo, không phải Pi)"
 
             print(f"   Model load:         {result['load_time_ms']:.0f}ms")
-            print(f"   Transcribe (3 lần): {result['transcribe_times_ms']}")
-            print(f"   Trung bình:         {result['avg_transcribe_ms']:.0f}ms  {budget_status}")
+            # print(f"   Transcribe (15 lần): {result['transcribe_times_ms']}")
+            print(f"   STT latency:        {result['avg_transcribe_ms']:.0f}ms ± {result['std_transcribe_ms']:.0f}ms  {budget_status}")
             print(f"   Transcript:         \"{result['transcript']}\"")
 
         except Exception as e:
@@ -147,14 +151,14 @@ def main():
     print("\n" + "=" * 70)
     print("TỔNG KẾT")
     print("=" * 70)
-    print(f"{'Model':<10} {'Load (ms)':<12} {'STT avg (ms)':<15} {'Trạng thái'}")
-    print("-" * 55)
+    print(f"{'Model':<10} {'Load (ms)':<12} {'STT avg (ms)':<15} {'STT std (ms)':<15} {'Trạng thái'}")
+    print("-" * 70)
     for r in results:
         if "error" in r:
-            print(f"{r['model_size']:<10} {'LỖI':<12} {'':<15} {r['error']}")
+            print(f"{r['model_size']:<10} {'LỖI':<12} {'':<15} {'':<15} {r['error']}")
         else:
             status = "OK" if r["avg_transcribe_ms"] <= 900 else "CHẬM"
-            print(f"{r['model_size']:<10} {r['load_time_ms']:<12.0f} {r['avg_transcribe_ms']:<15.0f} {status}")
+            print(f"{r['model_size']:<10} {r['load_time_ms']:<12.0f} {r['avg_transcribe_ms']:<15.0f} ±{r['std_transcribe_ms']:<14.0f} {status}")
 
     if not on_pi:
         print()
@@ -166,9 +170,7 @@ def main():
     print()
     ok_models = [r for r in results if "error" not in r and r["avg_transcribe_ms"] <= 900]
     if ok_models:
-        # Ưu tiên model lớn nhất trong ngân sách (chất lượng tốt hơn)
-        best = max(ok_models, key=lambda x: {"tiny": 1, "base": 2, "small": 3}.get(x["model_size"], 0))
-        print(f"💡 ĐỀ XUẤT: Dùng model '{best['model_size']}' (avg {best['avg_transcribe_ms']:.0f}ms)")
+        print(f"💡 ĐỀ XUẤT: Giữ lại các model đạt ngân sách để test trên Pi thật. KHÔNG vội chốt model trên máy dev.")
     else:
         print("💡 Không có model nào đạt ngân sách 900ms. Cần xem xét whisper.cpp hoặc chỉ dùng 'tiny'.")
 

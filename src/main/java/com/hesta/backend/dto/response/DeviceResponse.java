@@ -55,8 +55,6 @@ public class DeviceResponse {
                 .deviceType(device.getDeviceType())
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
-
-                .status(device.getStatus().name())
                 .currentState(device.getCurrentState())
                 .capabilities(device.getCapabilities())
                 .icon(device.getIcon())

@@ -65,6 +65,31 @@
       "action": "TURN_OFF",
       "device_type": "water_heater",
       "patterns": ["tắt bình nóng lạnh", "tắt nước nóng"]
+    },
+    {
+      "action": "SET_BRIGHTNESS",
+      "device_type": "light",
+      "patterns": ["chỉnh độ sáng", "để độ sáng đèn"]
+    },
+    {
+      "action": "INCREASE_BRIGHTNESS",
+      "device_type": "light",
+      "patterns": ["tăng độ sáng", "tăng sáng", "sáng lên", "cho sáng thêm"]
+    },
+    {
+      "action": "DECREASE_BRIGHTNESS",
+      "device_type": "light",
+      "patterns": ["giảm độ sáng", "giảm sáng", "tối đi", "bớt sáng"]
+    },
+    {
+      "action": "INCREASE_TEMPERATURE",
+      "device_type": "air_conditioner",
+      "patterns": ["tăng nhiệt độ", "tăng điều hòa", "tăng máy lạnh"]
+    },
+    {
+      "action": "DECREASE_TEMPERATURE",
+      "device_type": "air_conditioner",
+      "patterns": ["giảm nhiệt độ", "giảm điều hòa", "giảm máy lạnh"]
     }
   ]
 }

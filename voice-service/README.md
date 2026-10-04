@@ -81,11 +81,11 @@ python -m pytest tests/ -v
 
 > ⚠️ Chưa benchmark trên Pi thật. Số liệu dưới đây cần được cập nhật sau khi chạy trên Raspberry Pi.
 
-| Model | Load (ms) | STT avg (ms) | Trạng thái |
-|-------|-----------|---------------|------------|
-| tiny  | 1125 (Dev)| 372 (Dev)     | OK (Dev)   |
-| base  | 676 (Dev) | 718 (Dev)     | OK (Dev)   |
-| small | 1369 (Dev)| 2025 (Dev)    | CHẬM (Dev) |
+| Model | Load (ms) | STT avg (ms) | STT std (ms) | Trạng thái |
+|-------|-----------|---------------|--------------|------------|
+| tiny  | 1383 (Dev)| 413 (Dev)     | ±38 (Dev)    | OK (Dev)   |
+| base  | 1387 (Dev)| 784 (Dev)     | ±69 (Dev)    | OK (Dev)   |
+| small | 2130 (Dev)| 2332 (Dev)    | ±521 (Dev)   | CHẬM (Dev) |
 
 **Ngân sách latency (Mục 2.5):** STT ≤ 900ms, tổng pipeline ≤ 1.5s
 

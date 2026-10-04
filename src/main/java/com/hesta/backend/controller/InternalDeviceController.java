@@ -18,6 +18,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
+import org.springframework.transaction.annotation.Transactional;
+
 /**
  * Controller dành riêng cho các lệnh nội bộ từ voice-service.
  * Được bảo vệ bởi InternalApiKeyFilter (không cần JWT).
@@ -32,22 +34,28 @@ public class InternalDeviceController {
     private final DeviceCommandService deviceCommandService;
 
     @GetMapping("/devices")
-    public ResponseEntity<List<DeviceResponse>> getDevices(@RequestParam(required = false) UUID homeId) {
-        log.info("Internal request to get devices for homeId: {}", homeId);
-        List<Device> devices;
-        
-        if (homeId != null) {
-            devices = deviceRepository.findByHomeId(homeId);
-        } else {
-            devices = deviceRepository.findAll();
-        }
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> getDevices(@RequestParam(required = false) UUID homeId) {
+        try {
+            log.info("Internal request to get devices for homeId: {}", homeId);
+            List<Device> devices;
+            
+            if (homeId != null) {
+                devices = deviceRepository.findByHomeId(homeId);
+            } else {
+                devices = deviceRepository.findAll();
+            }
 
-        List<DeviceResponse> response = devices.stream()
-                .filter(d -> !d.isDeleted()) // Chắc chắn thiết bị chưa bị xóa
-                .map(DeviceResponse::fromEntity)
-                .collect(Collectors.toList());
-                
-        return ResponseEntity.ok(response);
+            List<DeviceResponse> response = devices.stream()
+                    .filter(d -> !d.isDeleted()) // Chắc chắn thiết bị chưa bị xóa
+                    .map(DeviceResponse::fromEntity)
+                    .collect(Collectors.toList());
+                    
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error getting devices: ", e);
+            return ResponseEntity.status(500).body("Error: " + e.getMessage() + " - " + e.getClass().getName());
+        }
     }
 
     @PostMapping("/devices/{deviceId}/actions")

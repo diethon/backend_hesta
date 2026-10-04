@@ -21,6 +21,8 @@ from typing import Any
 
 from rapidfuzz import fuzz, process
 
+from app.text_normalize import strip_vietnamese_tones
+
 logger = logging.getLogger(__name__)
 
 # Danh sách tên phòng phổ biến trong nhà Việt Nam
@@ -84,7 +86,7 @@ class IntentMapper:
     def __init__(self, config: IntentConfig | None = None):
         self.config = config or IntentConfig()
         self._intents: list[dict] = []
-        self._pattern_index: list[tuple[str, dict]] = []  # (pattern, intent_def)
+        self._pattern_index: list[tuple[str, str, dict]] = []  # (original_pattern, normalized_pattern, intent_def)
 
     def load_intents(self, filepath: str | Path) -> None:
         """Load intent definitions từ JSON file."""
@@ -101,7 +103,9 @@ class IntentMapper:
         self._pattern_index = []
         for intent_def in self._intents:
             for pattern in intent_def.get("patterns", []):
-                self._pattern_index.append((pattern.lower(), intent_def))
+                pat_lower = pattern.lower()
+                pat_norm = strip_vietnamese_tones(pat_lower)
+                self._pattern_index.append((pat_lower, pat_norm, intent_def))
 
     def extract_room(self, text: str) -> tuple[str | None, str]:
         """Tách tên phòng ra khỏi câu nói.
@@ -113,49 +117,74 @@ class IntentMapper:
             (room_name hoặc None, phần còn lại của câu)
         """
         text_lower = text.lower().strip()
+        text_norm = strip_vietnamese_tones(text_lower)
 
-        # Sắp xếp theo độ dài giảm dần để match tên phòng dài nhất trước
-        # (VD: "phòng làm việc" trước "phòng")
-        sorted_rooms = sorted(ROOM_PATTERNS, key=len, reverse=True)
+        norm_rooms = {strip_vietnamese_tones(r): r for r in ROOM_PATTERNS}
+        
+        # Dùng partial_ratio để tìm tên phòng kể cả khi STT bị sai một vài chữ (khách -> khảm)
+        result = process.extractOne(
+            text_norm,
+            list(norm_rooms.keys()),
+            scorer=fuzz.partial_ratio,
+        )
 
-        for room in sorted_rooms:
-            if room in text_lower:
-                # Loại bỏ tên phòng khỏi câu
-                remaining = text_lower.replace(room, "").strip()
-                # Dọn khoảng trắng thừa
+        if result:
+            matched_norm, score, _ = result
+            if score >= 75:  # Khớp > 75% là chấp nhận (ví dụ 'phong kham' vs 'phong khach')
+                original_room = norm_rooms[matched_norm]
+                
+                # Cố gắng xóa tên phòng khỏi text gốc nếu nó nằm nguyên vẹn
+                remaining = text_lower
+                if matched_norm in text_norm:
+                    start_idx = text_norm.find(matched_norm)
+                    end_idx = start_idx + len(matched_norm)
+                    remaining = text_lower[:start_idx] + " " + text_lower[end_idx:]
+                
                 remaining = re.sub(r"\s+", " ", remaining).strip()
-                # Dọn các từ nối thừa ở đầu/cuối
                 remaining = re.sub(r"^(ở|tại|trong|của)\s+", "", remaining).strip()
                 remaining = re.sub(r"\s+(ở|tại|trong|của)$", "", remaining).strip()
-                return room, remaining
+                
+                return original_room, remaining
 
         return None, text_lower
 
-    def extract_parameters(self, text: str, intent_def: dict) -> dict[str, Any]:
-        """Trích xuất tham số từ câu nói (VD: nhiệt độ).
+    def extract_parameters(self, text: str, intent_def: dict) -> tuple[str, dict[str, Any]]:
+        """Trích xuất tham số từ câu nói (VD: nhiệt độ, độ sáng).
 
         Args:
-            text: phần câu nói còn lại sau khi tách room + action
-            intent_def: definition của intent (có trường has_parameter)
+            text: câu nói gốc
+            intent_def: definition của intent
 
         Returns:
-            Dict tham số đã trích xuất
+            (action đã chốt, Dict tham số)
         """
         params: dict[str, Any] = {}
-        has_param = intent_def.get("has_parameter")
+        action = intent_def["action"]
+        dev_type = intent_def["device_type"]
 
-        if has_param == "temperature":
-            # Tìm số trong câu: "25 độ", "nhiệt độ 25", etc.
-            match = re.search(r"(\d{1,2})\s*(?:độ|°)?", text)
-            if match:
-                temp = int(match.group(1))
-                # Validate range hợp lý cho điều hòa
-                if 16 <= temp <= 32:
-                    params["temperature"] = temp
+        # Tìm bất kỳ con số nào trong câu
+        match = re.search(r"(\d+)", text)
+        if match:
+            value = int(match.group(1))
+
+            if dev_type == "air_conditioner":
+                # Nếu có chữ "lên" (ví dụ tăng lên 28) hoặc "đặt/chỉnh" -> absolute
+                if re.search(r"(lên|thành|đặt|chỉnh)\s*\d+", text.lower()):
+                    action = "SET_TEMPERATURE"
+                    params["temperature"] = value
                 else:
-                    logger.warning("Nhiệt độ %d ngoài phạm vi hợp lý (16-32)", temp)
+                    # Tăng/giảm tương đối (ví dụ thêm 2 độ)
+                    params["amount"] = value
 
-        return params
+            elif dev_type == "light":
+                # "lên 80", "thành 80" -> absolute
+                if re.search(r"(lên|thành|đặt|chỉnh)\s*\d+", text.lower()):
+                    action = "SET_BRIGHTNESS"
+                    params["brightness"] = value
+                else:
+                    params["amount"] = value
+
+        return action, params
 
     def map(self, text: str) -> IntentResult | None:
         """Map transcript text thành intent.
@@ -177,50 +206,53 @@ class IntentMapper:
         room, remaining = self.extract_room(text)
 
         # Bước 2: Fuzzy match phần còn lại với tất cả patterns
-        all_patterns = [p for p, _ in self._pattern_index]
-
         if not remaining:
             return None
+            
+        remaining_norm = strip_vietnamese_tones(remaining)
+        
+        # Tạo danh sách các pattern đã được chuẩn hóa
+        all_norm_patterns = [p_norm for _, p_norm, _ in self._pattern_index]
 
-        # Tìm match tốt nhất
+        # Tìm match tốt nhất trên bản chuẩn hóa (Sử dụng token_set_ratio để bỏ qua các từ thừa như tham số, tên phòng)
         result = process.extractOne(
-            remaining,
-            all_patterns,
-            scorer=fuzz.token_sort_ratio,
+            remaining_norm,
+            all_norm_patterns,
+            scorer=fuzz.token_set_ratio,
         )
 
         if result is None:
             return None
 
-        matched_pattern, score, idx = result
+        matched_norm_pattern, score, idx = result
+
+        # Lấy lại pattern gốc và intent_def dựa trên index
+        matched_original_pattern, _, intent_def = self._pattern_index[idx]
 
         if score < self.config.min_confidence:
             logger.info(
-                "Confidence quá thấp: '%s' → '%s' (%.0f%% < %.0f%%)",
-                remaining, matched_pattern, score, self.config.min_confidence,
+                "Confidence quá thấp: '%s' (norm: '%s') → '%s' (%.0f%% < %.0f%%)",
+                remaining, remaining_norm, matched_original_pattern, score, self.config.min_confidence,
             )
             return None
 
-        # Lấy intent definition tương ứng
-        _, intent_def = self._pattern_index[idx]
-
         # Bước 3: Trích xuất tham số
-        params = self.extract_parameters(text, intent_def)
+        action, params = self.extract_parameters(text, intent_def)
 
         intent_result = IntentResult(
-            action=intent_def["action"],
+            action=action,
             device_type=intent_def["device_type"],
             room=room,
             parameters=params,
             confidence=score,
-            matched_pattern=matched_pattern,
+            matched_pattern=matched_original_pattern,
             raw_text=text,
         )
 
         logger.info(
-            "Intent mapped: '%s' → %s %s room=%s (conf=%.0f%%)",
+            "Intent mapped: '%s' → %s %s room=%s params=%s (conf=%.0f%%)",
             text, intent_result.action, intent_result.device_type,
-            intent_result.room, intent_result.confidence,
+            intent_result.room, intent_result.parameters, intent_result.confidence,
         )
 
         return intent_result
