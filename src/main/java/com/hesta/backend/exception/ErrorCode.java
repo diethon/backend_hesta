@@ -93,6 +93,11 @@ public enum ErrorCode {
     INVALID_BRIGHTNESS_VALUE(1033, "Giá trị độ sáng không hợp lệ (phải từ 0 đến 100)", HttpStatus.BAD_REQUEST),
     DEVICE_MQTT_TOPIC_MISSING(1034, "Thiết bị chưa được cấu hình MQTT topic", HttpStatus.BAD_REQUEST),
     MQTT_PUBLISH_FAILED(1035, "Không thể gửi lệnh điều khiển tới thiết bị qua MQTT broker", HttpStatus.INTERNAL_SERVER_ERROR),
+    AC_TEMPERATURE_INVALID(1036, "Nhiệt độ điều hòa phải nằm trong khoảng từ 20 đến 30 độ C", HttpStatus.BAD_REQUEST),
+    AC_MODE_INVALID(1037, "Chế độ điều hòa không hợp lệ. Các chế độ hợp lệ: AUTO, COOL, DRY, HEAT", HttpStatus.BAD_REQUEST),
+    AC_FAN_INVALID(1038, "Tốc độ quạt không hợp lệ. Các mức hợp lệ: AUTO, LOW, MID, HIGH", HttpStatus.BAD_REQUEST),
+    AC_TIMER_INVALID(1039, "Thời gian hẹn giờ không hợp lệ (giờ từ 0 đến 24)", HttpStatus.BAD_REQUEST),
+    GATE_ACTION_INVALID(1040, "Hành động điều khiển cổng không hợp lệ. Các hành động hợp lệ: OPEN, CLOSE, STOP", HttpStatus.BAD_REQUEST),
     // Notification Core
     NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST);
 

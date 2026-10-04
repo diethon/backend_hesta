@@ -1,10 +1,15 @@
 package com.hesta.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.hesta.backend.enums.DeviceStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -53,14 +58,14 @@ public class Device {
     @Column(name = "status", nullable = false, length = 20)
     private DeviceStatus status;
 
-    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "current_state", nullable = false, columnDefinition = "jsonb")
     private Map<String, Object> currentState;
 
-    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "capabilities", columnDefinition = "jsonb")
     @Builder.Default
-    private java.util.Map<String, java.util.List<String>> capabilities = new java.util.HashMap<>();
+    private DeviceCapabilities capabilities = new DeviceCapabilities();
 
     @Column(name = "icon", length = 50)
     private String icon;
@@ -98,5 +103,34 @@ public class Device {
         return this.capabilities.values().stream().flatMap(java.util.List::stream).anyMatch(act -> act.equalsIgnoreCase(action));
     }
 
+    @JsonProperty("capabilities")
+    @JsonDeserialize(using = DeviceCapabilitiesDeserializer.class)
+    public void setCapabilities(DeviceCapabilities capabilities) {
+        this.capabilities = capabilities != null ? capabilities : new DeviceCapabilities();
+    }
 
+    @JsonIgnore
+    public void setCapabilities(Map<String, List<String>> capabilities) {
+        if (capabilities instanceof DeviceCapabilities dc) {
+            this.capabilities = dc;
+        } else if (capabilities != null) {
+            this.capabilities = new DeviceCapabilities(capabilities);
+        } else {
+            this.capabilities = new DeviceCapabilities();
+        }
+    }
+
+    public static class DeviceBuilder {
+        public DeviceBuilder capabilities(Map<String, List<String>> capabilities) {
+            if (capabilities instanceof DeviceCapabilities dc) {
+                this.capabilities$value = dc;
+            } else if (capabilities != null) {
+                this.capabilities$value = new DeviceCapabilities(capabilities);
+            } else {
+                this.capabilities$value = new DeviceCapabilities();
+            }
+            this.capabilities$set = true;
+            return this;
+        }
+    }
 }

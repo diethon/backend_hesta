@@ -26,6 +26,7 @@ public class DeviceResponse {
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.hesta.backend.entity.DeviceCapabilitiesDeserializer.class)
     private java.util.Map<String, java.util.List<String>> capabilities;
     private String icon;
     private BigDecimal digitalTwinX;

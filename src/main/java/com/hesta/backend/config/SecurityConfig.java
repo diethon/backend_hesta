@@ -49,7 +49,7 @@ public class SecurityConfig {
                 .accessDeniedHandler(customAccessDeniedHandler)
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html","/api/devices/led-strip/**","/api/devices/**", "/internal/**").permitAll()
+                .requestMatchers("/api/v1/auth/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/api/devices/led-strip/**", "/api/v1/devices/**", "/api/devices/**", "/internal/**").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
