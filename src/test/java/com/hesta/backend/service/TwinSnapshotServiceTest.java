@@ -31,8 +31,7 @@ class TwinSnapshotServiceTest {
     @Mock HomeRepository homeRepository;
     @Mock HomeMemberRepository homeMemberRepository;
     @Mock RoomRepository roomRepository;
-    @Mock DeviceRepository deviceRepository;
-    @Mock SensorReadingRepository sensorReadingRepository;
+    @Mock TwinSnapshotRepository twinSnapshotRepository;
     private final TwinFixtures fixture = new TwinFixtures();
     private final UUID userId = TwinFixtures.id(500);
     private TwinSnapshotService service;
@@ -40,7 +39,7 @@ class TwinSnapshotServiceTest {
     @BeforeEach
     void setUp() {
         service = new TwinSnapshotServiceImpl(new HomeAuthorizationService(homeRepository, homeMemberRepository),
-                roomRepository, deviceRepository, sensorReadingRepository, TwinHealthTestSupport.mapper(new ObjectMapper()));
+                roomRepository, twinSnapshotRepository, TwinHealthTestSupport.mapper(new ObjectMapper()));
     }
 
     @ParameterizedTest
@@ -50,14 +49,14 @@ class TwinSnapshotServiceTest {
         when(homeMemberRepository.findByHomeIdAndUserId(fixture.home.getId(), userId))
                 .thenReturn(Optional.of(HomeMember.builder().role(role).status(MemberStatus.ACTIVE).build()));
         when(roomRepository.findByHomeId(fixture.home.getId())).thenReturn(fixture.rooms);
-        when(deviceRepository.findByHomeIdOrderByIdAsc(fixture.home.getId())).thenReturn(fixture.devices);
-        when(sensorReadingRepository.findLatestByHomeId(fixture.home.getId())).thenReturn(fixture.readings);
+        when(twinSnapshotRepository.findDevicesByHomeId(fixture.home.getId())).thenReturn(fixture.devices);
+        when(twinSnapshotRepository.findLatestReadingsByHomeId(fixture.home.getId())).thenReturn(fixture.readings);
 
         var result = service.getSnapshot(userId, fixture.home.getId());
 
         assertThat(result.rooms()).hasSize(2);
         assertThat(result.rooms().get(1).sensors()).hasSize(2);
-        verify(sensorReadingRepository).findLatestByHomeId(fixture.home.getId());
+        verify(twinSnapshotRepository).findLatestReadingsByHomeId(fixture.home.getId());
     }
 
     @Test
@@ -90,6 +89,6 @@ class TwinSnapshotServiceTest {
     private void assertDenied(UUID caller, ErrorCode code) {
         assertThatThrownBy(() -> service.getSnapshot(caller, fixture.home.getId()))
                 .isInstanceOfSatisfying(AppException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(code));
-        verifyNoInteractions(roomRepository, deviceRepository, sensorReadingRepository);
+        verifyNoInteractions(roomRepository, twinSnapshotRepository);
     }
 }
