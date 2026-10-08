@@ -23,6 +23,8 @@ public class DeviceResponse {
     private String nodeName;
     private String name;
     private String deviceType;
+    private String model;
+    private String serialNumber;
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
@@ -54,6 +56,8 @@ public class DeviceResponse {
                 .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())
                 .deviceType(device.getDeviceType())
+                .model(device.getModel())
+                .serialNumber(device.getSerialNumber())
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
                 .currentState(device.getCurrentState())
@@ -66,5 +70,6 @@ public class DeviceResponse {
                 .updatedAt(device.getUpdatedAt())
                 .build();
     }
+
 }
 

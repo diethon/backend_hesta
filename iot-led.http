@@ -3,7 +3,7 @@
 ### ====================================================================
 
 @baseUrl = http://localhost:8080
-@deviceId = 66f08314-5899-4a2d-bf5a-f29ea0771d2e
+@deviceId = f803473e-8f7f-4dcd-8001-5ce1fc2f4dc4
 @token = 
 
 ### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
@@ -100,7 +100,7 @@ Content-Type: application/json
 
 {
   "action": "SET_BRIGHTNESS",
-  "brightness": 30
+  "brightness": 50
 }
 
 ### ====================================================================

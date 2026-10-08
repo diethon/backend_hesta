@@ -99,7 +99,20 @@ public enum ErrorCode {
     AC_TIMER_INVALID(1039, "Thời gian hẹn giờ không hợp lệ (giờ từ 0 đến 24)", HttpStatus.BAD_REQUEST),
     GATE_ACTION_INVALID(1040, "Hành động điều khiển cổng không hợp lệ. Các hành động hợp lệ: OPEN, CLOSE, STOP", HttpStatus.BAD_REQUEST),
     // Notification Core
-    NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST);
+    NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST),
+
+    // Device Onboarding & QR
+    DEVICE_SERIAL_EXISTS(1041, "Số serial thiết bị đã tồn tại", HttpStatus.CONFLICT),
+    QR_TOKEN_INVALID(1042, "Mã QR không hợp lệ", HttpStatus.BAD_REQUEST),
+    QR_TOKEN_EXPIRED(1043, "Mã QR đã hết hạn", HttpStatus.BAD_REQUEST),
+    QR_TOKEN_USED(1044, "Mã QR đã được sử dụng", HttpStatus.BAD_REQUEST),
+    DEVICE_ALREADY_CLAIMED(1045, "Thiết bị này đã được thêm vào hệ thống", HttpStatus.CONFLICT),
+    ROOM_NOT_FOUND(1046, "Phòng không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
+    ROOM_ACCESS_DENIED(1047, "Bạn không có quyền thêm thiết bị vào phòng này", HttpStatus.FORBIDDEN),
+    SERIAL_NUMBER_REQUIRED(1048, "Số serial không được để trống", HttpStatus.BAD_REQUEST),
+    DEVICE_NAME_REQUIRED(1049, "Tên thiết bị không được để trống", HttpStatus.BAD_REQUEST),
+    DEVICE_TYPE_REQUIRED(1050, "Loại thiết bị không được để trống", HttpStatus.BAD_REQUEST);
+
 
     private final int code;
     private final String message;
