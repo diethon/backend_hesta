@@ -4,7 +4,7 @@
 
 @baseUrl = http://localhost:8080
 @deviceId = 66f08314-5899-4a2d-bf5a-f29ea0771d2e
-#@token = 
+#@token =
 
 ### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
 POST {{baseUrl}}/api/v1/auth/login
@@ -100,7 +100,7 @@ Authorization: Bearer {{token}}
 
 {
   "action": "SET_BRIGHTNESS",
-  "brightness": 30
+  "brightness": 50
 }
 
 ### ====================================================================

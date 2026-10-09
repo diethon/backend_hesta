@@ -37,7 +37,36 @@ public class DeviceController {
 
     private final DeviceService deviceService;
     @Autowired
-    private  ManualControlService manualControlService;
+    private ManualControlService manualControlService;
+    @Autowired
+    private com.hesta.backend.service.DeviceOnboardingService onboardingService;
+
+    @GetMapping("/devices/qr/{token}")
+    public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DevicePublicPreviewResponse>> resolveQrToken(
+            @PathVariable String token) {
+        com.hesta.backend.dto.response.DevicePublicPreviewResponse result = onboardingService.resolveQrToken(token);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.dto.response.DevicePublicPreviewResponse>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
+    @PostMapping("/devices/{deviceId}/claim")
+    public ResponseEntity<ApiResponse<DeviceResponse>> claimDevice(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @Valid @RequestBody com.hesta.backend.dto.request.DeviceClaimRequest request) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
+        DeviceResponse result = onboardingService.claimDevice(userDetails.getId(), deviceId, request);
+        return ResponseEntity.ok(ApiResponse.<DeviceResponse>builder()
+                .code(1000)
+                .message("Device claimed successfully")
+                .result(result)
+                .build());
+    }
+
 
 
     @PostMapping("/devices/{deviceId}/commands")
