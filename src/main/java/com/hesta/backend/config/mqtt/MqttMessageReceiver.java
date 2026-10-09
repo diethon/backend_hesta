@@ -92,6 +92,9 @@ public class MqttMessageReceiver {
             if (topic.endsWith("/catalog")) {
                 handleCatalog(topic, payload);
             }
+            else if (topic.endsWith("/register") || topic.endsWith("/discovery")) {
+                handleEdgeNodeRegistration(topic, payload);
+            }
             else if (topic.endsWith("/telemetry") || topic.endsWith("/sensor")) {
                 handleTelemetry(topic, payload);
             }
@@ -639,9 +642,57 @@ public class MqttMessageReceiver {
         }
     }
 
-    private void handleDeviceStatus(String topic, String payload) {
-        log.info("Processing device status. Topic: [{}], Status: [{}]", topic, payload);
+    private void handleEdgeNodeRegistration(String topic, String payload) {
+        log.info("Processing EdgeNode registration. Topic: [{}], Payload: [{}]", topic, payload);
         try {
+            String nodeCode = null;
+            try {
+                Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+                if (data.containsKey("nodeId") && data.get("nodeId") != null) {
+                    nodeCode = data.get("nodeId").toString();
+                } else if (data.containsKey("nodeCode") && data.get("nodeCode") != null) {
+                    nodeCode = data.get("nodeCode").toString();
+                }
+            } catch (Exception ignored) {}
+
+            if (nodeCode == null || nodeCode.isBlank()) {
+                String[] parts = topic.split("/");
+                if (parts.length >= 3 && "nodes".equals(parts[1])) {
+                    nodeCode = parts[2];
+                }
+            }
+
+            if (nodeCode != null && !nodeCode.isBlank()) {
+                final String finalNodeCode = nodeCode;
+                edgeNodeRepository.findByNodeCode(finalNodeCode).ifPresent(node -> {
+                    node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                    edgeNodeRepository.save(node);
+                    log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
+                });
+            }
+        } catch (Exception e) {
+            log.error("Failed to process EdgeNode registration for topic: {}", topic, e);
+        }
+    }
+
+    private void handleDeviceStatus(String topic, String payload) {
+        log.info("Processing status. Topic: [{}], Status: [{}]", topic, payload);
+        try {
+            String[] parts = topic.split("/");
+            if (parts.length == 4 && "nodes".equals(parts[1]) && "status".equals(parts[3])) {
+                String nodeCode = parts[2];
+                String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
+                com.hesta.backend.enums.EdgeNodeStatus nodeStatus = "ONLINE".equals(statusStr)
+                        ? com.hesta.backend.enums.EdgeNodeStatus.ONLINE
+                        : com.hesta.backend.enums.EdgeNodeStatus.OFFLINE;
+                edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
+                    n.setStatus(nodeStatus);
+                    edgeNodeRepository.save(n);
+                    log.info("Updated node {} status to {}", nodeCode, nodeStatus);
+                });
+                return;
+            }
+
             String deviceIdStr = extractDeviceIdFromTopic(topic);
             String nodeCode = extractNodeCodeFromTopic(topic);
             if (deviceIdStr == null) return;
@@ -673,8 +724,9 @@ public class MqttMessageReceiver {
                 }
             });
         } catch (Exception e) {
-            log.error("Failed to process device status from topic: {}", topic, e);
+            log.error("Failed to process status from topic: {}", topic, e);
         }
     }
 }
+
 
