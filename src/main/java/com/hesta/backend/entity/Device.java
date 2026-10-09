@@ -51,8 +51,15 @@ public class Device {
     @Column(name = "device_type", nullable = false, length = 50)
     private String deviceType;
 
+    @Column(name = "model", length = 100)
+    private String model;
+
+    @Column(name = "serial_number", length = 100)
+    private String serialNumber;
+
     @Column(name = "mqtt_topic", length = 255)
     private String mqttTopic;
+
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
