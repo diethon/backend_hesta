@@ -121,6 +121,7 @@ class VoicePipeline:
             condition_on_previous_text=stt_cfg.get("condition_on_previous_text", None),
             repetition_penalty=stt_cfg.get("repetition_penalty", 1.2),
             no_repeat_ngram_size=stt_cfg.get("no_repeat_ngram_size", 3),
+            hotwords=stt_cfg.get("hotwords", None),
         ))
 
         device_directory = DeviceDirectory(DeviceDirectoryConfig(

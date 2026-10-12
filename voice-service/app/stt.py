@@ -35,6 +35,7 @@ class STTConfig:
     condition_on_previous_text: bool | None = None
     repetition_penalty: float | None = None
     no_repeat_ngram_size: int | None = None
+    hotwords: str | None = None
 
 
 @dataclass
@@ -129,6 +130,8 @@ class SpeechToText:
             kwargs["repetition_penalty"] = self.config.repetition_penalty
         if self.config.no_repeat_ngram_size is not None:
             kwargs["no_repeat_ngram_size"] = self.config.no_repeat_ngram_size
+        if self.config.hotwords is not None:
+            kwargs["hotwords"] = self.config.hotwords
 
         segments_iter, info = self._model.transcribe(
             audio_input,

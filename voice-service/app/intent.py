@@ -78,11 +78,11 @@ VI_SPOKEN_NUMBERS = [
     (r"\b(tám mươi|tám chục|tạm mươi|tạm vư|tạm mười|tám mười)\b", "80"),
     (r"\b(bảy mươi|bảy chục|bảy mười)\b", "70"),
     (r"\b(sáu mươi|sáu chục|sáu mười)\b", "60"),
-    (r"\b(năm mươi|năm chục|năm mười)\b", "50"),
+    (r"\b(năm mươi|năm chục)\b", "50"),
     (r"\b(bốn mươi|bốn chục|buồn bươi|bốn mười)\b", "40"),
     (r"\b(ba mươi|ba chục|ba mười)\b", "30"),
     (r"\b(hai mươi|hai chục|hai mười)\b", "20"),
-    (r"\b(mười)\b", "10"),
+    (r"\b(mười|mươi|một chục|chục)\b", "10"),
 ]
 
 
@@ -94,6 +94,8 @@ def normalize_spoken_numbers(text: str) -> str:
     # Sửa lỗi âm học Whisper: 'tắt' bị nhận nhầm thành 'bắt', 'đắt', 'tắc', 'bắc', 'ngắt', 'cắt'
     # Điều này cực kỳ quan trọng vì nếu để 'bắt đèn' bị bỏ dấu thành 'bat den', nó sẽ khớp nhầm với 'bật đèn'!
     res = re.sub(r'\b(bắt|đắt|tắc|bắc|ngắt|cắt)\b(?!\s+đầu\b)', 'tắt', res)
+    # Sửa lỗi âm học Whisper: 'là mười' / 'mức mười' bị nghe nhầm thành 'lăm mươi'
+    res = re.sub(r'\blăm\s+mươi\b', '10', res)
     for pat, rep in VI_SPOKEN_NUMBERS:
         res = re.sub(pat, rep, res)
     return res
