@@ -92,7 +92,9 @@ class DeviceDirectory:
 
         for dev in devices:
             try:
-                db_type = str(dev.get("deviceType", dev.get("type", ""))).lower()
+                db_type = str(dev.get("deviceType", dev.get("type", ""))).strip().lower()
+                if not db_type or "id" not in dev:
+                    continue
                 db_name = dev.get("name", "").lower()
                 
                 # Bản thân nó là type gì thì lưu type đó
@@ -112,7 +114,7 @@ class DeviceDirectory:
                         device_id=str(dev["id"]),
                         device_name=dev.get("name", ""),
                         device_type=t,
-                        room_name=str(dev.get("roomName", dev.get("room", ""))).lower(),
+                        room_name=str(dev.get("roomName", dev.get("room", ""))).strip().lower(),
                         home_id=str(dev.get("homeId", dev.get("home_id", ""))),
                     )
                     key = (info.home_id, info.room_name, t)

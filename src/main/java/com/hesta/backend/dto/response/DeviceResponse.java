@@ -45,11 +45,9 @@ public class DeviceResponse {
 
         return DeviceResponse.builder()
                 .id(device.getId())
-                .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
-                .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
-                .homeId(home != null ? home.getId() : null)
                 .roomId(room != null ? room.getId() : null)
                 .roomName(room != null ? room.getName() : null)
+                .homeId(home != null ? home.getId() : null)
                 .nodeId(device.getNode() != null ? device.getNode().getId() : null)
                 .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())

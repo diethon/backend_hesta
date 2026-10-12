@@ -9,6 +9,7 @@ KHÔNG cần cài torch hay model VAD riêng.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,11 @@ class STTConfig:
     language: str = "vi"           # ép cứng tiếng Việt
     compute_type: str = "int8"     # quantization cho ARM
     vad_filter: bool = True        # dùng Silero-VAD tích hợp
+    initial_prompt: str | None = None
+    temperature: float | None = None
+    condition_on_previous_text: bool | None = None
+    repetition_penalty: float | None = None
+    no_repeat_ngram_size: int | None = None
 
 
 @dataclass
@@ -109,10 +115,24 @@ class SpeechToText:
             raise TypeError(f"Loại audio không hỗ trợ: {type(audio)}")
 
         t0 = time.perf_counter()
+        kwargs = {
+            "language": self.config.language,
+            "vad_filter": self.config.vad_filter,
+        }
+        if self.config.initial_prompt is not None:
+            kwargs["initial_prompt"] = self.config.initial_prompt
+        if self.config.temperature is not None:
+            kwargs["temperature"] = self.config.temperature
+        if self.config.condition_on_previous_text is not None:
+            kwargs["condition_on_previous_text"] = self.config.condition_on_previous_text
+        if self.config.repetition_penalty is not None:
+            kwargs["repetition_penalty"] = self.config.repetition_penalty
+        if self.config.no_repeat_ngram_size is not None:
+            kwargs["no_repeat_ngram_size"] = self.config.no_repeat_ngram_size
+
         segments_iter, info = self._model.transcribe(
             audio_input,
-            language=self.config.language,
-            vad_filter=self.config.vad_filter,
+            **kwargs,
         )
 
         # Collect segments
@@ -137,8 +157,13 @@ class SpeechToText:
         duration_ms = (time.perf_counter() - t0) * 1000
         avg_confidence = total_log_prob / segment_count if segment_count > 0 else 0.0
 
+        full_text = " ".join(texts).strip()
+        # Loại bỏ lặp từ bất thường (VD: '90, 90, 90, 90') do ảo giác decoder
+        full_text = re.sub(r'(\b\w+\b)(?:\s*,\s*\1)+', r'\1', full_text)
+        full_text = re.sub(r',\s*,+', ',', full_text).strip(' ,')
+
         result = STTResult(
-            text=" ".join(texts),
+            text=full_text,
             language=self.config.language,
             confidence=avg_confidence,
             duration_ms=round(duration_ms, 1),

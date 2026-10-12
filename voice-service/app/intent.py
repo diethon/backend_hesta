@@ -42,9 +42,56 @@ ROOM_PATTERNS = [
     "tầng lầu",
     "nhà kho",
     "garage",
-    "sảnh",
+    "tiền sảnh",
     "hành lang",
 ]
+
+
+ROOM_PHONETIC_VARIANTS = {
+    # Biến thể phát âm Whisper cho phòng ngủ
+    "phong mua": "phòng ngủ",
+    "phang mua": "phòng ngủ",
+    "phong mu": "phòng ngủ",
+    "phang mu": "phòng ngủ",
+    "phong ngu": "phòng ngủ",
+    "phang ngu": "phòng ngủ",
+    "phong mui": "phòng ngủ",
+    "phang mui": "phòng ngủ",
+    "phang ngo": "phòng ngủ",
+    "phong ngo": "phòng ngủ",
+    "phong ngau": "phòng ngủ",
+    "phang ngau": "phòng ngủ",
+    "phong nhe": "phòng ngủ",
+    "phang nhe": "phòng ngủ",
+    "phong nu": "phòng ngủ",
+    "phang nu": "phòng ngủ",
+    "dem phong mua": "phòng ngủ",
+    "den phang mua": "phòng ngủ",
+    "dem phong ngu": "phòng ngủ",
+    "den phong ngu": "phòng ngủ",
+}
+
+
+VI_SPOKEN_NUMBERS = [
+    (r"\b(một trăm|trăm|1 đám|một đám)\b", "100"),
+    (r"\b(chín mươi|chín chục)\b", "90"),
+    (r"\b(tám mươi|tám chục|tạm mươi|tạm vư|tạm mười|tám mười)\b", "80"),
+    (r"\b(bảy mươi|bảy chục|bảy mười)\b", "70"),
+    (r"\b(sáu mươi|sáu chục|sáu mười)\b", "60"),
+    (r"\b(năm mươi|năm chục|năm mười)\b", "50"),
+    (r"\b(bốn mươi|bốn chục|buồn bươi|bốn mười)\b", "40"),
+    (r"\b(ba mươi|ba chục|ba mười)\b", "30"),
+    (r"\b(hai mươi|hai chục|hai mười)\b", "20"),
+    (r"\b(mười)\b", "10"),
+]
+
+
+def normalize_spoken_numbers(text: str) -> str:
+    """Chuyển đổi số dạng chữ tiếng Việt hoặc âm đọc lệch của whisper thành chữ số."""
+    res = text.lower()
+    for pat, rep in VI_SPOKEN_NUMBERS:
+        res = re.sub(pat, rep, res)
+    return res
 
 
 @dataclass
@@ -107,49 +154,76 @@ class IntentMapper:
                 pat_norm = strip_vietnamese_tones(pat_lower)
                 self._pattern_index.append((pat_lower, pat_norm, intent_def))
 
+
     def extract_room(self, text: str) -> tuple[str | None, str]:
-        """Tách tên phòng ra khỏi câu nói.
-
-        Args:
-            text: câu nói gốc (đã lowercase)
-
-        Returns:
-            (room_name hoặc None, phần còn lại của câu)
-        """
+        """Tách tên phòng ra khỏi câu nói sử dụng sliding window fuzzy matching."""
         text_lower = text.lower().strip()
         text_norm = strip_vietnamese_tones(text_lower)
+        
+        text_words_orig = text_lower.split()
+        text_words_norm = text_norm.split()
 
         norm_rooms = {strip_vietnamese_tones(r): r for r in ROOM_PATTERNS}
         
-        # Dùng partial_ratio để tìm tên phòng kể cả khi STT bị sai một vài chữ (khách -> khảm)
-        result = process.extractOne(
-            text_norm,
-            list(norm_rooms.keys()),
-            scorer=fuzz.partial_ratio,
-        )
+        best_overall_score = 0.0
+        best_overall_room = None
+        best_overall_start = -1
+        best_overall_len = 0
+        
+        for norm_room, original_room in norm_rooms.items():
+            room_words = norm_room.split()
+            room_len = len(room_words)
+            
+            if room_len > len(text_words_norm):
+                continue
+                
+            for start in range(len(text_words_norm) - room_len + 1):
+                window_norm = " ".join(text_words_norm[start : start + room_len])
 
-        if result:
-            matched_norm, score, _ = result
-            if score >= 75:  # Khớp > 75% là chấp nhận (ví dụ 'phong kham' vs 'phong khach')
-                original_room = norm_rooms[matched_norm]
-                
-                # Cố gắng xóa tên phòng khỏi text gốc nếu nó nằm nguyên vẹn
-                remaining = text_lower
-                if matched_norm in text_norm:
-                    start_idx = text_norm.find(matched_norm)
-                    end_idx = start_idx + len(matched_norm)
-                    remaining = text_lower[:start_idx] + " " + text_lower[end_idx:]
-                
-                remaining = re.sub(r"\s+", " ", remaining).strip()
-                remaining = re.sub(r"^(ở|tại|trong|của)\s+", "", remaining).strip()
-                remaining = re.sub(r"\s+(ở|tại|trong|của)$", "", remaining).strip()
-                
-                return original_room, remaining
+                matched_room = original_room
+                if window_norm in ROOM_PHONETIC_VARIANTS:
+                    score = 100.0
+                    matched_room = ROOM_PHONETIC_VARIANTS[window_norm]
+                else:
+                    score = fuzz.ratio(window_norm, norm_room)
+
+                # Ngưỡng: Phòng 1 từ (như 'garage') cần >= 85% để tránh nhầm với từ khác
+                # Phòng >= 2 từ (như 'phòng ngủ', 'phòng khách') cần >= 60%
+                threshold = 85.0 if room_len == 1 else 60.0
+                if score < threshold:
+                    continue
+
+                # Chỉ cập nhật nếu điểm cao hơn, hoặc bằng điểm nhưng phòng dài hơn (VD: 'phòng làm việc' > 'phòng')
+                if score > best_overall_score or (score == best_overall_score and room_len > best_overall_len):
+                    best_overall_score = score
+                    best_overall_room = matched_room
+                    best_overall_start = start
+                    best_overall_len = room_len
+
+        if best_overall_score >= 60.0 and best_overall_room:
+            # Xóa các từ thuộc về tên phòng khỏi câu
+            remaining_words = (
+                text_words_orig[:best_overall_start]
+                + text_words_orig[best_overall_start + best_overall_len:]
+            )
+            remaining = " ".join(remaining_words)
+            remaining = re.sub(r"\s+", " ", remaining).strip()
+            remaining = re.sub(r"^(ở|tại|trong|của)\s+", "", remaining).strip()
+            remaining = re.sub(r"\s+(ở|tại|trong|của)$", "", remaining).strip()
+            
+            return best_overall_room, remaining
 
         return None, text_lower
 
     def extract_parameters(self, text: str, intent_def: dict) -> tuple[str, dict[str, Any]]:
         """Trích xuất tham số từ câu nói (VD: nhiệt độ, độ sáng).
+
+        Logic phân biệt tuyệt đối vs tương đối:
+        - Nhiệt độ 16-30: luôn là tuyệt đối (SET_TEMPERATURE) vì không ai "tăng thêm 26 độ"
+        - Nhiệt độ 1-5: tương đối (tăng/giảm thêm X độ)
+        - Độ sáng 10-100: tuyệt đối (SET_BRIGHTNESS)
+        - Độ sáng 1-9: tương đối (tăng/giảm thêm X mức)
+        - Từ khóa "lên/xuống/là/về/thành/đặt/chỉnh/đến/mức" + số: luôn tuyệt đối
 
         Args:
             text: câu nói gốc
@@ -161,28 +235,39 @@ class IntentMapper:
         params: dict[str, Any] = {}
         action = intent_def["action"]
         dev_type = intent_def["device_type"]
+        text_num = normalize_spoken_numbers(text.lower())
 
         # Tìm bất kỳ con số nào trong câu
-        match = re.search(r"(\d+)", text)
+        match = re.search(r"(\d+)", text_num)
         if match:
             value = int(match.group(1))
 
+            # Kiểm tra từ khóa chỉ mức tuyệt đối (lên 26, xuống 24, là 27, về 25, đến mức, lên mức,...)
+            has_absolute_keyword = bool(
+                re.search(r"(lên|xuống|là|về|thành|đặt|chỉnh|đến|mức|la|ra)[-–—\s]*\d+", text_num)
+            )
+
             if dev_type == "air_conditioner":
-                # Nếu có chữ "lên" (ví dụ tăng lên 28) hoặc "đặt/chỉnh" -> absolute
-                if re.search(r"(lên|thành|đặt|chỉnh)\s*\d+", text.lower()):
+                if has_absolute_keyword or (16 <= value <= 30):
+                    # Số nằm trong khoảng nhiệt độ điều hòa (16-30°C) → chắc chắn tuyệt đối
                     action = "SET_TEMPERATURE"
                     params["temperature"] = value
+                    logger.info("Param: nhiệt độ tuyệt đối → SET_TEMPERATURE=%d°C", value)
                 else:
-                    # Tăng/giảm tương đối (ví dụ thêm 2 độ)
+                    # Số nhỏ (1-5) → tương đối (tăng/giảm thêm X độ)
                     params["amount"] = value
+                    logger.info("Param: nhiệt độ tương đối → amount=%d", value)
 
             elif dev_type == "light":
-                # "lên 80", "thành 80" -> absolute
-                if re.search(r"(lên|thành|đặt|chỉnh)\s*\d+", text.lower()):
+                if action == "SET_BRIGHTNESS" or has_absolute_keyword or (10 <= value <= 100):
+                    # Số trong khoảng độ sáng hợp lý (10-100%) hoặc có từ khóa tuyệt đối hoặc intent là SET_BRIGHTNESS → tuyệt đối
                     action = "SET_BRIGHTNESS"
                     params["brightness"] = value
+                    logger.info("Param: độ sáng tuyệt đối → SET_BRIGHTNESS=%d", value)
                 else:
+                    # Số nhỏ (1-9) → tương đối
                     params["amount"] = value
+                    logger.info("Param: độ sáng tương đối → amount=%d", value)
 
         return action, params
 
@@ -202,8 +287,11 @@ class IntentMapper:
             logger.warning("Chưa load intents! Gọi load_intents() trước.")
             return None
 
+        # Chuẩn hóa số đọc bằng chữ trước (VD: tám mươi -> 80)
+        text_norm_nums = normalize_spoken_numbers(text)
+
         # Bước 1: Tách room
-        room, remaining = self.extract_room(text)
+        room, remaining = self.extract_room(text_norm_nums)
 
         # Bước 2: Fuzzy match phần còn lại với tất cả patterns
         if not remaining:

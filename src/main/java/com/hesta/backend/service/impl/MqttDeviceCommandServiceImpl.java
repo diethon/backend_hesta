@@ -50,7 +50,6 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
     @Transactional(readOnly = true)
     @Override
-    @Transactional(readOnly = true)
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         if (existing != null && !existing.isDone()) {
@@ -146,6 +145,23 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     || "STOP".equalsIgnoreCase(normalizedAction);
 
             Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
+            if ("SET_BRIGHTNESS".equalsIgnoreCase(normalizedAction)) {
+                Object br = effectiveParams.get("brightness");
+                if (br == null) br = effectiveParams.get("level");
+                if (br != null) {
+                    try {
+                        if (Integer.parseInt(br.toString()) > 0) {
+                            effectiveParams.put("power", "ON");
+                            if (!effectiveParams.containsKey("brightness")) {
+                                effectiveParams.put("brightness", br);
+                            }
+                            if (!effectiveParams.containsKey("level")) {
+                                effectiveParams.put("level", br);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
 
             Map<String, Object> payload = new HashMap<>();
             if (isGateOrDoor) {
@@ -243,13 +259,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         switch (act) {
             case "TURN_ON":
             case "POWER_ON":
-                return "SET_POWER";
+                return "TURN_ON";
             case "TURN_OFF":
             case "POWER_OFF":
-                return "SET_POWER";
+                return "TURN_OFF";
             case "TEMP_UP":
+            case "INCREASE_TEMPERATURE":
                 return "TEMPERATURE_PLUS";
             case "TEMP_DOWN":
+            case "DECREASE_TEMPERATURE":
                 return "TEMPERATURE_MINUS";
             case "GATE_OPEN":
             case "OPEN":
@@ -340,7 +358,12 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     try {
                         if (curTempPlus != null) tPlus = Integer.parseInt(curTempPlus.toString());
                     } catch (Exception ignored) {}
-                    if (tPlus < 30) currentState.put("temperature", tPlus + 1);
+                    int amtPlus = 1;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtPlus = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (tPlus + amtPlus <= 30) currentState.put("temperature", tPlus + amtPlus);
+                    else currentState.put("temperature", 30);
                     break;
                 case "TEMPERATURE_MINUS":
                     Object curTempMinus = currentState.get("temperature");
@@ -348,7 +371,38 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     try {
                         if (curTempMinus != null) tMinus = Integer.parseInt(curTempMinus.toString());
                     } catch (Exception ignored) {}
-                    if (tMinus > 20) currentState.put("temperature", tMinus - 1);
+                    int amtMinus = 1;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtMinus = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (tMinus - amtMinus >= 16) currentState.put("temperature", tMinus - amtMinus);
+                    else currentState.put("temperature", 16);
+                    break;
+                case "INCREASE_BRIGHTNESS":
+                    Object curBrInc = currentState.get("brightness");
+                    int brInc = 50;
+                    try {
+                        if (curBrInc != null) brInc = Integer.parseInt(curBrInc.toString());
+                    } catch (Exception ignored) {}
+                    int amtBrInc = 20;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtBrInc = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (brInc + amtBrInc <= 100) currentState.put("brightness", brInc + amtBrInc);
+                    else currentState.put("brightness", 100);
+                    break;
+                case "DECREASE_BRIGHTNESS":
+                    Object curBrDec = currentState.get("brightness");
+                    int brDec = 50;
+                    try {
+                        if (curBrDec != null) brDec = Integer.parseInt(curBrDec.toString());
+                    } catch (Exception ignored) {}
+                    int amtBrDec = 20;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtBrDec = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (brDec - amtBrDec >= 0) currentState.put("brightness", brDec - amtBrDec);
+                    else currentState.put("brightness", 0);
                     break;
                 case "SET_FAN":
                     if (parameters != null && (parameters.containsKey("fan") || parameters.containsKey("speed"))) {

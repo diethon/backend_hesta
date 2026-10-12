@@ -116,6 +116,11 @@ class VoicePipeline:
             language=stt_cfg.get("language", "vi"),
             compute_type=stt_cfg.get("compute_type", "int8"),
             vad_filter=stt_cfg.get("vad_filter", True),
+            initial_prompt=stt_cfg.get("initial_prompt", None),
+            temperature=stt_cfg.get("temperature", None),
+            condition_on_previous_text=stt_cfg.get("condition_on_previous_text", None),
+            repetition_penalty=stt_cfg.get("repetition_penalty", 1.2),
+            no_repeat_ngram_size=stt_cfg.get("no_repeat_ngram_size", 3),
         ))
 
         device_directory = DeviceDirectory(DeviceDirectoryConfig(
@@ -127,6 +132,7 @@ class VoicePipeline:
 
         intent_mapper = IntentMapper(IntentConfig(
             mapping_file=intent_cfg.get("mapping_file", "intents_vi.json"),
+            min_confidence=intent_cfg.get("min_confidence", 50.0),
             context_ttl_seconds=intent_cfg.get("context_ttl_seconds", 45),
         ))
 
@@ -273,7 +279,7 @@ class VoicePipeline:
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
         # Tạo thông báo
-        message = dispatch_result.summary_message(intent.action, device_type, room)
+        message = dispatch_result.summary_message(intent.action, device_type, room, intent.parameters)
 
         # Cập nhật dialogue state cho multi-turn
         if dispatch_result.all_success:
@@ -380,7 +386,7 @@ class VoicePipeline:
         )
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
-        message = dispatch_result.summary_message(intent.action, device_type, room)
+        message = dispatch_result.summary_message(intent.action, device_type, room, intent.parameters)
 
         if dispatch_result.all_success:
             self.dialogue_state.update(

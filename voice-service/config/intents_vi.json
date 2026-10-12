@@ -69,27 +69,65 @@
     {
       "action": "SET_BRIGHTNESS",
       "device_type": "light",
-      "patterns": ["chỉnh độ sáng", "để độ sáng đèn"]
+      "patterns": [
+        "đặt độ sáng đèn",
+        "đặt độ sáng",
+        "chỉnh độ sáng đèn",
+        "chỉnh độ sáng",
+        "để độ sáng đèn",
+        "để độ sáng",
+        "đặt sáng đèn",
+        "đặt sáng",
+        "chỉnh sáng đèn",
+        "chỉnh sáng",
+        "đặt mức sáng đèn",
+        "đặt mức sáng",
+        "chỉnh mức sáng đèn",
+        "chỉnh mức sáng",
+        "độ sáng đèn",
+        "mức sáng đèn"
+      ]
     },
     {
       "action": "INCREASE_BRIGHTNESS",
       "device_type": "light",
-      "patterns": ["tăng độ sáng", "tăng sáng", "sáng lên", "cho sáng thêm"]
+      "patterns": [
+        "tăng độ sáng",
+        "tăng sáng",
+        "sáng lên",
+        "cho sáng thêm",
+        "tăng sáng đèn",
+        "tăng độ sáng đèn",
+        "tăng sáng lên",
+        "tăng lên mức",
+        "sáng lên mức",
+        "tăng đến mức"
+      ]
     },
     {
       "action": "DECREASE_BRIGHTNESS",
       "device_type": "light",
-      "patterns": ["giảm độ sáng", "giảm sáng", "tối đi", "bớt sáng"]
+      "patterns": [
+        "giảm độ sáng",
+        "giảm sáng",
+        "tối đi",
+        "bớt sáng",
+        "giảm sáng đèn",
+        "giảm độ sáng đèn",
+        "giảm sáng xuống",
+        "giảm xuống mức",
+        "giảm đến mức"
+      ]
     },
     {
       "action": "INCREASE_TEMPERATURE",
       "device_type": "air_conditioner",
-      "patterns": ["tăng nhiệt độ", "tăng điều hòa", "tăng máy lạnh"]
+      "patterns": ["tăng nhiệt độ", "tăng điều hòa", "tăng máy lạnh", "tăng nhiệt độ điều hòa"]
     },
     {
       "action": "DECREASE_TEMPERATURE",
       "device_type": "air_conditioner",
-      "patterns": ["giảm nhiệt độ", "giảm điều hòa", "giảm máy lạnh"]
+      "patterns": ["giảm nhiệt độ", "giảm điều hòa", "giảm máy lạnh", "giảm nhiệt độ điều hòa"]
     }
   ]
 }

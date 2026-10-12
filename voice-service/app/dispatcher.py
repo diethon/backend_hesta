@@ -52,14 +52,19 @@ class DispatchBatchResult:
     def all_success(self) -> bool:
         return self.failed_count == 0 and self.successful_count > 0
 
-    def summary_message(self, action: str, device_type: str, room: str | None = None) -> str:
+    def summary_message(self, action: str, device_type: str, room: str | None = None, parameters: dict[str, Any] | None = None) -> str:
         """Tạo thông báo xác nhận cho người dùng.
-        VD: 'Đã bật 2 đèn phòng khách'
+        VD: 'Đã bật 2 đèn phòng khách' hoặc 'Đã chỉnh nhiệt độ điều hòa phòng ngủ về 26 độ'
         """
         action_vi = {
             "TURN_ON": "bật",
             "TURN_OFF": "tắt",
-            "SET_TEMPERATURE": "chỉnh nhiệt độ",
+            "SET_TEMPERATURE": "đặt nhiệt độ",
+            "INCREASE_TEMPERATURE": "tăng nhiệt độ",
+            "DECREASE_TEMPERATURE": "giảm nhiệt độ",
+            "SET_BRIGHTNESS": "đặt độ sáng",
+            "INCREASE_BRIGHTNESS": "tăng sáng",
+            "DECREASE_BRIGHTNESS": "giảm sáng",
         }.get(action, action)
 
         type_vi = {
@@ -72,12 +77,24 @@ class DispatchBatchResult:
         }.get(device_type, device_type)
 
         room_str = f" {room}" if room else ""
+        
+        param_str = ""
+        if parameters:
+            if "temperature" in parameters:
+                param_str = f" về {parameters['temperature']} độ"
+            elif "brightness" in parameters:
+                param_str = f" về mức {parameters['brightness']}"
+            elif "amount" in parameters:
+                if "TEMPERATURE" in action:
+                    param_str = f" thêm {parameters['amount']} độ"
+                elif "BRIGHTNESS" in action:
+                    param_str = f" thêm {parameters['amount']} mức"
 
         if self.all_success:
             if self.total_devices == 1:
-                return f"Đã {action_vi} {type_vi}{room_str}"
+                return f"Đã {action_vi} {type_vi}{room_str}{param_str}"
             else:
-                return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}"
+                return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}"
         elif self.successful_count > 0:
             return (f"Đã {action_vi} {self.successful_count}/{self.total_devices} "
                     f"{type_vi}{room_str}, {self.failed_count} thiết bị lỗi")

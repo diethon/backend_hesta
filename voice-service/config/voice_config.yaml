@@ -3,10 +3,15 @@ stt:
   language: vi
   compute_type: int8
   vad_filter: true
+  temperature: 0.0
+  condition_on_previous_text: false
+  initial_prompt: "Điều khiển nhà thông minh HESTA: bật tắt đèn phòng ngủ phòng khách, tăng giảm đặt độ sáng."
+  repetition_penalty: 1.2
+  no_repeat_ngram_size: 3
 audio_gate:
   rms_threshold: 200        # hiệu chỉnh theo môi trường thật (Mục 8.4 bước 3)
   min_speech_ms: 60
-  max_silence_ms: 1000        # im lặng liên tục bao lâu thì coi là kết thúc câu nói
+  max_silence_ms: 600        # ngắt câu sau 600ms im lặng (giảm lag)
 backend:
   base_url: "${BACKEND_BASE_URL}"
   internal_api_key_env: "INTERNAL_API_KEY"
@@ -16,4 +21,5 @@ device_directory:
   refresh_interval_seconds: 60
 intent:
   mapping_file: "intents_vi.json"
+  min_confidence: 50.0
   context_ttl_seconds: 45
