@@ -32,14 +32,19 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
     private static final int FAILURE_THRESHOLD = 3;
     private static final long COOLDOWN_SECONDS = 60;
+    private static final int RTT_BUFFER_SIZE = 100;
+    private static final int SNIFFER_BUFFER_SIZE = 50;
 
     private final ConcurrentHashMap<String, NodeHealthTracker> trackers = new ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentLinkedDeque<Long> globalRttBuffer = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private final java.util.concurrent.ConcurrentLinkedDeque<MqttPacketDto> snifferBuffer = new java.util.concurrent.ConcurrentLinkedDeque<>();
 
     private static class NodeHealthTracker {
         final AtomicInteger consecutiveFailures = new AtomicInteger(0);
         final AtomicInteger totalCommands = new AtomicInteger(0);
         final AtomicInteger successfulCommands = new AtomicInteger(0);
         final AtomicLong totalLatencyMs = new AtomicLong(0);
+        final java.util.concurrent.ConcurrentLinkedDeque<Long> nodeRttBuffer = new java.util.concurrent.ConcurrentLinkedDeque<>();
         final AtomicReference<CircuitState> state = new AtomicReference<>(CircuitState.CLOSED);
         volatile OffsetDateTime lastTrippedAt = null;
         volatile OffsetDateTime lastPingAt = OffsetDateTime.now();
@@ -47,6 +52,24 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
     private NodeHealthTracker getTracker(String nodeCode) {
         return trackers.computeIfAbsent(nodeCode, k -> new NodeHealthTracker());
+    }
+
+    private long[] calculateLatencyStats(java.util.Collection<Long> samples) {
+        if (samples == null || samples.isEmpty()) {
+            return new long[]{20, 50, 30, 45};
+        }
+        java.util.List<Long> list = new java.util.ArrayList<>(samples);
+        list.sort(Long::compareTo);
+        long min = list.get(0);
+        long max = list.get(list.size() - 1);
+        double sum = 0;
+        for (Long v : list) sum += v;
+        long avg = Math.round(sum / list.size());
+        int p95Index = (int) Math.ceil(0.95 * list.size()) - 1;
+        if (p95Index < 0) p95Index = 0;
+        if (p95Index >= list.size()) p95Index = list.size() - 1;
+        long p95 = list.get(p95Index);
+        return new long[]{min, max, avg, p95};
     }
 
     @Override
@@ -82,6 +105,17 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         tracker.totalLatencyMs.addAndGet(latencyMs);
         tracker.consecutiveFailures.set(0);
 
+        // Record in node and global RTT buffers
+        tracker.nodeRttBuffer.addFirst(latencyMs);
+        while (tracker.nodeRttBuffer.size() > RTT_BUFFER_SIZE) {
+            tracker.nodeRttBuffer.pollLast();
+        }
+
+        globalRttBuffer.addFirst(latencyMs);
+        while (globalRttBuffer.size() > RTT_BUFFER_SIZE) {
+            globalRttBuffer.pollLast();
+        }
+
         if (tracker.state.get() != CircuitState.CLOSED) {
             tracker.state.set(CircuitState.CLOSED);
             log.info("Circuit breaker for node {} restored to CLOSED (Healthy)", nodeCode);
@@ -105,6 +139,61 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    public NodeDiagnosticsResponse tripCircuitBreaker(String nodeCode) {
+        EdgeNode node = edgeNodeRepository.findByNodeCode(nodeCode).orElse(null);
+        NodeHealthTracker tracker = getTracker(nodeCode);
+        tracker.state.set(CircuitState.OPEN);
+        tracker.lastTrippedAt = OffsetDateTime.now();
+        tracker.consecutiveFailures.set(FAILURE_THRESHOLD);
+        log.warn("Circuit breaker for node {} was manually TRIPPED to OPEN via diagnostics endpoint", nodeCode);
+
+        long[] stats = calculateLatencyStats(tracker.nodeRttBuffer.isEmpty() ? globalRttBuffer : tracker.nodeRttBuffer);
+
+        return NodeDiagnosticsResponse.builder()
+                .nodeId(node != null ? node.getId() : null)
+                .nodeCode(nodeCode)
+                .status(node != null && node.getStatus() != null ? node.getStatus().name() : "OFFLINE")
+                .homeId(node != null && node.getHome() != null ? node.getHome().getId() : null)
+                .homeName(node != null && node.getHome() != null ? node.getHome().getName() : "N/A")
+                .circuitState(CircuitState.OPEN)
+                .consecutiveFailures(tracker.consecutiveFailures.get())
+                .totalCommands(tracker.totalCommands.get())
+                .successfulCommands(tracker.successfulCommands.get())
+                .averageLatencyMs(stats[2])
+                .minLatencyMs(stats[0])
+                .maxLatencyMs(stats[1])
+                .avgLatencyMs(stats[2])
+                .p95LatencyMs(stats[3])
+                .lastPingAt(tracker.lastPingAt)
+                .lastTrippedAt(tracker.lastTrippedAt)
+                .build();
+    }
+
+    @Override
+    public void recordPacket(String topic, String direction, int qos, String payload) {
+        String summary = payload;
+        if (summary != null && summary.length() > 200) {
+            summary = summary.substring(0, 197) + "...";
+        }
+        MqttPacketDto packet = MqttPacketDto.builder()
+                .timestamp(OffsetDateTime.now())
+                .topic(topic)
+                .direction(direction != null ? direction : "IN")
+                .qos(qos)
+                .payloadSummary(summary)
+                .build();
+        snifferBuffer.addFirst(packet);
+        while (snifferBuffer.size() > SNIFFER_BUFFER_SIZE) {
+            snifferBuffer.pollLast();
+        }
+    }
+
+    @Override
+    public java.util.List<MqttPacketDto> getSnifferPackets() {
+        return new java.util.ArrayList<>(snifferBuffer);
+    }
+
+    @Override
     public DiagnosticsSummaryResponse getSummary() {
         List<EdgeNode> allNodes = edgeNodeRepository.findAll();
         int total = allNodes.size();
@@ -112,8 +201,6 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         int offline = total - online;
 
         int quarantined = 0;
-        long sumLatency = 0;
-        int latencySamples = 0;
         int totalCmds = 0;
         int successCmds = 0;
 
@@ -121,19 +208,13 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             NodeHealthTracker t = trackers.get(node.getNodeCode());
             if (t != null) {
                 if (t.state.get() == CircuitState.OPEN) quarantined++;
-                int cmds = t.totalCommands.get();
-                int succ = t.successfulCommands.get();
-                totalCmds += cmds;
-                successCmds += succ;
-                if (succ > 0) {
-                    sumLatency += (t.totalLatencyMs.get() / succ);
-                    latencySamples++;
-                }
+                totalCmds += t.totalCommands.get();
+                successCmds += t.successfulCommands.get();
             }
         }
 
         double reliability = totalCmds > 0 ? ((double) successCmds / totalCmds) * 100.0 : 99.4;
-        long avgLatency = latencySamples > 0 ? (sumLatency / latencySamples) : 32;
+        long[] stats = calculateLatencyStats(globalRttBuffer);
 
         return DiagnosticsSummaryResponse.builder()
                 .brokerConnected(true)
@@ -143,7 +224,11 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .offlineNodes(offline)
                 .quarantinedNodes(quarantined)
                 .systemReliabilityPct(Math.round(reliability * 10.0) / 10.0)
-                .averageLatencyMs(avgLatency)
+                .averageLatencyMs(stats[2])
+                .minLatencyMs(stats[0])
+                .maxLatencyMs(stats[1])
+                .avgLatencyMs(stats[2])
+                .p95LatencyMs(stats[3])
                 .build();
     }
 
@@ -154,7 +239,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             NodeHealthTracker t = getTracker(node.getNodeCode());
             int total = t.totalCommands.get();
             int succ = t.successfulCommands.get();
-            long avgLatency = succ > 0 ? (t.totalLatencyMs.get() / succ) : 25;
+            long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
 
             return NodeDiagnosticsResponse.builder()
                     .nodeId(node.getId())
@@ -166,7 +251,11 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     .consecutiveFailures(t.consecutiveFailures.get())
                     .totalCommands(total)
                     .successfulCommands(succ)
-                    .averageLatencyMs(avgLatency)
+                    .averageLatencyMs(stats[2])
+                    .minLatencyMs(stats[0])
+                    .maxLatencyMs(stats[1])
+                    .avgLatencyMs(stats[2])
+                    .p95LatencyMs(stats[3])
                     .lastPingAt(t.lastPingAt)
                     .lastTrippedAt(t.lastTrippedAt)
                     .build();
@@ -184,6 +273,8 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         t.lastTrippedAt = null;
         log.info("Admin manually RESET circuit breaker for node {}", node.getNodeCode());
 
+        long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
+
         return NodeDiagnosticsResponse.builder()
                 .nodeId(node.getId())
                 .nodeCode(node.getNodeCode())
@@ -194,7 +285,11 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .consecutiveFailures(0)
                 .totalCommands(t.totalCommands.get())
                 .successfulCommands(t.successfulCommands.get())
-                .averageLatencyMs(25)
+                .averageLatencyMs(stats[2])
+                .minLatencyMs(stats[0])
+                .maxLatencyMs(stats[1])
+                .avgLatencyMs(stats[2])
+                .p95LatencyMs(stats[3])
                 .lastPingAt(OffsetDateTime.now())
                 .lastTrippedAt(null)
                 .build();
@@ -210,6 +305,8 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         t.lastPingAt = OffsetDateTime.now();
         recordCommandSuccess(node.getNodeCode(), simulatedLatency);
 
+        long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
+
         return NodeDiagnosticsResponse.builder()
                 .nodeId(node.getId())
                 .nodeCode(node.getNodeCode())
@@ -221,6 +318,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .totalCommands(t.totalCommands.get())
                 .successfulCommands(t.successfulCommands.get())
                 .averageLatencyMs(simulatedLatency)
+                .minLatencyMs(stats[0])
+                .maxLatencyMs(stats[1])
+                .avgLatencyMs(stats[2])
+                .p95LatencyMs(stats[3])
                 .lastPingAt(t.lastPingAt)
                 .lastTrippedAt(t.lastTrippedAt)
                 .build();

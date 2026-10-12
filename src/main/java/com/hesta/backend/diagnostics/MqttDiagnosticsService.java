@@ -18,4 +18,10 @@ public interface MqttDiagnosticsService {
     void recordCommandFailure(String nodeCode);
 
     boolean allowExecution(String nodeCode);
+
+    NodeDiagnosticsResponse tripCircuitBreaker(String nodeCode);
+
+    void recordPacket(String topic, String direction, int qos, String payload);
+
+    List<MqttPacketDto> getSnifferPackets();
 }

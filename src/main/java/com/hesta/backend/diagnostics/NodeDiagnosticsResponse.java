@@ -24,6 +24,10 @@ public class NodeDiagnosticsResponse {
     private int totalCommands;
     private int successfulCommands;
     private long averageLatencyMs;
+    private Long minLatencyMs;
+    private Long maxLatencyMs;
+    private Long avgLatencyMs;
+    private Long p95LatencyMs;
     private OffsetDateTime lastPingAt;
     private OffsetDateTime lastTrippedAt;
 }

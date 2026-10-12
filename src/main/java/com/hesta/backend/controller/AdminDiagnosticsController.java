@@ -57,4 +57,23 @@ public class AdminDiagnosticsController {
                 .result(result)
                 .build());
     }
+
+    @PostMapping("/circuit-breaker/{nodeCode}/trip")
+    public ResponseEntity<ApiResponse<NodeDiagnosticsResponse>> tripCircuitBreaker(@PathVariable String nodeCode) {
+        NodeDiagnosticsResponse result = diagnosticsService.tripCircuitBreaker(nodeCode);
+        return ResponseEntity.ok(ApiResponse.<NodeDiagnosticsResponse>builder()
+                .code(1000)
+                .message("Đã ngắt mạch bảo vệ (TRIP CIRCUIT) cho node " + nodeCode)
+                .result(result)
+                .build());
+    }
+
+    @GetMapping("/mqtt-sniffer")
+    public ResponseEntity<ApiResponse<List<com.hesta.backend.diagnostics.MqttPacketDto>>> getMqttSniffer() {
+        List<com.hesta.backend.diagnostics.MqttPacketDto> packets = diagnosticsService.getSnifferPackets();
+        return ResponseEntity.ok(ApiResponse.<List<com.hesta.backend.diagnostics.MqttPacketDto>>builder()
+                .code(1000)
+                .result(packets)
+                .build());
+    }
 }

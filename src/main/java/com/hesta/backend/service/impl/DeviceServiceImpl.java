@@ -42,6 +42,8 @@ public class DeviceServiceImpl implements DeviceService {
     private final TwinSnapshotMapper twinSnapshotMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.ManualOverrideService manualOverrideService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.DeviceHealthService deviceHealthService;
 
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
 
@@ -187,6 +189,11 @@ public class DeviceServiceImpl implements DeviceService {
                     .changedAt(OffsetDateTime.now())
                     .build();
                 deviceStateHistoryRepository.save(history);
+                if (deviceHealthService != null) {
+                    try {
+                        deviceHealthService.recordSwitch(device.getId());
+                    } catch (Exception ignored) {}
+                }
             }
 
             applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
@@ -314,5 +321,118 @@ public class DeviceServiceImpl implements DeviceService {
         if (value == null) return "\"\"";
         String escaped = value.replace("\"", "\"\"");
         return "\"" + escaped + "\"";
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] exportDeviceHistoryExcel(UUID userId, UUID deviceId, OffsetDateTime from, OffsetDateTime to) {
+        Device device = deviceRepository.findById(deviceId)
+                .orElseThrow(() -> new RuntimeException("Device not found"));
+        checkHomeAccess(userId, getHomeId(device));
+
+        List<DeviceStateHistory> histories;
+        if (from != null && to != null) {
+            histories = deviceStateHistoryRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, to);
+        } else if (from != null) {
+            histories = deviceStateHistoryRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, OffsetDateTime.now());
+        } else {
+            histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
+        }
+
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Lịch sử trạng thái");
+
+            // Header styling
+            org.apache.poi.ss.usermodel.CellStyle headerStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerFont.setColor(org.apache.poi.ss.usermodel.IndexedColors.WHITE.getIndex());
+            headerStyle.setFont(headerFont);
+            headerStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.ROYAL_BLUE.getIndex());
+            headerStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(org.apache.poi.ss.usermodel.HorizontalAlignment.CENTER);
+
+            // ON state style (Green background / font)
+            org.apache.poi.ss.usermodel.CellStyle onStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font onFont = workbook.createFont();
+            onFont.setBold(true);
+            onFont.setColor(org.apache.poi.ss.usermodel.IndexedColors.DARK_GREEN.getIndex());
+            onStyle.setFont(onFont);
+            onStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.LIGHT_GREEN.getIndex());
+            onStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+
+            // OFF state style (Gray background / font)
+            org.apache.poi.ss.usermodel.CellStyle offStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font offFont = workbook.createFont();
+            offFont.setColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_50_PERCENT.getIndex());
+            offStyle.setFont(offFont);
+            offStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_25_PERCENT.getIndex());
+            offStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+
+            String[] headers = {"STT", "Thời Gian", "Thiết Bị", "Phòng", "Nguồn Kích Hoạt", "Trạng Thái Trước", "Trạng Thái Sau", "Người Thực Hiện"};
+            org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            int rowIdx = 1;
+            for (DeviceStateHistory h : histories) {
+                org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx++);
+                row.createCell(0).setCellValue(rowIdx - 1);
+                row.createCell(1).setCellValue(h.getChangedAt() != null ? h.getChangedAt().format(dtf) : "");
+                row.createCell(2).setCellValue(h.getDevice() != null ? h.getDevice().getName() : "");
+                row.createCell(3).setCellValue((h.getDevice() != null && h.getDevice().getRoom() != null) ? h.getDevice().getRoom().getName() : "N/A");
+                row.createCell(4).setCellValue(h.getSource() != null ? h.getSource().name() : "MANUAL");
+
+                String prev = h.getPreviousState() != null ? h.getPreviousState().toString() : "{}";
+                String curr = h.getNewState() != null ? h.getNewState().toString() : "{}";
+
+                row.createCell(5).setCellValue(prev);
+
+                org.apache.poi.ss.usermodel.Cell currCell = row.createCell(6);
+                currCell.setCellValue(curr);
+
+                boolean isOn = isStateOn(h.getNewState());
+                currCell.setCellStyle(isOn ? onStyle : offStyle);
+
+                String user = h.getChangedBy() != null ? (h.getChangedBy().getFullName() != null ? h.getChangedBy().getFullName() : h.getChangedBy().getEmail()) : "Hệ thống";
+                row.createCell(7).setCellValue(user);
+            }
+
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            workbook.write(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Lỗi khi tạo file Excel lịch sử thiết bị: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean isStateOn(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) return false;
+        Object power = state.get("power");
+        if (power != null) {
+            if (power instanceof Boolean b) return b;
+            String pStr = power.toString().trim().toUpperCase();
+            if ("ON".equals(pStr) || "TRUE".equals(pStr) || "1".equals(pStr)) return true;
+        }
+        Object status = state.get("status");
+        if (status != null) {
+            String sStr = status.toString().trim().toUpperCase();
+            if ("ON".equals(sStr) || "OPEN".equals(sStr) || "ACTIVE".equals(sStr)) return true;
+        }
+        Object stateVal = state.get("state");
+        if (stateVal != null) {
+            if (stateVal instanceof Boolean b) return b;
+            String sStr = stateVal.toString().trim().toUpperCase();
+            if ("ON".equals(sStr) || "TRUE".equals(sStr) || "OPEN".equals(sStr)) return true;
+        }
+        return false;
     }
 }

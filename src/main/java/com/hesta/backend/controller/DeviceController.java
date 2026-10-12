@@ -40,6 +40,12 @@ public class DeviceController {
     private ManualControlService manualControlService;
     @Autowired
     private com.hesta.backend.service.DeviceOnboardingService onboardingService;
+    @Autowired(required = false)
+    private com.hesta.backend.service.ManualOverrideService manualOverrideService;
+    @Autowired(required = false)
+    private com.hesta.backend.service.DeviceProfilingService deviceProfilingService;
+    @Autowired(required = false)
+    private com.hesta.backend.service.DeviceHealthService deviceHealthService;
 
     @GetMapping("/devices/qr/{token}")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DevicePublicPreviewResponse>> resolveQrToken(
@@ -90,6 +96,18 @@ public class DeviceController {
         manualControlService.resumeAutomation(userDetails.getId(), deviceId);
         return ResponseEntity.ok(ApiResponse.<Void>builder().code(1000)
                 .message("Đã khôi phục tự động hóa").build());
+    }
+
+    @PostMapping("/devices/{deviceId}/automation/extend")
+    public ResponseEntity<ApiResponse<OffsetDateTime>> extendAutomation(
+            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        if (manualOverrideService == null) {
+            throw new RuntimeException("Manual override service not available");
+        }
+        OffsetDateTime until = manualOverrideService.extendOverride(deviceId, userDetails.getId(), 60);
+        return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
+                .message("Đã gia hạn khóa tự động hóa thêm 60 phút")
+                .result(until).build());
     }
 
     @GetMapping("/devices/{deviceId}/automation/overrides")
@@ -197,6 +215,19 @@ public class DeviceController {
                 .body(csv);
     }
 
+    @GetMapping(value = "/devices/{deviceId}/history/export/excel", produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public ResponseEntity<byte[]> exportDeviceHistoryExcel(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to) {
+        byte[] excel = deviceService.exportDeviceHistoryExcel(userDetails.getId(), deviceId, from, to);
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"device_audit_" + deviceId + ".xlsx\"")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                .body(excel);
+    }
+
     @GetMapping(value = "/homes/{homeId}/devices/history/export", produces = "text/csv; charset=UTF-8")
     public ResponseEntity<byte[]> exportHomeDeviceHistory(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -207,6 +238,30 @@ public class DeviceController {
                 .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "text/csv; charset=UTF-8")
                 .body(csv);
     }
+
+    @GetMapping("/devices/{deviceId}/analytics/uptime")
+    public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceUptimeResponse>> getDeviceUptime(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestParam(defaultValue = "7") int days) {
+        com.hesta.backend.dto.response.DeviceUptimeResponse result = deviceProfilingService.getDeviceUptime(deviceId, days);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.dto.response.DeviceUptimeResponse>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
+    @GetMapping("/devices/{deviceId}/health")
+    public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceHealthResponse>> getDeviceHealth(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId) {
+        com.hesta.backend.dto.response.DeviceHealthResponse result = deviceHealthService.getDeviceHealth(deviceId);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.dto.response.DeviceHealthResponse>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
 @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
@@ -224,7 +279,16 @@ public class DeviceController {
             params.remove("action");
         }
         return deviceCommandService.sendCommand(deviceId, actionStr, params, StateChangeSource.MANUAL)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
+                .thenApply(result -> {
+                    if (result.isSuccess() && manualOverrideService != null && userDetails != null) {
+                        try {
+                            manualOverrideService.recordOverride(deviceId, userDetails.getId(), 30);
+                        } catch (Exception ex) {
+                            // Do not fail command result on override failure
+                        }
+                    }
+                    return ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build());
+                });
     }
 
 @PreAuthorize("@deviceAccessValidator.canAccessRoom(principal.id, #roomId)")

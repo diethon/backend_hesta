@@ -19,4 +19,8 @@ public class DiagnosticsSummaryResponse {
     private int quarantinedNodes;
     private double systemReliabilityPct;
     private long averageLatencyMs;
+    private Long minLatencyMs;
+    private Long maxLatencyMs;
+    private Long avgLatencyMs;
+    private Long p95LatencyMs;
 }
