@@ -84,6 +84,14 @@ public class DeviceController {
                 .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId)).build());
     }
 
+    @PostMapping("/devices/{deviceId}/automation/resume")
+    public ResponseEntity<ApiResponse<Void>> resumeAutomation(
+            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        manualControlService.resumeAutomation(userDetails.getId(), deviceId);
+        return ResponseEntity.ok(ApiResponse.<Void>builder().code(1000)
+                .message("Đã khôi phục tự động hóa").build());
+    }
+
     @GetMapping("/devices/{deviceId}/automation/overrides")
     public ResponseEntity<ApiResponse<List<ManualOverrideResponse>>> overrideHistory(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
@@ -176,6 +184,28 @@ public class DeviceController {
                 .code(1000)
                 .result(result)
                 .build());
+    }
+
+    @GetMapping(value = "/devices/{deviceId}/history/export", produces = "text/csv; charset=UTF-8")
+    public ResponseEntity<byte[]> exportDeviceHistory(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId) {
+        byte[] csv = deviceService.exportDeviceHistoryCsv(userDetails.getId(), deviceId);
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"device_audit_" + deviceId + ".csv\"")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "text/csv; charset=UTF-8")
+                .body(csv);
+    }
+
+    @GetMapping(value = "/homes/{homeId}/devices/history/export", produces = "text/csv; charset=UTF-8")
+    public ResponseEntity<byte[]> exportHomeDeviceHistory(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId) {
+        byte[] csv = deviceService.exportHomeHistoryCsv(userDetails.getId(), homeId);
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"home_audit_" + homeId + ".csv\"")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "text/csv; charset=UTF-8")
+                .body(csv);
     }
 @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/command")

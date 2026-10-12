@@ -61,6 +61,12 @@ public class ManualControlServiceImpl implements ManualControlService {
     }
 
     @Override
+    public void resumeAutomation(UUID userId, UUID deviceId) {
+        Device device = authorizedDevice(userId, deviceId);
+        overrides.resumeAutomation(device, userId);
+    }
+
+    @Override
     public List<ManualOverrideResponse> history(UUID userId, UUID deviceId) {
         authorizedDevice(userId, deviceId);
         return behaviorEvents.findTop100ByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")

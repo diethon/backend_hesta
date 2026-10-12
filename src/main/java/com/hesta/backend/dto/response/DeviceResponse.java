@@ -34,6 +34,8 @@ public class DeviceResponse {
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
     private BigDecimal digitalTwinZ;
+    private OffsetDateTime manualOverrideUntil;
+    private Boolean manualOverrideActive;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 

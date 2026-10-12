@@ -21,4 +21,6 @@ public interface DeviceService {
     void removeDevice(UUID userId, UUID deviceId);
 
     List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId);
+    byte[] exportDeviceHistoryCsv(UUID userId, UUID deviceId);
+    byte[] exportHomeHistoryCsv(UUID userId, UUID homeId);
 }

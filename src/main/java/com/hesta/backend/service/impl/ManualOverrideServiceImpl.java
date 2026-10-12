@@ -40,7 +40,31 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
     @Transactional(readOnly = true)
     public boolean isActive(UUID deviceId) {
         return events.findTopByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")
-                .map(event -> event.getOccurredAt().plus(OVERRIDE_DURATION).isAfter(OffsetDateTime.now()))
+                .map(event -> !"RESUME".equalsIgnoreCase(event.getAction())
+                        && event.getOccurredAt().plus(OVERRIDE_DURATION).isAfter(OffsetDateTime.now()))
                 .orElse(false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OffsetDateTime getOverrideUntil(UUID deviceId) {
+        return events.findTopByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")
+                .filter(event -> !"RESUME".equalsIgnoreCase(event.getAction()))
+                .map(event -> {
+                    OffsetDateTime expiry = event.getOccurredAt().plus(OVERRIDE_DURATION);
+                    return expiry.isAfter(OffsetDateTime.now()) ? expiry : null;
+                })
+                .orElse(null);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void resumeAutomation(Device device, UUID userId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        events.save(BehaviorEvent.builder().home(device.getRoom().getHome()).device(device).room(device.getRoom())
+                .user(user).eventType("MANUAL_OVERRIDE").action("RESUME").eventSource("MANUAL")
+                .currentState(Map.of("resumedAt", now.toString()))
+                .occurredAt(now).build());
     }
 }
