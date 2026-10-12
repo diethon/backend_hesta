@@ -48,3 +48,13 @@ logs/
 
 /agents
 .tmp/
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.pytest_cache/
