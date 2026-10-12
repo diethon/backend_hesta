@@ -5,7 +5,7 @@ stt:
   vad_filter: true
   temperature: 0.0
   condition_on_previous_text: false
-  initial_prompt: "Điều khiển nhà thông minh HESTA: bật tắt đèn phòng ngủ phòng khách, tăng giảm đặt độ sáng."
+  initial_prompt: "Điều khiển nhà thông minh HESTA: tắt đèn hoặc bật đèn phòng ngủ, phòng khách, điều hòa, quạt, đặt độ sáng."
   repetition_penalty: 1.2
   no_repeat_ngram_size: 3
 audio_gate:

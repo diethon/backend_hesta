@@ -87,8 +87,13 @@ VI_SPOKEN_NUMBERS = [
 
 
 def normalize_spoken_numbers(text: str) -> str:
-    """Chuyển đổi số dạng chữ tiếng Việt hoặc âm đọc lệch của whisper thành chữ số."""
+    """Chuyển đổi số dạng chữ tiếng Việt hoặc âm đọc lệch của whisper thành chữ số,
+    đồng thời sửa các lỗi âm học phổ biến (như 'bắt' nhầm từ 'tắt').
+    """
     res = text.lower()
+    # Sửa lỗi âm học Whisper: 'tắt' bị nhận nhầm thành 'bắt', 'đắt', 'tắc', 'bắc', 'ngắt', 'cắt'
+    # Điều này cực kỳ quan trọng vì nếu để 'bắt đèn' bị bỏ dấu thành 'bat den', nó sẽ khớp nhầm với 'bật đèn'!
+    res = re.sub(r'\b(bắt|đắt|tắc|bắc|ngắt|cắt)\b(?!\s+đầu\b)', 'tắt', res)
     for pat, rep in VI_SPOKEN_NUMBERS:
         res = re.sub(pat, rep, res)
     return res
