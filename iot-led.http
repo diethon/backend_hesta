@@ -100,7 +100,7 @@ Content-Type: application/json
 
 {
   "action": "SET_BRIGHTNESS",
-  "brightness": 30
+  "brightness": 50
 }
 
 ### ====================================================================

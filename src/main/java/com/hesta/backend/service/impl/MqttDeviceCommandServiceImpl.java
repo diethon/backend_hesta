@@ -136,15 +136,16 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 }
             }
 
+            Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
+
             // Normalize action and parameters for devices (including Air Conditioner and Gate)
-            String normalizedAction = normalizeAction(action, parameters);
+            String normalizedAction = normalizeAction(device, action, effectiveParams);
             boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
                     ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType())))
                     || "OPEN".equalsIgnoreCase(normalizedAction)
                     || "CLOSE".equalsIgnoreCase(normalizedAction)
                     || "STOP".equalsIgnoreCase(normalizedAction);
 
-            Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
             if ("SET_BRIGHTNESS".equalsIgnoreCase(normalizedAction)) {
                 Object br = effectiveParams.get("brightness");
                 if (br == null) br = effectiveParams.get("level");
@@ -162,7 +163,6 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     } catch (Exception ignored) {}
                 }
             }
-
             Map<String, Object> payload = new HashMap<>();
             if (isGateOrDoor) {
                 // Keep payload compact so PubSubClient on ESP32 does not overflow its 128-byte buffer
@@ -253,16 +253,79 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         }
     }
 
-    private String normalizeAction(String action, Map<String, Object> parameters) {
+    private String normalizeAction(Device device, String action, Map<String, Object> parameters) {
         if (action == null) return "UNKNOWN";
         String act = action.trim().toUpperCase();
+
+        boolean isAc = (device != null && device.getDeviceType() != null &&
+                ("AIR_CONDITIONER".equalsIgnoreCase(device.getDeviceType()) || "AC".equalsIgnoreCase(device.getDeviceType())))
+                || (parameters != null && (parameters.containsKey("temperature") || parameters.containsKey("temp") || parameters.containsKey("fan")));
+
+        boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
+                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType())))
+                || "OPEN".equalsIgnoreCase(act)
+                || "CLOSE".equalsIgnoreCase(act)
+                || "STOP".equalsIgnoreCase(act)
+                || "GATE_OPEN".equalsIgnoreCase(act)
+                || "GATE_CLOSE".equalsIgnoreCase(act)
+                || "GATE_STOP".equalsIgnoreCase(act);
+
+        if (isGateOrDoor) {
+            switch (act) {
+                case "GATE_OPEN":
+                case "OPEN":
+                    return "OPEN";
+                case "GATE_CLOSE":
+                case "CLOSE":
+                    return "CLOSE";
+                case "GATE_STOP":
+                case "STOP":
+                    return "STOP";
+                default:
+                    return act;
+            }
+        }
+
+        if (isAc) {
+            switch (act) {
+                case "TURN_ON":
+                case "POWER_ON":
+                    if (parameters != null && !parameters.containsKey("power")) {
+                        parameters.put("power", true);
+                    }
+                    return "SET_POWER";
+                case "TURN_OFF":
+                case "POWER_OFF":
+                    if (parameters != null && !parameters.containsKey("power")) {
+                        parameters.put("power", false);
+                    }
+                    return "SET_POWER";
+                case "TEMP_UP":
+                    return "TEMPERATURE_PLUS";
+                case "TEMP_DOWN":
+                    return "TEMPERATURE_MINUS";
+                default:
+                    return act;
+            }
+        }
+
+        // Default: LED, RGB Light, Relay, Switch and other generic IoT devices
         switch (act) {
             case "TURN_ON":
-            case "POWER_ON":
                 return "TURN_ON";
             case "TURN_OFF":
-            case "POWER_OFF":
                 return "TURN_OFF";
+            case "POWER_ON":
+                return "POWER_ON";
+            case "POWER_OFF":
+                return "POWER_OFF";
+            case "SET_POWER":
+                if (parameters != null && parameters.containsKey("power")) {
+                    Object p = parameters.get("power");
+                    boolean boolVal = Boolean.TRUE.equals(p) || "true".equalsIgnoreCase(String.valueOf(p)) || "on".equalsIgnoreCase(String.valueOf(p)) || "1".equals(String.valueOf(p));
+                    return boolVal ? "POWER_ON" : "POWER_OFF";
+                }
+                return "POWER_ON";
             case "TEMP_UP":
             case "INCREASE_TEMPERATURE":
                 return "TEMPERATURE_PLUS";
