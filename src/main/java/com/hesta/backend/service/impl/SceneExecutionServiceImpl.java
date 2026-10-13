@@ -9,7 +9,6 @@ import com.hesta.backend.dto.response.SceneExecutionResponse;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.SceneExecution;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.ExecutionStatus;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
@@ -115,7 +114,7 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
             attempted++;
             try {
                 CommandResult result = deviceCommandService.sendCommand(action.getTargetDevice().getId(),
-                        DeviceAction.valueOf(action.getAction()), parameters(action), source).join();
+                        action.getAction(), parameters(action), source).join();
                 detail.put("success", result.isSuccess());
                 detail.put("status", result.getStatus());
                 if (result.getCommandId() != null) detail.put("commandId", result.getCommandId());
@@ -124,7 +123,7 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
                 if (result.isSuccess()) {
                     successes++;
                     try {
-                        behaviorEventRecorder.recordCommand(action.getTargetDevice(), DeviceAction.valueOf(action.getAction()), source, result);
+                        behaviorEventRecorder.recordCommand(action.getTargetDevice(), action.getAction(), source, result);
                     } catch (RuntimeException recordingFailure) {
                         log.warn("Could not record scene command for device {}", action.getTargetDevice().getId(), recordingFailure);
                     }
@@ -148,12 +147,12 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     private Map<String, Object> parameters(SceneAction action) {
         JsonNode value = action.getValue();
         if (value == null || value.isNull()) return Map.of();
-        return switch (DeviceAction.valueOf(action.getAction())) {
-            case SET_BRIGHTNESS -> Map.of("level", value.numberValue());
-            case SET_SPEED -> Map.of("speed", value.numberValue());
-            case SET_TEMPERATURE -> Map.of("temperature", value.numberValue());
-            case SET_STATE -> objectMapper.convertValue(value, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
-            default -> Map.of();
+        return switch (action.getAction()) {
+            case "SET_BRIGHTNESS" -> Map.of("level", value.numberValue());
+            case "SET_SPEED" -> Map.of("speed", value.numberValue());
+            case "SET_TEMPERATURE" -> Map.of("temperature", value.numberValue());
+            case "SET_STATE" -> objectMapper.convertValue(value, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                    default -> Map.of();
         };
     }
 

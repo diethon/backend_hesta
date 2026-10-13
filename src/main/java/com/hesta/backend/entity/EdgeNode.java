@@ -37,6 +37,10 @@ public class EdgeNode {
     @Column(name = "status", nullable = false, length = 20)
     private EdgeNodeStatus status;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "supported_types", columnDefinition = "jsonb")
+    private java.util.List<java.util.Map<String, Object>> supportedTypes;
+
     @CreationTimestamp
     @Column(name = "paired_at", nullable = false, updatable = false)
     private OffsetDateTime pairedAt;
