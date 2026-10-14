@@ -19,6 +19,7 @@ target/
 *.iml
 *.ipr
 /mosquitto/data/mosquitto.db
+
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
@@ -48,3 +49,13 @@ logs/
 
 /agents
 .tmp/
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.pytest_cache/
