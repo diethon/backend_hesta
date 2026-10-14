@@ -18,6 +18,7 @@ target/
 *.iws
 *.iml
 *.ipr
+/mosquitto/data/mosquitto.db
 
 ### NetBeans ###
 /nbproject/private/
@@ -57,4 +58,4 @@ __pycache__/
 .Python
 venv/
 ENV/
-.pytest_cache/
+.pytest_cache/

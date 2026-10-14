@@ -18,9 +18,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
+@Transactional
 public class AirConditionerServiceImpl implements AirConditionerService {
 
     private static final Set<String> VALID_MODES = Set.of("AUTO", "COOL", "DRY", "HEAT");

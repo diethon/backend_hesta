@@ -23,10 +23,12 @@ import org.springframework.stereotype.Service;
 import java.util.concurrent.CompletableFuture;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class MqttMessageReceiver {
     private final DeviceRepository devices;
     private final AutomationEngine automationEngine;
@@ -36,6 +38,8 @@ public class MqttMessageReceiver {
     private final TelemetryService telemetryService;
     private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -71,6 +75,10 @@ public class MqttMessageReceiver {
         // =========================================================
 
         String payload = message.getPayload().toString();
+
+        if (diagnosticsService != null && !topic.isBlank()) {
+            diagnosticsService.recordPacket(topic, "IN", 1, payload);
+        }
 
         log.info(
                 "Received MQTT message. Topic: [{}], Payload: [{}]",

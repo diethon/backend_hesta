@@ -34,6 +34,8 @@ public class DeviceResponse {
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
     private BigDecimal digitalTwinZ;
+    private OffsetDateTime manualOverrideUntil;
+    private Boolean manualOverrideActive;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 
@@ -43,7 +45,7 @@ public class DeviceResponse {
         }
 
         Room room = device.getRoom();
-        Home home = (room != null) ? room.getHome() : null;
+        Home home = device.getHome();
 
         return DeviceResponse.builder()
                 .id(device.getId())
