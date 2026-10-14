@@ -16,6 +16,17 @@ import java.util.UUID;
 public interface DeviceStateHistoryRepository extends JpaRepository<DeviceStateHistory, UUID> {
     List<DeviceStateHistory> findByDeviceIdOrderByChangedAtDesc(UUID deviceId);
 
+    List<DeviceStateHistory> findByDeviceIdInOrderByChangedAtDesc(List<UUID> deviceIds);
+
+    List<DeviceStateHistory> findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(
+            UUID deviceId, OffsetDateTime from, OffsetDateTime to);
+
+    @Query("SELECT h FROM DeviceStateHistory h WHERE h.device.id IN :deviceIds AND h.changedAt BETWEEN :from AND :to ORDER BY h.changedAt ASC")
+    List<DeviceStateHistory> findByDeviceIdsAndChangedAtBetween(
+            @Param("deviceIds") List<UUID> deviceIds,
+            @Param("from") OffsetDateTime from,
+            @Param("to") OffsetDateTime to);
+
     @Modifying
     @Transactional
     @Query("DELETE FROM DeviceStateHistory d WHERE d.changedAt < :cutoffDate")
