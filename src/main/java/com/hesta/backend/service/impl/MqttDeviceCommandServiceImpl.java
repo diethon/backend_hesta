@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -41,17 +42,31 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     @org.springframework.beans.factory.annotation.Value("${mqtt.command.timeout-ms:5000}")
     private long commandTimeoutMs;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
+
     public static final ConcurrentHashMap<String, CompletableFuture<CommandResult>> pendingCommands = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> commandStartTimes = new ConcurrentHashMap<>();
 
-
-
-
-    @Transactional(readOnly = true)
+    @Transactional
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
+        Long lastStartTime = commandStartTimes.get(deviceId);
+        long now = System.currentTimeMillis();
+
         if (existing != null && !existing.isDone()) {
+            if (lastStartTime != null && (now - lastStartTime < 2000)) {
+                log.warn("Idempotency / Anti-spam: Device {} click spam rejected (<2s).", deviceId);
+                return CompletableFuture.completedFuture(CommandResult.builder()
+                        .commandId(UUID.randomUUID().toString())
+                        .success(false)
+                        .status("REJECTED")
+                        .errorCode("COMMAND_IN_PROGRESS_DUPLICATE_REJECTED")
+                        .message("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục")
+                        .build());
+            }
             log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
             return existing;
         }
@@ -59,7 +74,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         String commandId = UUID.randomUUID().toString();
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
         activeDeviceCommands.put(deviceId, future);
+        commandStartTimes.put(deviceId, now);
         
+        String resolvedNodeCode = "unknown";
         try {
             Device device = deviceRepository.findByIdWithNode(deviceId)
                     .orElse(null);
@@ -112,6 +129,22 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
                 }
             }
+            resolvedNodeCode = nodeCode;
+
+            // Circuit Breaker check
+            if (diagnosticsService != null && nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)
+                    && !diagnosticsService.allowExecution(nodeCode)) {
+                log.warn("Circuit Breaker OPEN for node {}. Blocking command to device {}.", nodeCode, deviceId);
+                activeDeviceCommands.remove(deviceId);
+                commandStartTimes.remove(deviceId);
+                return CompletableFuture.completedFuture(CommandResult.builder()
+                        .commandId(commandId)
+                        .success(false)
+                        .status("FAILED")
+                        .errorCode("CIRCUIT_BREAKER_OPEN")
+                        .message("Mạch điều khiển Node đang ngắt bảo vệ (CIRCUIT OPEN)")
+                        .build());
+            }
 
             java.util.Set<String> targetTopics = new java.util.LinkedHashSet<>();
             if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)) {
@@ -145,6 +178,23 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     || "CLOSE".equalsIgnoreCase(normalizedAction)
                     || "STOP".equalsIgnoreCase(normalizedAction);
 
+            if ("SET_BRIGHTNESS".equalsIgnoreCase(normalizedAction)) {
+                Object br = effectiveParams.get("brightness");
+                if (br == null) br = effectiveParams.get("level");
+                if (br != null) {
+                    try {
+                        if (Integer.parseInt(br.toString()) > 0) {
+                            effectiveParams.put("power", "ON");
+                            if (!effectiveParams.containsKey("brightness")) {
+                                effectiveParams.put("brightness", br);
+                            }
+                            if (!effectiveParams.containsKey("level")) {
+                                effectiveParams.put("level", br);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
             Map<String, Object> payload = new HashMap<>();
             if (isGateOrDoor) {
                 // Keep payload compact so PubSubClient on ESP32 does not overflow its 128-byte buffer
@@ -182,32 +232,55 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             for (String targetTopic : targetTopics) {
                 log.info("Publishing MQTT Command to {}: {}", targetTopic, jsonPayload);
                 mqttGateway.sendToMqtt(targetTopic, 1, jsonPayload);
+                if (diagnosticsService != null) {
+                    diagnosticsService.recordPacket(targetTopic, "OUT", 1, jsonPayload);
+                }
             }
             
             long metricStartTime = System.currentTimeMillis();
+            final String targetNodeCode = nodeCode;
             return future.orTimeout(commandTimeoutMs, TimeUnit.MILLISECONDS)
                     .whenComplete((res, ex) -> {
                         activeDeviceCommands.remove(deviceId);
+                        commandStartTimes.remove(deviceId);
                         long roundtrip = System.currentTimeMillis() - metricStartTime;
-                        if (ex == null) {
+                        if (ex == null && res != null && res.isSuccess()) {
                             log.info("[METRICS] MQTT Roundtrip (Success) completed in {} ms for commandId {}", roundtrip, commandId);
+                            res.setLatencyMs(roundtrip);
+                            if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
+                                diagnosticsService.recordCommandSuccess(targetNodeCode, roundtrip);
+                            }
+                        } else {
+                            if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
+                                diagnosticsService.recordCommandFailure(targetNodeCode);
+                            }
                         }
                     })
                     .exceptionally(ex -> {
                         pendingCommands.remove(commandId);
+                        activeDeviceCommands.remove(deviceId);
+                        commandStartTimes.remove(deviceId);
                         long roundtrip = System.currentTimeMillis() - metricStartTime;
                         log.warn("[METRICS] MQTT Roundtrip (Timeout) after {} ms for commandId {}. Device {} timed out.", roundtrip, commandId, deviceId);
+                        if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
+                            diagnosticsService.recordCommandFailure(targetNodeCode);
+                        }
                         return CommandResult.builder()
                                 .commandId(commandId)
                                 .success(false)
                                 .status("TIMEOUT")
                                 .errorCode("TIMEOUT_NO_ACK")
                                 .message("Device did not acknowledge within " + commandTimeoutMs + " ms")
+                                .latencyMs(roundtrip)
                                 .build();
                     });
 
         } catch (Exception e) {
             activeDeviceCommands.remove(deviceId);
+            commandStartTimes.remove(deviceId);
+            if (diagnosticsService != null && resolvedNodeCode != null && !"unknown".equalsIgnoreCase(resolvedNodeCode)) {
+                diagnosticsService.recordCommandFailure(resolvedNodeCode);
+            }
             log.error("Failed to send command to device {}", deviceId, e);
             future.complete(CommandResult.builder()
                     .commandId(commandId)
@@ -222,6 +295,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     }
 
     public static void completeDeviceCommand(UUID deviceId, Map<String, Object> state) {
+        commandStartTimes.remove(deviceId);
         CompletableFuture<CommandResult> future = activeDeviceCommands.remove(deviceId);
         if (future != null && !future.isDone()) {
             pendingCommands.values().remove(future);
@@ -294,9 +368,11 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // Default: LED, RGB Light, Relay, Switch and other generic IoT devices
         switch (act) {
             case "TURN_ON":
+                return "TURN_ON";
+            case "TURN_OFF":
+                return "TURN_OFF";
             case "POWER_ON":
                 return "POWER_ON";
-            case "TURN_OFF":
             case "POWER_OFF":
                 return "POWER_OFF";
             case "SET_POWER":
@@ -306,6 +382,21 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     return boolVal ? "POWER_ON" : "POWER_OFF";
                 }
                 return "POWER_ON";
+            case "TEMP_UP":
+            case "INCREASE_TEMPERATURE":
+                return "TEMPERATURE_PLUS";
+            case "TEMP_DOWN":
+            case "DECREASE_TEMPERATURE":
+                return "TEMPERATURE_MINUS";
+            case "GATE_OPEN":
+            case "OPEN":
+                return "OPEN";
+            case "GATE_CLOSE":
+            case "CLOSE":
+                return "CLOSE";
+            case "GATE_STOP":
+            case "STOP":
+                return "STOP";
             default:
                 return act;
         }
@@ -386,7 +477,12 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     try {
                         if (curTempPlus != null) tPlus = Integer.parseInt(curTempPlus.toString());
                     } catch (Exception ignored) {}
-                    if (tPlus < 30) currentState.put("temperature", tPlus + 1);
+                    int amtPlus = 1;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtPlus = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (tPlus + amtPlus <= 30) currentState.put("temperature", tPlus + amtPlus);
+                    else currentState.put("temperature", 30);
                     break;
                 case "TEMPERATURE_MINUS":
                     Object curTempMinus = currentState.get("temperature");
@@ -394,7 +490,38 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     try {
                         if (curTempMinus != null) tMinus = Integer.parseInt(curTempMinus.toString());
                     } catch (Exception ignored) {}
-                    if (tMinus > 20) currentState.put("temperature", tMinus - 1);
+                    int amtMinus = 1;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtMinus = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (tMinus - amtMinus >= 16) currentState.put("temperature", tMinus - amtMinus);
+                    else currentState.put("temperature", 16);
+                    break;
+                case "INCREASE_BRIGHTNESS":
+                    Object curBrInc = currentState.get("brightness");
+                    int brInc = 50;
+                    try {
+                        if (curBrInc != null) brInc = Integer.parseInt(curBrInc.toString());
+                    } catch (Exception ignored) {}
+                    int amtBrInc = 20;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtBrInc = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (brInc + amtBrInc <= 100) currentState.put("brightness", brInc + amtBrInc);
+                    else currentState.put("brightness", 100);
+                    break;
+                case "DECREASE_BRIGHTNESS":
+                    Object curBrDec = currentState.get("brightness");
+                    int brDec = 50;
+                    try {
+                        if (curBrDec != null) brDec = Integer.parseInt(curBrDec.toString());
+                    } catch (Exception ignored) {}
+                    int amtBrDec = 20;
+                    if (parameters != null && parameters.containsKey("amount")) {
+                        try { amtBrDec = Integer.parseInt(parameters.get("amount").toString()); } catch (Exception ignored) {}
+                    }
+                    if (brDec - amtBrDec >= 0) currentState.put("brightness", brDec - amtBrDec);
+                    else currentState.put("brightness", 0);
                     break;
                 case "SET_FAN":
                     if (parameters != null && (parameters.containsKey("fan") || parameters.containsKey("speed"))) {
