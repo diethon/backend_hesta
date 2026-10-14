@@ -148,4 +148,42 @@ class MqttDeviceCommandServiceImplTest {
         assertEquals("SET_POWER", map.get("action"));
         assertEquals(Boolean.TRUE, map.get("power"));
     }
+
+    @Test
+    @DisplayName("Anti-spam: rapidly sending duplicate command within 2s rejects with COMMAND_IN_PROGRESS_DUPLICATE_REJECTED")
+    void testAntiSpamDuplicateRejected() {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        // First command
+        commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+
+        // Immediate duplicate command
+        com.hesta.backend.dto.command.CommandResult result = commandService
+                .sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL)
+                .join();
+
+        assertNotNull(result);
+        assertFalse(result.isSuccess());
+        assertEquals("COMMAND_IN_PROGRESS_DUPLICATE_REJECTED", result.getErrorCode());
+        assertEquals("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục", result.getMessage());
+    }
+
+    @Test
+    @DisplayName("Circuit Breaker: blocks execution and returns CIRCUIT_BREAKER_OPEN when node breaker is open")
+    void testCircuitBreakerOpenBlocked() {
+        com.hesta.backend.diagnostics.MqttDiagnosticsService mockDiag = mock(com.hesta.backend.diagnostics.MqttDiagnosticsService.class);
+        when(mockDiag.allowExecution("HESTA-APARTMENT-00377b16-F1")).thenReturn(false);
+        ReflectionTestUtils.setField(commandService, "diagnosticsService", mockDiag);
+
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        com.hesta.backend.dto.command.CommandResult result = commandService
+                .sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL)
+                .join();
+
+        assertNotNull(result);
+        assertFalse(result.isSuccess());
+        assertEquals("CIRCUIT_BREAKER_OPEN", result.getErrorCode());
+        assertEquals("Mạch điều khiển Node đang ngắt bảo vệ (CIRCUIT OPEN)", result.getMessage());
+    }
 }

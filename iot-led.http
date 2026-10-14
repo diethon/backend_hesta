@@ -3,36 +3,36 @@
 ### ====================================================================
 
 @baseUrl = http://localhost:8080
-@deviceId = f803473e-8f7f-4dcd-8001-5ce1fc2f4dc4
-@token = 
+@deviceId = 66f08314-5899-4a2d-bf5a-f29ea0771d2e
+#@token =
 
 ### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
-#POST {{baseUrl}}/api/v1/auth/login
-#Content-Type: application/json
-#
-#{
-#  "email": "test_user@hesta.com",
-#  "password": "Password123!"
-#}
-#
-#> {%
-#    if (response.body && response.body.result && response.body.result.accessToken) {
-#        client.global.set("token", response.body.result.accessToken);
-#    }
-#%}
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@hesta.local",
+  "password": "12345678"
+}
+
+> {%
+    if (response.body && response.body.result && response.body.result.accessToken) {
+        client.global.set("token", response.body.result.accessToken);
+    }
+%}
 
 ### ====================================================================
 ### 0.1 Check Device Detail & Current State
 ### ====================================================================
 #GET {{baseUrl}}/api/v1/devices/{{deviceId}}
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 #
 #### ====================================================================
 #### 1. POWER_ON Command
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-##Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "POWER_ON"
@@ -43,7 +43,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "POWER_OFF"
@@ -54,7 +54,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_RGB",
@@ -68,7 +68,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_RGB",
@@ -82,7 +82,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_RGB",
@@ -96,7 +96,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_BRIGHTNESS",
@@ -108,7 +108,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_RGB",
@@ -122,7 +122,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_BRIGHTNESS",
@@ -134,7 +134,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "UNKNOWN_ACTION"

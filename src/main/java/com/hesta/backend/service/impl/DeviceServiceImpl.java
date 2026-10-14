@@ -40,6 +40,10 @@ public class DeviceServiceImpl implements DeviceService {
     private final DeviceStateHistoryRepository deviceStateHistoryRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final TwinSnapshotMapper twinSnapshotMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.ManualOverrideService manualOverrideService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.DeviceHealthService deviceHealthService;
 
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
 
@@ -51,12 +55,22 @@ public class DeviceServiceImpl implements DeviceService {
         homeAuthorizationService.requireSceneManagement(userId, homeId);
     }
 
+    private DeviceResponse mapWithOverride(Device device) {
+        DeviceResponse res = DeviceResponse.fromEntity(device);
+        if (res != null && manualOverrideService != null) {
+            OffsetDateTime overrideUntil = manualOverrideService.getOverrideUntil(device.getId());
+            res.setManualOverrideUntil(overrideUntil);
+            res.setManualOverrideActive(overrideUntil != null);
+        }
+        return res;
+    }
+
     @Override
     @Transactional(readOnly = true)
     public List<DeviceResponse> getDevicesByHome(UUID userId, UUID homeId) {
         checkHomeAccess(userId, homeId);
         return deviceRepository.findByHomeId(homeId).stream()
-                .map(DeviceResponse::fromEntity)
+                .map(this::mapWithOverride)
                 .collect(Collectors.toList());
     }
 
@@ -68,13 +82,13 @@ public class DeviceServiceImpl implements DeviceService {
         checkHomeAccess(userId, room.getHome().getId());
 
         return deviceRepository.findByRoomId(roomId).stream()
-                .map(DeviceResponse::fromEntity)
+                .map(this::mapWithOverride)
                 .collect(Collectors.toList());
     }
 
     private UUID getHomeId(Device device) {
-        if (device.getRoom() != null && device.getRoom().getHome() != null) {
-            return device.getRoom().getHome().getId();
+        if (device.getHome() != null) {
+            return device.getHome().getId();
         }
         throw new RuntimeException("Device is not associated with any home");
     }
@@ -85,7 +99,7 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new RuntimeException("Device not found"));
         checkHomeAccess(userId, getHomeId(device));
-        return DeviceResponse.fromEntity(device);
+        return mapWithOverride(device);
     }
 
     @Override
@@ -175,6 +189,11 @@ public class DeviceServiceImpl implements DeviceService {
                     .changedAt(OffsetDateTime.now())
                     .build();
                 deviceStateHistoryRepository.save(history);
+                if (deviceHealthService != null) {
+                    try {
+                        deviceHealthService.recordSwitch(device.getId());
+                    } catch (Exception ignored) {}
+                }
             }
 
             applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
@@ -246,5 +265,174 @@ public class DeviceServiceImpl implements DeviceService {
                 .stream()
                 .map(com.hesta.backend.dto.response.DeviceStateHistoryResponse::fromEntity)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] exportDeviceHistoryCsv(UUID userId, UUID deviceId) {
+        Device device = deviceRepository.findById(deviceId)
+                .orElseThrow(() -> new RuntimeException("Device not found"));
+        checkHomeAccess(userId, getHomeId(device));
+
+        List<DeviceStateHistory> histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
+        return buildCsv(histories);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] exportHomeHistoryCsv(UUID userId, UUID homeId) {
+        checkHomeAccess(userId, homeId);
+        List<Device> devices = deviceRepository.findByHomeId(homeId);
+        List<UUID> deviceIds = devices.stream().map(Device::getId).toList();
+        List<DeviceStateHistory> histories = deviceStateHistoryRepository.findByDeviceIdInOrderByChangedAtDesc(deviceIds);
+        return buildCsv(histories);
+    }
+
+    private byte[] buildCsv(List<DeviceStateHistory> histories) {
+        StringBuilder sb = new StringBuilder();
+        // UTF-8 BOM so Microsoft Excel automatically decodes Vietnamese diacritics
+        sb.append('\uFEFF');
+        sb.append("ID,Thời Gian,Thiết Bị,Phòng,Nguồn Kích Hoạt,Trạng Thái Trước,Trạng Thái Sau,Người Thực Hiện\n");
+        java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+        for (DeviceStateHistory h : histories) {
+            String id = h.getId() != null ? h.getId().toString() : "";
+            String time = h.getChangedAt() != null ? h.getChangedAt().format(dtf) : "";
+            String devName = h.getDevice() != null ? h.getDevice().getName() : "";
+            String roomName = (h.getDevice() != null && h.getDevice().getRoom() != null) ? h.getDevice().getRoom().getName() : "N/A";
+            String source = h.getSource() != null ? h.getSource().name() : "MANUAL";
+            String prev = h.getPreviousState() != null ? h.getPreviousState().toString() : "{}";
+            String curr = h.getNewState() != null ? h.getNewState().toString() : "{}";
+            String user = h.getChangedBy() != null ? (h.getChangedBy().getFullName() != null ? h.getChangedBy().getFullName() : h.getChangedBy().getEmail()) : "Hệ thống";
+
+            sb.append(escapeCsv(id)).append(",")
+              .append(escapeCsv(time)).append(",")
+              .append(escapeCsv(devName)).append(",")
+              .append(escapeCsv(roomName)).append(",")
+              .append(escapeCsv(source)).append(",")
+              .append(escapeCsv(prev)).append(",")
+              .append(escapeCsv(curr)).append(",")
+              .append(escapeCsv(user)).append("\n");
+        }
+        return sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private String escapeCsv(String value) {
+        if (value == null) return "\"\"";
+        String escaped = value.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] exportDeviceHistoryExcel(UUID userId, UUID deviceId, OffsetDateTime from, OffsetDateTime to) {
+        Device device = deviceRepository.findById(deviceId)
+                .orElseThrow(() -> new RuntimeException("Device not found"));
+        checkHomeAccess(userId, getHomeId(device));
+
+        List<DeviceStateHistory> histories;
+        if (from != null && to != null) {
+            histories = deviceStateHistoryRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, to);
+        } else if (from != null) {
+            histories = deviceStateHistoryRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, OffsetDateTime.now());
+        } else {
+            histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
+        }
+
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Lịch sử trạng thái");
+
+            // Header styling
+            org.apache.poi.ss.usermodel.CellStyle headerStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerFont.setColor(org.apache.poi.ss.usermodel.IndexedColors.WHITE.getIndex());
+            headerStyle.setFont(headerFont);
+            headerStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.ROYAL_BLUE.getIndex());
+            headerStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(org.apache.poi.ss.usermodel.HorizontalAlignment.CENTER);
+
+            // ON state style (Green background / font)
+            org.apache.poi.ss.usermodel.CellStyle onStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font onFont = workbook.createFont();
+            onFont.setBold(true);
+            onFont.setColor(org.apache.poi.ss.usermodel.IndexedColors.DARK_GREEN.getIndex());
+            onStyle.setFont(onFont);
+            onStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.LIGHT_GREEN.getIndex());
+            onStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+
+            // OFF state style (Gray background / font)
+            org.apache.poi.ss.usermodel.CellStyle offStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font offFont = workbook.createFont();
+            offFont.setColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_50_PERCENT.getIndex());
+            offStyle.setFont(offFont);
+            offStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_25_PERCENT.getIndex());
+            offStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+
+            String[] headers = {"STT", "Thời Gian", "Thiết Bị", "Phòng", "Nguồn Kích Hoạt", "Trạng Thái Trước", "Trạng Thái Sau", "Người Thực Hiện"};
+            org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            int rowIdx = 1;
+            for (DeviceStateHistory h : histories) {
+                org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx++);
+                row.createCell(0).setCellValue(rowIdx - 1);
+                row.createCell(1).setCellValue(h.getChangedAt() != null ? h.getChangedAt().format(dtf) : "");
+                row.createCell(2).setCellValue(h.getDevice() != null ? h.getDevice().getName() : "");
+                row.createCell(3).setCellValue((h.getDevice() != null && h.getDevice().getRoom() != null) ? h.getDevice().getRoom().getName() : "N/A");
+                row.createCell(4).setCellValue(h.getSource() != null ? h.getSource().name() : "MANUAL");
+
+                String prev = h.getPreviousState() != null ? h.getPreviousState().toString() : "{}";
+                String curr = h.getNewState() != null ? h.getNewState().toString() : "{}";
+
+                row.createCell(5).setCellValue(prev);
+
+                org.apache.poi.ss.usermodel.Cell currCell = row.createCell(6);
+                currCell.setCellValue(curr);
+
+                boolean isOn = isStateOn(h.getNewState());
+                currCell.setCellStyle(isOn ? onStyle : offStyle);
+
+                String user = h.getChangedBy() != null ? (h.getChangedBy().getFullName() != null ? h.getChangedBy().getFullName() : h.getChangedBy().getEmail()) : "Hệ thống";
+                row.createCell(7).setCellValue(user);
+            }
+
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            workbook.write(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Lỗi khi tạo file Excel lịch sử thiết bị: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean isStateOn(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) return false;
+        Object power = state.get("power");
+        if (power != null) {
+            if (power instanceof Boolean b) return b;
+            String pStr = power.toString().trim().toUpperCase();
+            if ("ON".equals(pStr) || "TRUE".equals(pStr) || "1".equals(pStr)) return true;
+        }
+        Object status = state.get("status");
+        if (status != null) {
+            String sStr = status.toString().trim().toUpperCase();
+            if ("ON".equals(sStr) || "OPEN".equals(sStr) || "ACTIVE".equals(sStr)) return true;
+        }
+        Object stateVal = state.get("state");
+        if (stateVal != null) {
+            if (stateVal instanceof Boolean b) return b;
+            String sStr = stateVal.toString().trim().toUpperCase();
+            if ("ON".equals(sStr) || "TRUE".equals(sStr) || "OPEN".equals(sStr)) return true;
+        }
+        return false;
     }
 }

@@ -10,5 +10,6 @@ import java.util.List;
 public interface ManualControlService {
     ManualCommandResponse command(UUID userId, UUID deviceId, String action);
     OffsetDateTime cancelAutomation(UUID userId, UUID deviceId);
+    void resumeAutomation(UUID userId, UUID deviceId);
     List<ManualOverrideResponse> history(UUID userId, UUID deviceId);
 }

@@ -8,4 +8,8 @@ import java.util.UUID;
 public interface ManualOverrideService {
     OffsetDateTime activate(Device device, UUID userId, String reason);
     boolean isActive(UUID deviceId);
+    OffsetDateTime getOverrideUntil(UUID deviceId);
+    void resumeAutomation(Device device, UUID userId);
+    OffsetDateTime recordOverride(UUID deviceId, UUID userId, int minutes);
+    OffsetDateTime extendOverride(UUID deviceId, UUID userId, int minutes);
 }
