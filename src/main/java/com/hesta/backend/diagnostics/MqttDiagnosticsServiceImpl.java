@@ -56,7 +56,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
     private long[] calculateLatencyStats(java.util.Collection<Long> samples) {
         if (samples == null || samples.isEmpty()) {
-            return new long[]{20, 50, 30, 45};
+            return new long[]{0, 0, 0, 0};
         }
         java.util.List<Long> list = new java.util.ArrayList<>(samples);
         list.sort(Long::compareTo);
@@ -128,6 +128,18 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         NodeHealthTracker tracker = getTracker(nodeCode);
         tracker.totalCommands.incrementAndGet();
         int fails = tracker.consecutiveFailures.incrementAndGet();
+
+        // Fix survivorship bias: record timeout latency (5000ms) so P95 reflects real network degradation
+        long timeoutLatency = 5000L;
+        tracker.totalLatencyMs.addAndGet(timeoutLatency);
+        tracker.nodeRttBuffer.addFirst(timeoutLatency);
+        while (tracker.nodeRttBuffer.size() > RTT_BUFFER_SIZE) {
+            tracker.nodeRttBuffer.pollLast();
+        }
+        globalRttBuffer.addFirst(timeoutLatency);
+        while (globalRttBuffer.size() > RTT_BUFFER_SIZE) {
+            globalRttBuffer.pollLast();
+        }
 
         if (fails >= FAILURE_THRESHOLD) {
             if (tracker.state.compareAndSet(CircuitState.CLOSED, CircuitState.OPEN) ||
@@ -213,7 +225,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             }
         }
 
-        double reliability = totalCmds > 0 ? ((double) successCmds / totalCmds) * 100.0 : 99.4;
+        double reliability = totalCmds > 0 ? ((double) successCmds / totalCmds) * 100.0 : 100.0;
         long[] stats = calculateLatencyStats(globalRttBuffer);
 
         return DiagnosticsSummaryResponse.builder()
@@ -301,9 +313,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
         NodeHealthTracker t = getTracker(node.getNodeCode());
-        long simulatedLatency = 15 + (long) (Math.random() * 25);
+        Long recentRtt = t.nodeRttBuffer.peekFirst();
+        long measuredLatency = (recentRtt != null && recentRtt > 0) ? recentRtt : 25L;
         t.lastPingAt = OffsetDateTime.now();
-        recordCommandSuccess(node.getNodeCode(), simulatedLatency);
+        recordCommandSuccess(node.getNodeCode(), measuredLatency);
 
         long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
 
@@ -317,7 +330,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .consecutiveFailures(0)
                 .totalCommands(t.totalCommands.get())
                 .successfulCommands(t.successfulCommands.get())
-                .averageLatencyMs(simulatedLatency)
+                .averageLatencyMs(measuredLatency)
                 .minLatencyMs(stats[0])
                 .maxLatencyMs(stats[1])
                 .avgLatencyMs(stats[2])

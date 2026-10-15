@@ -147,25 +147,22 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
 
             java.util.Set<String> targetTopics = new java.util.LinkedHashSet<>();
-            if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)) {
-                targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, localId));
-                if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
-                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, localId));
+            // Strictly target canonical hardware topic matching ESP32 firmware: hesta/nodes/{nodeId}/devices/{deviceId}/command
+            String routingNode = (nodeIdStr != null && !nodeIdStr.isBlank()) ? nodeIdStr : nodeCode;
+            String routingDevice = deviceId.toString();
+
+            if (routingNode != null && !"unknown".equalsIgnoreCase(routingNode)) {
+                targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, routingNode, routingDevice));
+            } else if (device != null && device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
+                String devTopic = device.getMqttTopic().trim();
+                if (devTopic.endsWith("/state") || devTopic.endsWith("/telemetry") || devTopic.endsWith("/status")) {
+                    devTopic = devTopic.substring(0, devTopic.lastIndexOf('/')) + "/command";
+                } else if (!devTopic.endsWith("/command")) {
+                    devTopic = devTopic + "/command";
                 }
-            }
-            if (device != null) {
-                if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode) && device.getId() != null && !device.getId().toString().equals(localId)) {
-                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, device.getId()));
-                    if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
-                        targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, device.getId()));
-                    }
-                }
-                if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
-                    targetTopics.add(device.getMqttTopic());
-                    if (!device.getMqttTopic().endsWith("/command")) {
-                        targetTopics.add(device.getMqttTopic() + "/command");
-                    }
-                }
+                targetTopics.add(devTopic);
+            } else {
+                targetTopics.add(String.format("%s/unknown/devices/%s/command", topicPrefix, routingDevice));
             }
 
             Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
@@ -195,6 +192,51 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     } catch (Exception ignored) {}
                 }
             }
+
+            if ("SET_RGB".equalsIgnoreCase(normalizedAction) || "SET_COLOR".equalsIgnoreCase(normalizedAction)) {
+                if (effectiveParams.get("color") instanceof Map<?, ?> colorMapParam) {
+                    if (!effectiveParams.containsKey("r") && colorMapParam.containsKey("r")) {
+                        effectiveParams.put("r", colorMapParam.get("r"));
+                    }
+                    if (!effectiveParams.containsKey("g") && colorMapParam.containsKey("g")) {
+                        effectiveParams.put("g", colorMapParam.get("g"));
+                    }
+                    if (!effectiveParams.containsKey("b") && colorMapParam.containsKey("b")) {
+                        effectiveParams.put("b", colorMapParam.get("b"));
+                    }
+                }
+
+                int defaultR = 0;
+                int defaultG = 0;
+                int defaultB = 0;
+                if (device != null && device.getCurrentState() != null) {
+                    Map<String, Object> cur = device.getCurrentState();
+                    defaultR = clampRgb(cur.get("r"), 0);
+                    defaultG = clampRgb(cur.get("g"), 0);
+                    defaultB = clampRgb(cur.get("b"), 0);
+                    if (cur.get("color") instanceof Map<?, ?> cMap) {
+                        if (cur.get("r") == null && cMap.containsKey("r")) defaultR = clampRgb(cMap.get("r"), defaultR);
+                        if (cur.get("g") == null && cMap.containsKey("g")) defaultG = clampRgb(cMap.get("g"), defaultG);
+                        if (cur.get("b") == null && cMap.containsKey("b")) defaultB = clampRgb(cMap.get("b"), defaultB);
+                    }
+                }
+
+                int r = effectiveParams.containsKey("r") ? clampRgb(effectiveParams.get("r"), defaultR) : defaultR;
+                int g = effectiveParams.containsKey("g") ? clampRgb(effectiveParams.get("g"), defaultG) : defaultG;
+                int b = effectiveParams.containsKey("b") ? clampRgb(effectiveParams.get("b"), defaultB) : defaultB;
+
+                effectiveParams.put("r", r);
+                effectiveParams.put("g", g);
+                effectiveParams.put("b", b);
+
+                Map<String, Object> colorMap = new HashMap<>();
+                colorMap.put("r", r);
+                colorMap.put("g", g);
+                colorMap.put("b", b);
+                effectiveParams.put("color", colorMap);
+
+                effectiveParams.put("power", "ON");
+            }
             Map<String, Object> payload = new HashMap<>();
             if (isGateOrDoor) {
                 // Keep payload compact so PubSubClient on ESP32 does not overflow its 128-byte buffer
@@ -215,26 +257,33 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     }
                 }
 
+                if ("SET_RGB".equalsIgnoreCase(normalizedAction)) {
+                    payload.put("r", effectiveParams.get("r"));
+                    payload.put("g", effectiveParams.get("g"));
+                    payload.put("b", effectiveParams.get("b"));
+                }
+
                 // Normalization helpers for AC fields
                 applyAcPayloadConversions(normalizedAction, payload, effectiveParams);
 
                 payload.put("timestamp", System.currentTimeMillis());
             }
             
-            // Cập nhật trạng thái vào database nếu device tồn tại
-            if (device != null) {
-                updateDeviceState(device, normalizedAction, effectiveParams);
-            }
-            
             String jsonPayload = objectMapper.writeValueAsString(payload);
             pendingCommands.put(commandId, future);
             
+            // 1. Dispatch MQTT command immediately to broker (sub-second physical response)
             for (String targetTopic : targetTopics) {
                 log.info("Publishing MQTT Command to {}: {}", targetTopic, jsonPayload);
                 mqttGateway.sendToMqtt(targetTopic, 1, jsonPayload);
                 if (diagnosticsService != null) {
                     diagnosticsService.recordPacket(targetTopic, "OUT", 1, jsonPayload);
                 }
+            }
+
+            // 2. Persist device state without delaying MQTT physical dispatch
+            if (device != null) {
+                updateDeviceState(device, normalizedAction, effectiveParams);
             }
             
             long metricStartTime = System.currentTimeMillis();
@@ -309,9 +358,28 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         }
     }
 
+    private int clampRgb(Object val, int defaultVal) {
+        if (val == null) return defaultVal;
+        try {
+            int parsed;
+            if (val instanceof Number n) {
+                parsed = n.intValue();
+            } else {
+                parsed = (int) Math.round(Double.parseDouble(val.toString().trim()));
+            }
+            return Math.max(0, Math.min(255, parsed));
+        } catch (Exception e) {
+            return defaultVal;
+        }
+    }
+
     private String normalizeAction(Device device, String action, Map<String, Object> parameters) {
         if (action == null) return "UNKNOWN";
         String act = action.trim().toUpperCase();
+
+        if ("SET_COLOR".equals(act) || "SET_RGB".equals(act)) {
+            return "SET_RGB";
+        }
 
         boolean isAc = (device != null && device.getDeviceType() != null &&
                 ("AIR_CONDITIONER".equalsIgnoreCase(device.getDeviceType()) || "AC".equalsIgnoreCase(device.getDeviceType())))
@@ -382,6 +450,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     return boolVal ? "POWER_ON" : "POWER_OFF";
                 }
                 return "POWER_ON";
+            case "SET_COLOR":
+            case "SET_RGB":
+                return "SET_RGB";
             case "TEMP_UP":
             case "INCREASE_TEMPERATURE":
                 return "TEMPERATURE_PLUS";
@@ -556,11 +627,49 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 case "SET_RGB":
                 case "SET_COLOR":
                     currentState.put("power", "ON");
-                    if (parameters != null) {
-                        if (parameters.containsKey("r")) currentState.put("r", parameters.get("r"));
-                        if (parameters.containsKey("g")) currentState.put("g", parameters.get("g"));
-                        if (parameters.containsKey("b")) currentState.put("b", parameters.get("b"));
+                    int defaultRState = clampRgb(currentState.get("r"), 0);
+                    int defaultGState = clampRgb(currentState.get("g"), 0);
+                    int defaultBState = clampRgb(currentState.get("b"), 0);
+                    if (currentState.get("color") instanceof Map<?, ?> existingColorMap) {
+                        if (currentState.get("r") == null && existingColorMap.containsKey("r")) {
+                            defaultRState = clampRgb(existingColorMap.get("r"), defaultRState);
+                        }
+                        if (currentState.get("g") == null && existingColorMap.containsKey("g")) {
+                            defaultGState = clampRgb(existingColorMap.get("g"), defaultGState);
+                        }
+                        if (currentState.get("b") == null && existingColorMap.containsKey("b")) {
+                            defaultBState = clampRgb(existingColorMap.get("b"), defaultBState);
+                        }
                     }
+
+                    int rVal = defaultRState;
+                    int gVal = defaultGState;
+                    int bVal = defaultBState;
+
+                    if (parameters != null) {
+                        Object rObj = parameters.get("r");
+                        Object gObj = parameters.get("g");
+                        Object bObj = parameters.get("b");
+
+                        if (parameters.get("color") instanceof Map<?, ?> colorMapParam) {
+                            if (rObj == null) rObj = colorMapParam.get("r");
+                            if (gObj == null) gObj = colorMapParam.get("g");
+                            if (bObj == null) bObj = colorMapParam.get("b");
+                        }
+
+                        if (rObj != null) rVal = clampRgb(rObj, defaultRState);
+                        if (gObj != null) gVal = clampRgb(gObj, defaultGState);
+                        if (bObj != null) bVal = clampRgb(bObj, defaultBState);
+                    }
+
+                    Map<String, Object> colorMap = new HashMap<>();
+                    colorMap.put("r", rVal);
+                    colorMap.put("g", gVal);
+                    colorMap.put("b", bVal);
+                    currentState.put("color", colorMap);
+                    currentState.put("r", rVal);
+                    currentState.put("g", gVal);
+                    currentState.put("b", bVal);
                     break;
                 case "SET_BRIGHTNESS":
                     if (parameters != null) {
