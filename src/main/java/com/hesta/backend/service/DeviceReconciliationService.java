@@ -49,12 +49,16 @@ public class DeviceReconciliationService {
     @EventListener(org.springframework.integration.mqtt.event.MqttSubscribedEvent.class)
     public void onMqttSubscribed(org.springframework.integration.mqtt.event.MqttSubscribedEvent event) {
         long now = System.currentTimeMillis();
+        long lastTime = lastReconcileTimestamp.get();
         // Rate-limit / debounce: Bỏ qua nếu lần reconcile trước đó chưa qua 15 giây để tránh Broadcast Storm
-        if (now - lastReconcileTimestamp.get() < 15000) {
+        if (now - lastTime < 15000) {
             log.debug("[PHO-038 Broker Failover Recovery] Bỏ qua sự kiện Subscribed trùng lặp do đang trong thời gian debounce.");
             return;
         }
-        lastReconcileTimestamp.set(now);
+        if (!lastReconcileTimestamp.compareAndSet(lastTime, now)) {
+            log.debug("[PHO-038 Broker Failover Recovery] Race condition detected on debounce timestamp update, skipping.");
+            return;
+        }
         log.info("[PHO-038 Broker Failover Recovery] MQTT Broker connected/subscribed! Triggering automatic State Reconciliation...");
         reconcileStatesOnStartup();
     }
