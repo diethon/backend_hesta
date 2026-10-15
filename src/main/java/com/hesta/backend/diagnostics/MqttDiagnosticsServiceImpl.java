@@ -226,12 +226,25 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             snifferBuffer.pollLast();
         }
 
-        // PHO-038 Dead Man's Snitch: cập nhật heartbeat khi nhận bản tin từ node
+        // PHO-038 Dead Man's Snitch: cập nhật heartbeat khi nhận bản tin từ node (Fix Key Mismatch giữa nodeCode và UUID)
         if (topic != null && topic.startsWith("hesta/nodes/")) {
             String[] parts = topic.split("/");
             if (parts.length >= 3) {
                 String nodeIdent = parts[2];
                 NodeHealthTracker tracker = trackers.get(nodeIdent);
+                if (tracker == null) {
+                    // Thử tìm qua Repository nếu nodeIdent là UUID hoặc nodeCode ngược lại
+                    EdgeNode matchedNode = edgeNodeRepository.findByNodeCode(nodeIdent).orElse(null);
+                    if (matchedNode == null) {
+                        try {
+                            matchedNode = edgeNodeRepository.findById(UUID.fromString(nodeIdent)).orElse(null);
+                        } catch (Exception ignored) {}
+                    }
+                    if (matchedNode != null) {
+                        tracker = getTracker(matchedNode.getNodeCode());
+                        trackers.put(nodeIdent, tracker);
+                    }
+                }
                 if (tracker != null) {
                     tracker.lastPingAt = OffsetDateTime.now();
                 }

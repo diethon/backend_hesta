@@ -44,8 +44,17 @@ public class DeviceReconciliationService {
      * PHO-038: Runtime Broker Failover
      * Tự động phục hồi và kích hoạt State Reconciliation khi Broker Mosquitto kết nối lại mà không cần restart server.
      */
+    private final java.util.concurrent.atomic.AtomicLong lastReconcileTimestamp = new java.util.concurrent.atomic.AtomicLong(0);
+
     @EventListener(org.springframework.integration.mqtt.event.MqttSubscribedEvent.class)
     public void onMqttSubscribed(org.springframework.integration.mqtt.event.MqttSubscribedEvent event) {
+        long now = System.currentTimeMillis();
+        // Rate-limit / debounce: Bỏ qua nếu lần reconcile trước đó chưa qua 15 giây để tránh Broadcast Storm
+        if (now - lastReconcileTimestamp.get() < 15000) {
+            log.debug("[PHO-038 Broker Failover Recovery] Bỏ qua sự kiện Subscribed trùng lặp do đang trong thời gian debounce.");
+            return;
+        }
+        lastReconcileTimestamp.set(now);
         log.info("[PHO-038 Broker Failover Recovery] MQTT Broker connected/subscribed! Triggering automatic State Reconciliation...");
         reconcileStatesOnStartup();
     }
