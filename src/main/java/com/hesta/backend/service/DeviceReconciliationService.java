@@ -39,4 +39,20 @@ public class DeviceReconciliationService {
             log.error("[State Reconciliation] Lỗi khi gửi lệnh đồng bộ", e);
         }
     }
+
+    /**
+     * PHO-038: Runtime Broker Failover
+     * Tự động phục hồi và kích hoạt State Reconciliation khi Broker Mosquitto kết nối lại mà không cần restart server.
+     */
+    @EventListener(org.springframework.integration.mqtt.event.MqttSubscribedEvent.class)
+    public void onMqttSubscribed(org.springframework.integration.mqtt.event.MqttSubscribedEvent event) {
+        log.info("[PHO-038 Broker Failover Recovery] MQTT Broker connected/subscribed! Triggering automatic State Reconciliation...");
+        reconcileStatesOnStartup();
+    }
+
+    @EventListener(org.springframework.integration.mqtt.event.MqttConnectionFailedEvent.class)
+    public void onMqttConnectionFailed(org.springframework.integration.mqtt.event.MqttConnectionFailedEvent event) {
+        log.warn("[PHO-038 Broker Failover] Mất kết nối tới Mosquitto Broker: {}", 
+                event.getCause() != null ? event.getCause().getMessage() : "Network dropped");
+    }
 }

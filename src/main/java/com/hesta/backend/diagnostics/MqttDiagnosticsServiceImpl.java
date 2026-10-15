@@ -46,6 +46,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         final AtomicLong totalLatencyMs = new AtomicLong(0);
         final java.util.concurrent.ConcurrentLinkedDeque<Long> nodeRttBuffer = new java.util.concurrent.ConcurrentLinkedDeque<>();
         final AtomicReference<CircuitState> state = new AtomicReference<>(CircuitState.CLOSED);
+        final java.util.concurrent.atomic.AtomicBoolean halfOpenTrialInFlight = new java.util.concurrent.atomic.AtomicBoolean(false);
         volatile OffsetDateTime lastTrippedAt = null;
         volatile OffsetDateTime lastPingAt = OffsetDateTime.now();
     }
@@ -85,14 +86,20 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         if (currentState == CircuitState.OPEN) {
             if (tracker.lastTrippedAt != null &&
                     Duration.between(tracker.lastTrippedAt, OffsetDateTime.now()).getSeconds() > COOLDOWN_SECONDS) {
-                tracker.state.compareAndSet(CircuitState.OPEN, CircuitState.HALF_OPEN);
-                log.info("Circuit breaker for node {} transitioned to HALF_OPEN (trial execution allowed)", nodeCode);
-                return true;
+                if (tracker.state.compareAndSet(CircuitState.OPEN, CircuitState.HALF_OPEN)) {
+                    tracker.halfOpenTrialInFlight.set(false);
+                    log.info("Circuit breaker for node {} transitioned to HALF_OPEN (trial execution allowed)", nodeCode);
+                }
+            } else {
+                return false;
             }
-            return false;
         }
 
-        // HALF_OPEN allows single trial execution
+        if (tracker.state.get() == CircuitState.HALF_OPEN) {
+            // Prevent thundering herd: allow only one trial execution in flight
+            return tracker.halfOpenTrialInFlight.compareAndSet(false, true);
+        }
+
         return true;
     }
 
@@ -118,7 +125,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
         if (tracker.state.get() != CircuitState.CLOSED) {
             tracker.state.set(CircuitState.CLOSED);
+            tracker.halfOpenTrialInFlight.set(false);
             log.info("Circuit breaker for node {} restored to CLOSED (Healthy)", nodeCode);
+        } else {
+            tracker.halfOpenTrialInFlight.set(false);
         }
     }
 
@@ -141,7 +151,8 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             globalRttBuffer.pollLast();
         }
 
-        if (fails >= FAILURE_THRESHOLD) {
+        tracker.halfOpenTrialInFlight.set(false);
+        if (fails >= FAILURE_THRESHOLD || tracker.state.get() == CircuitState.HALF_OPEN) {
             if (tracker.state.compareAndSet(CircuitState.CLOSED, CircuitState.OPEN) ||
                 tracker.state.compareAndSet(CircuitState.HALF_OPEN, CircuitState.OPEN)) {
                 tracker.lastTrippedAt = OffsetDateTime.now();
@@ -153,8 +164,17 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     @Override
     public NodeDiagnosticsResponse tripCircuitBreaker(String nodeCode) {
         EdgeNode node = edgeNodeRepository.findByNodeCode(nodeCode).orElse(null);
+        if (node == null) {
+            try {
+                node = edgeNodeRepository.findById(UUID.fromString(nodeCode)).orElse(null);
+                if (node != null) {
+                    nodeCode = node.getNodeCode();
+                }
+            } catch (Exception ignored) {}
+        }
         NodeHealthTracker tracker = getTracker(nodeCode);
         tracker.state.set(CircuitState.OPEN);
+        tracker.halfOpenTrialInFlight.set(false);
         tracker.lastTrippedAt = OffsetDateTime.now();
         tracker.consecutiveFailures.set(FAILURE_THRESHOLD);
         log.warn("Circuit breaker for node {} was manually TRIPPED to OPEN via diagnostics endpoint", nodeCode);
@@ -182,6 +202,13 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    public NodeDiagnosticsResponse tripCircuitBreaker(UUID nodeId) {
+        EdgeNode node = edgeNodeRepository.findById(nodeId)
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
+        return tripCircuitBreaker(node.getNodeCode());
+    }
+
+    @Override
     public void recordPacket(String topic, String direction, int qos, String payload) {
         String summary = payload;
         if (summary != null && summary.length() > 200) {
@@ -197,6 +224,40 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         snifferBuffer.addFirst(packet);
         while (snifferBuffer.size() > SNIFFER_BUFFER_SIZE) {
             snifferBuffer.pollLast();
+        }
+
+        // PHO-038 Dead Man's Snitch: cập nhật heartbeat khi nhận bản tin từ node
+        if (topic != null && topic.startsWith("hesta/nodes/")) {
+            String[] parts = topic.split("/");
+            if (parts.length >= 3) {
+                String nodeIdent = parts[2];
+                NodeHealthTracker tracker = trackers.get(nodeIdent);
+                if (tracker != null) {
+                    tracker.lastPingAt = OffsetDateTime.now();
+                }
+            }
+        }
+    }
+
+    /**
+     * PHO-038: Dead Man's Snitch Node Heartbeat Monitor
+     * Quét định kỳ mỗi 30s. Nếu node quá 60s không nhận được bất kỳ bản tin nào -> Chuyển trạng thái sang OFFLINE.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 30000)
+    public void evaluateDeadMansSnitch() {
+        OffsetDateTime now = OffsetDateTime.now();
+        List<EdgeNode> allNodes = edgeNodeRepository.findAll();
+        for (EdgeNode node : allNodes) {
+            NodeHealthTracker t = trackers.get(node.getNodeCode());
+            if (t != null && t.lastPingAt != null) {
+                long elapsedSeconds = Duration.between(t.lastPingAt, now).getSeconds();
+                if (elapsedSeconds > 60 && node.getStatus() == EdgeNodeStatus.ONLINE) {
+                    node.setStatus(EdgeNodeStatus.OFFLINE);
+                    edgeNodeRepository.save(node);
+                    log.warn("[PHO-038 Dead Man's Snitch] Node {} timed out (>60s without heartbeat, last seen {}s ago). Status marked OFFLINE.",
+                            node.getNodeCode(), elapsedSeconds);
+                }
+            }
         }
     }
 
@@ -282,6 +343,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         NodeHealthTracker t = getTracker(node.getNodeCode());
         t.consecutiveFailures.set(0);
         t.state.set(CircuitState.CLOSED);
+        t.halfOpenTrialInFlight.set(false);
         t.lastTrippedAt = null;
         log.info("Admin manually RESET circuit breaker for node {}", node.getNodeCode());
 
