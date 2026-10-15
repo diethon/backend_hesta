@@ -241,8 +241,8 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                         } catch (Exception ignored) {}
                     }
                     if (matchedNode != null) {
-                        tracker = getTracker(matchedNode.getNodeCode());
-                        trackers.put(nodeIdent, tracker);
+                        tracker = trackers.computeIfAbsent(matchedNode.getNodeCode(), k -> new NodeHealthTracker());
+                        trackers.putIfAbsent(nodeIdent, tracker);
                     }
                 }
                 if (tracker != null) {
