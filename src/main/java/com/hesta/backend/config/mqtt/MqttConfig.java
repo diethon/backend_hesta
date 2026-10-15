@@ -95,8 +95,15 @@ public class MqttConfig {
                 topicPrefix + "/+/devices/+/ack",
                 topicPrefix + "/+/devices/+/sensor",
                 topicPrefix + "/+/devices/+/status",
-                topicPrefix + "/+/devices/+/telemetry"
+                topicPrefix + "/+/devices/+/telemetry",
+                topicPrefix + "/+/discovery",
+                topicPrefix + "/+/register",
+                topicPrefix + "/+/catalog",
+                topicPrefix + "/+/status",
+                "hesta/device/+/ack",
+                "hesta/device/+/state"
         };
+
         MqttPahoMessageDrivenChannelAdapter adapter =
                 new MqttPahoMessageDrivenChannelAdapter(clientId + "_in", mqttClientFactory(), topics);
         adapter.setCompletionTimeout(5000);
