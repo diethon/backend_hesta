@@ -90,6 +90,17 @@ class DeviceDirectory:
         """Xây dựng cache từ danh sách thiết bị raw."""
         cache: dict[tuple[str, str, str], list[DeviceInfo]] = {}
 
+        # Các alias mapping từ loại phần cứng / DB sang loại chuẩn của voice intent
+        TYPE_ALIASES = {
+            "light": {"light", "led", "led_rgb", "rgb_light", "dimmer_switch", "lamp"},
+            "fan": {"fan", "exhaust_fan", "ceiling_fan"},
+            "air_conditioner": {"air_conditioner", "ac", "hvac", "máy lạnh", "điều hòa"},
+            "door_lock": {"door_lock", "smart_lock", "gate", "rolling_door", "lock"},
+            "water_heater": {"water_heater", "boiler"},
+            "water_pump": {"water_pump", "pump"},
+            "curtain": {"curtain", "blind", "shade"},
+        }
+
         for dev in devices:
             try:
                 db_type = str(dev.get("deviceType", dev.get("type", ""))).strip().lower()
@@ -98,16 +109,37 @@ class DeviceDirectory:
                 db_name = dev.get("name", "").lower()
                 
                 # Bản thân nó là type gì thì lưu type đó
-                types_to_register = [db_type]
+                types_to_register = {db_type}
                 
+                # Nếu không phải cảm biến, phân loại thêm theo aliases và tên
+                if "sensor" not in db_type:
+                    for standard_type, aliases in TYPE_ALIASES.items():
+                        if db_type in aliases:
+                            types_to_register.add(standard_type)
+
+                    if any(w in db_name for w in ["đèn", "light", "led", "lamp"]):
+                        types_to_register.add("light")
+                    if any(w in db_name for w in ["quạt", "fan"]):
+                        types_to_register.add("fan")
+                    if any(w in db_name for w in ["điều hòa", "điều hoà", "máy lạnh", "ac"]):
+                        types_to_register.add("air_conditioner")
+                    if any(w in db_name for w in ["khóa", "khoá", "cửa", "cổng"]):
+                        types_to_register.add("door_lock")
+                    if any(w in db_name for w in ["nóng lạnh", "bình nóng", "nước nóng"]):
+                        types_to_register.add("water_heater")
+                    if any(w in db_name for w in ["bơm", "máy bơm"]):
+                        types_to_register.add("water_pump")
+                    if any(w in db_name for w in ["rèm", "màn"]):
+                        types_to_register.add("curtain")
+
                 # Nếu nó là bộ điều khiển hồng ngoại (IR_REMOTE), phân loại thêm dựa vào tên
                 if db_type == "ir_remote":
                     if "điều hòa" in db_name or "điều hoà" in db_name or "máy lạnh" in db_name or "ac" in db_name:
-                        types_to_register.append("air_conditioner")
+                        types_to_register.add("air_conditioner")
                     if "tv" in db_name or "tivi" in db_name:
-                        types_to_register.append("tv")
+                        types_to_register.add("tv")
                     if "quạt" in db_name or "fan" in db_name:
-                        types_to_register.append("fan")
+                        types_to_register.add("fan")
 
                 for t in types_to_register:
                     info = DeviceInfo(
@@ -190,26 +222,51 @@ class DeviceDirectory:
         Returns:
             Danh sách DeviceInfo khớp. List rỗng nếu không tìm thấy.
         """
-        key = (home_id, room_name.lower(), device_type.lower())
+        r_name = room_name.strip().lower() if room_name else ""
+        d_type = device_type.strip().lower()
+        key = (home_id, r_name, d_type)
+
+        def _lookup() -> list[DeviceInfo]:
+            if r_name:
+                devs = self._cache.get(key, [])
+                if devs:
+                    return list(devs)
+                if not home_id:
+                    # Nếu home_id rỗng, fallback tìm trên toàn bộ cache
+                    matched = []
+                    for (h, r, t), ds in self._cache.items():
+                        if r == r_name and t == d_type:
+                            matched.extend(ds)
+                    if matched:
+                        return matched
+            else:
+                # Không chỉ định room: tìm tất cả thiết bị thuộc d_type trong home_id
+                matched = []
+                for (h, r, t), ds in self._cache.items():
+                    if t == d_type and (not home_id or h == home_id):
+                        matched.extend(ds)
+                if matched:
+                    return matched
+            return []
 
         with self._lock:
-            devices = self._cache.get(key, [])
+            devices = _lookup()
 
         if devices:
             logger.debug("Cache HIT: %s → %d thiết bị", key, len(devices))
-            return list(devices)
+            return devices
 
         # Cache miss → refresh ngay lập tức (Mục 2.4 bước 2)
         logger.info("Cache MISS: %s — refreshing ngay...", key)
         if self.refresh(home_id=home_id):
             with self._lock:
-                devices = self._cache.get(key, [])
+                devices = _lookup()
             if devices:
                 logger.info("Sau refresh: tìm thấy %d thiết bị", len(devices))
-                return list(devices)
+                return devices
 
         # Vẫn không tìm thấy → trả lỗi rõ ràng (Mục 2.4 bước 4)
-        logger.warning("Không tìm thấy thiết bị: room='%s', type='%s'", room_name, device_type)
+        logger.warning("Không tìm thấy thiết bị: room='%s', type='%s', home_id='%s'", room_name, device_type, home_id)
         return []
 
     def start(self, home_id: str = "") -> None:
