@@ -46,4 +46,34 @@ class DeviceServiceTest {
         assertThat(service.getDeviceDetail(userId, deviceId).getHomeId()).isEqualTo(homeId);
         verify(homeAuthorizationService).requireAccess(userId, homeId);
     }
+
+    @Test
+    void getHomeCapabilitiesReturnsGroupedCapabilitiesAndActionTypes() {
+        UUID userId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+        UUID device1Id = UUID.randomUUID();
+        UUID device2Id = UUID.randomUUID();
+        Home home = Home.builder().id(homeId).build();
+
+        Device light = Device.builder().id(device1Id).room(Room.builder().home(home).name("Living").build())
+                .name("Main Light").deviceType("LIGHT").status(DeviceStatus.ONLINE)
+                .currentState(Map.of("power", "ON")).build();
+
+        Device ac = Device.builder().id(device2Id).room(Room.builder().home(home).name("Living").build())
+                .name("Living AC").deviceType("AIR_CONDITIONER").status(DeviceStatus.ONLINE)
+                .currentState(Map.of("power", "ON", "temperature", 24)).build();
+
+        when(deviceRepository.findByHomeId(homeId)).thenReturn(java.util.List.of(light, ac));
+
+        com.hesta.backend.dto.response.HomeCapabilitiesResponse response = service.getHomeCapabilities(userId, homeId);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getHomeId()).isEqualTo(homeId);
+        assertThat(response.getDevices()).hasSize(2);
+        assertThat(response.getActionTypes()).contains("TURN_ON", "TURN_OFF", "SET_BRIGHTNESS", "SET_TEMPERATURE");
+        assertThat(response.getCapabilities()).anyMatch(c -> c.getCode().equals("POWER"));
+        assertThat(response.getCapabilities()).anyMatch(c -> c.getCode().equals("BRIGHTNESS"));
+        assertThat(response.getCapabilities()).anyMatch(c -> c.getCode().equals("TEMPERATURE"));
+        verify(homeAuthorizationService).requireAccess(userId, homeId);
+    }
 }

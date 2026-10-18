@@ -296,7 +296,7 @@ public class SceneServiceImpl implements SceneService {
             throw new AppException(ErrorCode.SCENE_ACTION_INVALID);
         }
         boolean valid = switch (upperAction) {
-            case "TURN_ON", "TURN_OFF" -> value == null || value.isNull();
+            case "TURN_ON", "TURN_OFF" -> value == null || value.isNull() || (value.isObject() && value.isEmpty()) || (value.isTextual() && value.asText().isBlank());
             case "SET_BRIGHTNESS", "SET_SPEED" -> value != null
                     && value.isIntegralNumber()
                     && value.intValue() >= 0

@@ -57,18 +57,22 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         long now = System.currentTimeMillis();
 
         if (existing != null && !existing.isDone()) {
-            if (lastStartTime != null && (now - lastStartTime < 2000)) {
-                log.warn("Idempotency / Anti-spam: Device {} click spam rejected (<2s).", deviceId);
-                return CompletableFuture.completedFuture(CommandResult.builder()
-                        .commandId(UUID.randomUUID().toString())
-                        .success(false)
-                        .status("REJECTED")
-                        .errorCode("COMMAND_IN_PROGRESS_DUPLICATE_REJECTED")
-                        .message("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục")
-                        .build());
+            if (source == StateChangeSource.MANUAL) {
+                if (lastStartTime != null && (now - lastStartTime < 2000)) {
+                    log.warn("Idempotency / Anti-spam: Device {} click spam rejected (<2s).", deviceId);
+                    return CompletableFuture.completedFuture(CommandResult.builder()
+                            .commandId(UUID.randomUUID().toString())
+                            .success(false)
+                            .status("REJECTED")
+                            .errorCode("COMMAND_IN_PROGRESS_DUPLICATE_REJECTED")
+                            .message("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục")
+                            .build());
+                }
+                log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
+                return existing;
             }
-            log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
-            return existing;
+            return existing.handle((res, ex) -> null)
+                    .thenCompose(ignored -> sendCommand(deviceId, action, parameters, source));
         }
         
         String commandId = UUID.randomUUID().toString();
@@ -193,6 +197,23 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             }
                         }
                     } catch (Exception ignored) {}
+                }
+            }
+            if ("SET_COLOR".equalsIgnoreCase(normalizedAction) || "SET_RGB".equalsIgnoreCase(normalizedAction)) {
+                effectiveParams.put("power", "ON");
+                if (!effectiveParams.containsKey("brightness")) {
+                    effectiveParams.put("brightness", 100);
+                }
+                if (!effectiveParams.containsKey("r") || !effectiveParams.containsKey("g") || !effectiveParams.containsKey("b")) {
+                    Object hexVal = effectiveParams.get("hex");
+                    if (hexVal == null) hexVal = effectiveParams.get("color");
+                    if (hexVal instanceof String hexStr && hexStr.startsWith("#") && hexStr.length() == 7) {
+                        try {
+                            effectiveParams.put("r", Integer.parseInt(hexStr.substring(1, 3), 16));
+                            effectiveParams.put("g", Integer.parseInt(hexStr.substring(3, 5), 16));
+                            effectiveParams.put("b", Integer.parseInt(hexStr.substring(5, 7), 16));
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
             Map<String, Object> payload = new HashMap<>();
@@ -397,6 +418,17 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             case "GATE_STOP":
             case "STOP":
                 return "STOP";
+            case "SET_COLOR":
+            case "SET_RGB":
+                if (device != null && device.getCapabilities() != null) {
+                    boolean hasRgb = device.getCapabilities().values().stream()
+                            .flatMap(List::stream).anyMatch("SET_RGB"::equalsIgnoreCase);
+                    boolean hasColor = device.getCapabilities().values().stream()
+                            .flatMap(List::stream).anyMatch("SET_COLOR"::equalsIgnoreCase);
+                    if (hasRgb && !hasColor) return "SET_RGB";
+                    if (hasColor && !hasRgb) return "SET_COLOR";
+                }
+                return act;
             default:
                 return act;
         }
@@ -560,6 +592,16 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                         if (parameters.containsKey("r")) currentState.put("r", parameters.get("r"));
                         if (parameters.containsKey("g")) currentState.put("g", parameters.get("g"));
                         if (parameters.containsKey("b")) currentState.put("b", parameters.get("b"));
+                        if (parameters.containsKey("brightness")) currentState.put("brightness", parameters.get("brightness"));
+                        if (parameters.containsKey("color")) currentState.put("color", parameters.get("color"));
+                        else if (parameters.containsKey("hex")) currentState.put("color", parameters.get("hex"));
+                        else if (parameters.containsKey("r") && parameters.containsKey("g") && parameters.containsKey("b")) {
+                            currentState.put("color", Map.of(
+                                "r", parameters.get("r"),
+                                "g", parameters.get("g"),
+                                "b", parameters.get("b")
+                            ));
+                        }
                     }
                     break;
                 case "SET_BRIGHTNESS":
