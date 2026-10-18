@@ -137,6 +137,32 @@ public class DeviceController {
                 .build());
     }
 
+    @GetMapping({"/homes/{homeId}/device-capabilities", "/homes/{homeId}/devices/capabilities"})
+    public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.HomeCapabilitiesResponse>> getHomeCapabilities(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId) {
+
+        com.hesta.backend.dto.response.HomeCapabilitiesResponse result = deviceService.getHomeCapabilities(userDetails.getId(), homeId);
+
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.dto.response.HomeCapabilitiesResponse>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
+    @GetMapping("/devices/{deviceId}/capabilities")
+    public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceCapabilityInfoResponse>> getDeviceCapabilities(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId) {
+
+        com.hesta.backend.dto.response.DeviceCapabilityInfoResponse result = deviceService.getDeviceCapabilities(userDetails.getId(), deviceId);
+
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.dto.response.DeviceCapabilityInfoResponse>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
     @GetMapping("/rooms/{roomId}/devices")
     public ResponseEntity<ApiResponse<List<DeviceResponse>>> getDevicesByRoom(
             @AuthenticationPrincipal CustomUserDetails userDetails,

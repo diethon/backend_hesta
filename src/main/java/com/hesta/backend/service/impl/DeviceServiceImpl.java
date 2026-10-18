@@ -435,4 +435,291 @@ public class DeviceServiceImpl implements DeviceService {
         }
         return false;
     }
+
+    public static Map<String, List<String>> resolveDeviceCapabilities(Device device) {
+        Map<String, List<String>> result = new java.util.LinkedHashMap<>();
+        if (device != null && device.getCapabilities() != null && !device.getCapabilities().isEmpty()) {
+            for (Map.Entry<String, List<String>> entry : device.getCapabilities().entrySet()) {
+                String key = entry.getKey() != null ? entry.getKey().trim().toUpperCase(java.util.Locale.ROOT) : "";
+                if (key.isBlank()) continue;
+                List<String> actions = new java.util.ArrayList<>();
+                if (entry.getValue() != null) {
+                    for (String act : entry.getValue()) {
+                        if (act != null && !act.isBlank()) {
+                            actions.add(act.trim().toUpperCase(java.util.Locale.ROOT));
+                        }
+                    }
+                }
+                result.put(key, actions);
+            }
+        }
+
+        if (result.isEmpty() && device != null) {
+            String type = device.getDeviceType() != null ? device.getDeviceType().trim().toUpperCase(java.util.Locale.ROOT) : "";
+            switch (type) {
+                case "LIGHT", "LED" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                    result.put("BRIGHTNESS", List.of("SET_BRIGHTNESS"));
+                }
+                case "LED_RGB" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                    result.put("BRIGHTNESS", List.of("SET_BRIGHTNESS"));
+                    result.put("COLOR", List.of("SET_RGB", "SET_COLOR"));
+                }
+                case "SMART_PLUG", "SOCKET" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                }
+                case "FAN" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                    result.put("SPEED", List.of("SET_SPEED", "SET_FAN"));
+                }
+                case "AIR_CONDITIONER", "AC" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                    result.put("TEMPERATURE", List.of("SET_TEMPERATURE"));
+                    result.put("SPEED", List.of("SET_FAN", "SET_SPEED"));
+                    result.put("MODE", List.of("SET_MODE"));
+                }
+                case "GATE", "ROLLING_DOOR" -> {
+                    result.put("GATE", List.of("OPEN", "CLOSE", "STOP"));
+                }
+                case "IR_REMOTE" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                    result.put("TEMPERATURE", List.of("SET_TEMPERATURE"));
+                    result.put("SPEED", List.of("SET_FAN", "SET_SPEED"));
+                    result.put("MODE", List.of("SET_MODE"));
+                    result.put("IR_TRANSMIT", List.of("SEND_IR_CODE"));
+                }
+                case "TEMP_HUMID_SENSOR" -> {
+                    result.put("TEMPERATURE_READ", List.of());
+                    result.put("HUMIDITY_READ", List.of());
+                }
+                case "MOTION_SENSOR" -> {
+                    result.put("MOTION_DETECT", List.of());
+                }
+                case "SMOKE_SENSOR" -> {
+                    result.put("SMOKE_DETECT", List.of());
+                }
+                case "CAMERA_AI" -> {
+                    result.put("AI_FALL_DETECT", List.of("SET_AI_MODE"));
+                    result.put("AI_INTRUSION_DETECT", List.of("SET_AI_MODE"));
+                }
+                default -> {
+                    if (type.contains("SENSOR")) {
+                        result.put("SENSOR", List.of());
+                    } else {
+                        result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    public static List<String> extractSupportedActions(Map<String, List<String>> capabilities) {
+        java.util.Set<String> actions = new java.util.LinkedHashSet<>();
+        if (capabilities != null) {
+            for (Map.Entry<String, List<String>> entry : capabilities.entrySet()) {
+                if (entry.getValue() != null && !entry.getValue().isEmpty()) {
+                    actions.addAll(entry.getValue());
+                } else {
+                    String key = entry.getKey() != null ? entry.getKey().toUpperCase(java.util.Locale.ROOT) : "";
+                    switch (key) {
+                        case "POWER" -> actions.addAll(List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
+                        case "BRIGHTNESS" -> actions.add("SET_BRIGHTNESS");
+                        case "COLOR", "RGB" -> actions.addAll(List.of("SET_RGB", "SET_COLOR"));
+                        case "TEMPERATURE", "TEMP" -> actions.add("SET_TEMPERATURE");
+                        case "SPEED", "FAN" -> actions.addAll(List.of("SET_FAN", "SET_SPEED"));
+                        case "MODE" -> actions.add("SET_MODE");
+                        case "GATE", "DOOR" -> actions.addAll(List.of("OPEN", "CLOSE", "STOP"));
+                    }
+                }
+            }
+        }
+        return new java.util.ArrayList<>(actions);
+    }
+
+    public static List<String> extractSupportedAttributes(Device device, Map<String, List<String>> capabilities) {
+        java.util.Set<String> attrs = new java.util.LinkedHashSet<>();
+        if (capabilities != null) {
+            for (String key : capabilities.keySet()) {
+                switch (key.toUpperCase(java.util.Locale.ROOT)) {
+                    case "POWER" -> attrs.add("power");
+                    case "BRIGHTNESS" -> attrs.add("brightness");
+                    case "COLOR", "RGB" -> { attrs.add("color"); attrs.add("r"); attrs.add("g"); attrs.add("b"); }
+                    case "TEMPERATURE", "TEMP", "TEMPERATURE_READ" -> attrs.add("temperature");
+                    case "HUMIDITY", "HUMIDITY_READ" -> attrs.add("humidity");
+                    case "MOTION", "MOTION_DETECT" -> attrs.add("motion");
+                    case "SMOKE", "SMOKE_DETECT" -> attrs.add("smoke");
+                    case "SPEED", "FAN" -> attrs.add("speed");
+                    case "MODE" -> attrs.add("mode");
+                    case "GATE", "DOOR" -> attrs.add("state");
+                }
+            }
+        }
+        if (device != null && device.getCurrentState() != null) {
+            attrs.addAll(device.getCurrentState().keySet());
+        }
+        String type = device != null && device.getDeviceType() != null ? device.getDeviceType().toUpperCase(java.util.Locale.ROOT) : "";
+        if (type.contains("TEMP") || type.contains("DHT")) {
+            attrs.add("temperature");
+            attrs.add("humidity");
+        }
+        if (type.contains("MOTION") || type.contains("PIR")) {
+            attrs.add("motion");
+        }
+        if (type.contains("SMOKE") || type.contains("GAS")) {
+            attrs.add("smoke");
+        }
+        return new java.util.ArrayList<>(attrs);
+    }
+
+    public static com.hesta.backend.dto.response.DeviceCapabilityInfoResponse toDeviceCapabilityInfo(Device device) {
+        if (device == null) return null;
+        Map<String, List<String>> caps = resolveDeviceCapabilities(device);
+        List<String> actions = extractSupportedActions(caps);
+        List<String> attributes = extractSupportedAttributes(device, caps);
+        String type = device.getDeviceType() != null ? device.getDeviceType().toUpperCase(java.util.Locale.ROOT) : "";
+        boolean isSensor = type.contains("SENSOR")
+                || caps.containsKey("TEMPERATURE_READ")
+                || caps.containsKey("HUMIDITY_READ")
+                || caps.containsKey("MOTION_DETECT")
+                || caps.containsKey("SMOKE_DETECT")
+                || caps.containsKey("SENSOR");
+        boolean isActionable = !actions.isEmpty();
+
+        return com.hesta.backend.dto.response.DeviceCapabilityInfoResponse.builder()
+                .id(device.getId())
+                .homeId(device.getHome() != null ? device.getHome().getId() : null)
+                .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
+                .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
+                .name(device.getName())
+                .deviceType(device.getDeviceType())
+                .status(device.getStatus() != null ? device.getStatus().name() : null)
+                .icon(device.getIcon())
+                .capabilities(caps)
+                .supportedActions(actions)
+                .supportedAttributes(attributes)
+                .currentState(device.getCurrentState() != null ? device.getCurrentState() : Map.of())
+                .sensor(isSensor)
+                .actionable(isActionable)
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.hesta.backend.dto.response.HomeCapabilitiesResponse getHomeCapabilities(UUID userId, UUID homeId) {
+        checkHomeAccess(userId, homeId);
+        List<Device> devices = deviceRepository.findByHomeId(homeId);
+        List<com.hesta.backend.dto.response.DeviceCapabilityInfoResponse> deviceInfos = devices.stream()
+                .map(DeviceServiceImpl::toDeviceCapabilityInfo)
+                .collect(Collectors.toList());
+
+        Map<String, java.util.Set<UUID>> devicesByCap = new java.util.LinkedHashMap<>();
+        devicesByCap.put("POWER", new java.util.LinkedHashSet<>());
+        devicesByCap.put("BRIGHTNESS", new java.util.LinkedHashSet<>());
+        devicesByCap.put("COLOR", new java.util.LinkedHashSet<>());
+        devicesByCap.put("TEMPERATURE", new java.util.LinkedHashSet<>());
+        devicesByCap.put("SPEED", new java.util.LinkedHashSet<>());
+        devicesByCap.put("MODE", new java.util.LinkedHashSet<>());
+        devicesByCap.put("GATE", new java.util.LinkedHashSet<>());
+        devicesByCap.put("SENSOR", new java.util.LinkedHashSet<>());
+
+        java.util.Set<String> allActions = new java.util.LinkedHashSet<>();
+        java.util.Set<String> sensorAttrs = new java.util.LinkedHashSet<>();
+
+        for (com.hesta.backend.dto.response.DeviceCapabilityInfoResponse dev : deviceInfos) {
+            allActions.addAll(dev.getSupportedActions());
+            if (dev.isSensor()) {
+                devicesByCap.get("SENSOR").add(dev.getId());
+                sensorAttrs.addAll(dev.getSupportedAttributes());
+            }
+            Map<String, List<String>> caps = dev.getCapabilities();
+            if (caps != null) {
+                if (caps.containsKey("POWER")) devicesByCap.get("POWER").add(dev.getId());
+                if (caps.containsKey("BRIGHTNESS")) devicesByCap.get("BRIGHTNESS").add(dev.getId());
+                if (caps.containsKey("COLOR") || caps.containsKey("RGB")) devicesByCap.get("COLOR").add(dev.getId());
+                if (caps.containsKey("TEMPERATURE") || caps.containsKey("TEMP")) devicesByCap.get("TEMPERATURE").add(dev.getId());
+                if (caps.containsKey("SPEED") || caps.containsKey("FAN")) devicesByCap.get("SPEED").add(dev.getId());
+                if (caps.containsKey("MODE")) devicesByCap.get("MODE").add(dev.getId());
+                if (caps.containsKey("GATE") || caps.containsKey("DOOR")) devicesByCap.get("GATE").add(dev.getId());
+            }
+        }
+
+        List<com.hesta.backend.dto.response.CapabilityGroupResponse> capabilityGroups = new java.util.ArrayList<>();
+        if (!devicesByCap.get("POWER").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("POWER").label("Bật / Tắt nguồn").icon("power")
+                    .actions(List.of("TURN_ON", "TURN_OFF", "TOGGLE"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("POWER")))
+                    .deviceCount(devicesByCap.get("POWER").size()).build());
+        }
+        if (!devicesByCap.get("BRIGHTNESS").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("BRIGHTNESS").label("Độ sáng ánh sáng").icon("sun")
+                    .actions(List.of("SET_BRIGHTNESS"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("BRIGHTNESS")))
+                    .deviceCount(devicesByCap.get("BRIGHTNESS").size()).build());
+        }
+        if (!devicesByCap.get("COLOR").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("COLOR").label("Màu sắc ánh sáng RGB").icon("palette")
+                    .actions(List.of("SET_COLOR"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("COLOR")))
+                    .deviceCount(devicesByCap.get("COLOR").size()).build());
+        }
+        if (!devicesByCap.get("TEMPERATURE").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("TEMPERATURE").label("Cài đặt nhiệt độ điều hòa").icon("snowflake")
+                    .actions(List.of("SET_TEMPERATURE"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("TEMPERATURE")))
+                    .deviceCount(devicesByCap.get("TEMPERATURE").size()).build());
+        }
+        if (!devicesByCap.get("SPEED").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("SPEED").label("Tốc độ gió & quạt").icon("wind")
+                    .actions(List.of("SET_SPEED"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("SPEED")))
+                    .deviceCount(devicesByCap.get("SPEED").size()).build());
+        }
+        if (!devicesByCap.get("MODE").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("MODE").label("Chế độ vận hành").icon("refresh-cw")
+                    .actions(List.of("SET_MODE"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("MODE")))
+                    .deviceCount(devicesByCap.get("MODE").size()).build());
+        }
+        if (!devicesByCap.get("GATE").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("GATE").label("Đóng / Mở cửa & cổng").icon("door-closed")
+                    .actions(List.of("OPEN", "CLOSE", "STOP"))
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("GATE")))
+                    .deviceCount(devicesByCap.get("GATE").size()).build());
+        }
+        if (!devicesByCap.get("SENSOR").isEmpty()) {
+            capabilityGroups.add(com.hesta.backend.dto.response.CapabilityGroupResponse.builder()
+                    .code("SENSOR").label("Cảm biến môi trường & an ninh").icon("activity")
+                    .actions(List.of())
+                    .deviceIds(new java.util.ArrayList<>(devicesByCap.get("SENSOR")))
+                    .deviceCount(devicesByCap.get("SENSOR").size()).build());
+        }
+
+        allActions.add("SET_STATE");
+
+        return com.hesta.backend.dto.response.HomeCapabilitiesResponse.builder()
+                .homeId(homeId)
+                .devices(deviceInfos)
+                .capabilities(capabilityGroups)
+                .actionTypes(new java.util.ArrayList<>(allActions))
+                .sensorAttributes(new java.util.ArrayList<>(sensorAttrs))
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.hesta.backend.dto.response.DeviceCapabilityInfoResponse getDeviceCapabilities(UUID userId, UUID deviceId) {
+        Device device = deviceRepository.findById(deviceId)
+                .orElseThrow(() -> new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.DEVICE_NOT_FOUND));
+        checkHomeAccess(userId, getHomeId(device));
+        return toDeviceCapabilityInfo(device);
+    }
 }

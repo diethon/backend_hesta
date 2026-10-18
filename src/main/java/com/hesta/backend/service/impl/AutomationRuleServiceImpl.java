@@ -188,10 +188,11 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         Map<String, Object> values = parameters == null ? Map.of() : parameters;
         boolean valid = switch (action) {
             case "TURN_ON", "TURN_OFF", "TOGGLE" -> true;
-            case "SET_BRIGHTNESS" -> percentage(values.get("level"));
+            case "SET_BRIGHTNESS" -> percentage(values.get("level")) || percentage(values.get("brightness"));
             case "SET_SPEED" -> percentage(values.get("speed"));
             case "SET_TEMPERATURE" -> values.get("temperature") instanceof Number;
             case "SET_MODE" -> values.get("mode") instanceof String mode && !mode.isBlank();
+            case "SET_COLOR", "SET_RGB" -> values.containsKey("color") || values.containsKey("hex") || (values.containsKey("r") && values.containsKey("g") && values.containsKey("b"));
             case "SET_STATE" -> !values.isEmpty();
             case "EXECUTE_SCENE" -> false;
             default -> false;
