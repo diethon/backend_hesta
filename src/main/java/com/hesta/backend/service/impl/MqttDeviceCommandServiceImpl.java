@@ -351,9 +351,11 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             switch (act) {
                 case "GATE_OPEN":
                 case "OPEN":
+                case "TURN_ON":
                     return "OPEN";
                 case "GATE_CLOSE":
                 case "CLOSE":
+                case "TURN_OFF":
                     return "CLOSE";
                 case "GATE_STOP":
                 case "STOP":

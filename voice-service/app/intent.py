@@ -38,6 +38,8 @@ ROOM_PATTERNS = [
     "phòng trẻ em",
     "ban công",
     "sân thượng",
+    "sân vườn",
+    "garden",
     "tầng trệt",
     "tầng lầu",
     "nhà kho",
@@ -69,6 +71,21 @@ ROOM_PHONETIC_VARIANTS = {
     "den phang mua": "phòng ngủ",
     "dem phong ngu": "phòng ngủ",
     "den phong ngu": "phòng ngủ",
+    # Ghép tắt đèn ngủ / đèn phòng ngủ
+    "den ngu": "phòng ngủ",
+    # Biến thể phát âm Whisper cho phòng khách
+    "phong khach": "phòng khách",
+    "phang khach": "phòng khách",
+    # Biến thể phát âm Whisper cho garage
+    "ga ra": "garage",
+    "ga-ra": "garage",
+    "gara": "garage",
+    "ga rô": "garage",
+    "ga rát": "garage",
+    # Biến thể phát âm Whisper cho sân vườn / garden
+    "san vuon": "sân vườn",
+    "san buon": "sân vườn",
+    "garden": "garden",
 }
 
 
@@ -185,20 +202,24 @@ class IntentMapper:
                 continue
                 
             for start in range(len(text_words_norm) - room_len + 1):
-                window_norm = " ".join(text_words_norm[start : start + room_len])
+                window_words = text_words_norm[start : start + room_len]
+                window_norm = " ".join(window_words)
 
                 matched_room = original_room
                 if window_norm in ROOM_PHONETIC_VARIANTS:
                     score = 100.0
                     matched_room = ROOM_PHONETIC_VARIANTS[window_norm]
-                else:
+                elif room_len == 1:
                     score = fuzz.ratio(window_norm, norm_room)
-
-                # Ngưỡng: Phòng 1 từ (như 'garage') cần >= 85% để tránh nhầm với từ khác
-                # Phòng >= 2 từ (như 'phòng ngủ', 'phòng khách') cần >= 60%
-                threshold = 85.0 if room_len == 1 else 60.0
-                if score < threshold:
-                    continue
+                    if score < 88.0:
+                        continue
+                else:
+                    # Multi-word rooms: mỗi từ phải có độ tương đồng tối thiểu (>= 65%)
+                    # và trung bình cộng phải >= 80% để tránh false positive (như 'mở cổng' khớp 'ban công')
+                    word_scores = [fuzz.ratio(w, r) for w, r in zip(window_words, room_words)]
+                    if any(ws < 65 for ws in word_scores) or (sum(word_scores) / len(word_scores)) < 80.0:
+                        continue
+                    score = sum(word_scores) / len(word_scores)
 
                 # Chỉ cập nhật nếu điểm cao hơn, hoặc bằng điểm nhưng phòng dài hơn (VD: 'phòng làm việc' > 'phòng')
                 if score > best_overall_score or (score == best_overall_score and room_len > best_overall_len):
@@ -208,11 +229,18 @@ class IntentMapper:
                     best_overall_len = room_len
 
         if best_overall_score >= 60.0 and best_overall_room:
-            # Xóa các từ thuộc về tên phòng khỏi câu
-            remaining_words = (
-                text_words_orig[:best_overall_start]
-                + text_words_orig[best_overall_start + best_overall_len:]
-            )
+            # Special case: nếu match qua 'den ngu' (ví dụ: 'bật đèn ngủ'), giữ lại chữ 'đèn' để intent mapper xử lý tiếp
+            matched_slice = text_words_norm[best_overall_start : best_overall_start + best_overall_len]
+            if matched_slice == ["den", "ngu"]:
+                remaining_words = (
+                    text_words_orig[:best_overall_start + 1]
+                    + text_words_orig[best_overall_start + best_overall_len:]
+                )
+            else:
+                remaining_words = (
+                    text_words_orig[:best_overall_start]
+                    + text_words_orig[best_overall_start + best_overall_len:]
+                )
             remaining = " ".join(remaining_words)
             remaining = re.sub(r"\s+", " ", remaining).strip()
             remaining = re.sub(r"^(ở|tại|trong|của)\s+", "", remaining).strip()
@@ -309,11 +337,11 @@ class IntentMapper:
         # Tạo danh sách các pattern đã được chuẩn hóa
         all_norm_patterns = [p_norm for _, p_norm, _ in self._pattern_index]
 
-        # Tìm match tốt nhất trên bản chuẩn hóa (Sử dụng token_set_ratio để bỏ qua các từ thừa như tham số, tên phòng)
+        # Tìm match tốt nhất trên bản chuẩn hóa (Sử dụng WRatio để vừa hỗ trợ biến thể/tham số vừa phản ánh đúng confidence)
         result = process.extractOne(
             remaining_norm,
             all_norm_patterns,
-            scorer=fuzz.token_set_ratio,
+            scorer=fuzz.WRatio,
         )
 
         if result is None:

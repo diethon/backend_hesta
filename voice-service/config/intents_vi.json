@@ -3,58 +3,122 @@
     {
       "action": "TURN_ON",
       "device_type": "light",
-      "patterns": ["bật đèn", "mở đèn", "bật điện", "mở điện", "bật sáng"]
+      "patterns": ["bật đèn", "mở đèn", "bật điện", "mở điện", "bật sáng", "bật đèn lên", "mở đèn lên"]
     },
     {
       "action": "TURN_OFF",
       "device_type": "light",
-      "patterns": ["tắt đèn", "tắt hết đèn", "tắt điện", "tắt sáng"]
+      "patterns": ["tắt đèn", "tắt hết đèn", "tắt điện", "tắt sáng", "tắt đèn đi", "tắt hết điện"]
     },
     {
       "action": "TURN_ON",
       "device_type": "fan",
-      "patterns": ["bật quạt", "mở quạt"]
+      "patterns": ["bật quạt", "mở quạt", "bật quạt lên", "mở quạt lên", "bật quạt trần", "mở quạt trần"]
     },
     {
       "action": "TURN_OFF",
       "device_type": "fan",
-      "patterns": ["tắt quạt", "tắt hết quạt"]
+      "patterns": ["tắt quạt", "tắt hết quạt", "tắt quạt đi", "tắt quạt trần"]
     },
     {
       "action": "TURN_ON",
       "device_type": "air_conditioner",
-      "patterns": ["bật điều hòa", "mở điều hòa", "bật máy lạnh", "mở máy lạnh"]
+      "patterns": ["bật điều hòa", "mở điều hòa", "bật máy lạnh", "mở máy lạnh", "bật điều hoà", "mở điều hoà", "bật điều hòa lên", "mở máy lạnh lên"]
     },
     {
       "action": "TURN_OFF",
       "device_type": "air_conditioner",
-      "patterns": ["tắt điều hòa", "tắt máy lạnh"]
+      "patterns": ["tắt điều hòa", "tắt máy lạnh", "tắt điều hoà", "tắt điều hòa đi", "tắt máy lạnh đi"]
     },
     {
       "action": "SET_TEMPERATURE",
       "device_type": "air_conditioner",
-      "patterns": ["chỉnh điều hòa", "đặt nhiệt độ", "chỉnh nhiệt độ", "để nhiệt độ"],
+      "patterns": [
+        "chỉnh điều hòa",
+        "đặt nhiệt độ",
+        "chỉnh nhiệt độ",
+        "để nhiệt độ",
+        "đặt nhiệt độ điều hòa",
+        "chỉnh nhiệt độ điều hòa",
+        "để nhiệt độ điều hòa",
+        "đặt nhiệt độ máy lạnh",
+        "chỉnh nhiệt độ máy lạnh",
+        "nhiệt độ điều hòa",
+        "nhiệt độ máy lạnh",
+        "điều hòa nhiệt độ"
+      ],
       "has_parameter": "temperature"
     },
     {
+      "action": "INCREASE_TEMPERATURE",
+      "device_type": "air_conditioner",
+      "patterns": [
+        "tăng nhiệt độ",
+        "tăng điều hòa",
+        "tăng máy lạnh",
+        "tăng nhiệt độ điều hòa",
+        "tăng nhiệt độ máy lạnh",
+        "tăng nhiệt độ lên",
+        "tăng điều hòa lên",
+        "nóng lên",
+        "tăng nhiệt"
+      ]
+    },
+    {
+      "action": "DECREASE_TEMPERATURE",
+      "device_type": "air_conditioner",
+      "patterns": [
+        "giảm nhiệt độ",
+        "giảm điều hòa",
+        "giảm máy lạnh",
+        "giảm nhiệt độ điều hòa",
+        "giảm nhiệt độ máy lạnh",
+        "giảm nhiệt độ xuống",
+        "giảm điều hòa xuống",
+        "mát hơn",
+        "lạnh hơn",
+        "giảm nhiệt"
+      ]
+    },
+    {
+      "action": "OPEN",
+      "device_type": "gate",
+      "patterns": ["mở cổng", "bật cổng", "mở cổng lên", "mở cổng ra", "mở cửa cổng"]
+    },
+    {
+      "action": "CLOSE",
+      "device_type": "gate",
+      "patterns": ["đóng cổng", "tắt cổng", "đóng cổng lại", "đóng cửa cổng", "khóa cổng"]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "water_pump",
+      "patterns": ["bật máy bơm", "mở máy bơm", "bật bơm nước", "mở bơm nước", "bật máy bơm nước", "mở máy bơm nước", "bật bơm", "mở bơm"]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "water_pump",
+      "patterns": ["tắt máy bơm", "tắt bơm nước", "tắt máy bơm nước", "tắt bơm", "tắt bơm đi", "tắt máy bơm đi"]
+    },
+    {
       "action": "TURN_ON",
       "device_type": "door_lock",
-      "patterns": ["mở khóa cửa", "mở cửa"]
+      "patterns": ["mở khóa cửa", "mở cửa", "mở khóa", "mở khoá cửa"]
     },
     {
       "action": "TURN_OFF",
       "device_type": "door_lock",
-      "patterns": ["khóa cửa", "đóng cửa", "khoá cửa"]
+      "patterns": ["khóa cửa", "đóng cửa", "khoá cửa", "khóa cửa lại"]
     },
     {
       "action": "TURN_ON",
       "device_type": "curtain",
-      "patterns": ["mở rèm", "kéo rèm ra", "mở màn"]
+      "patterns": ["mở rèm", "kéo rèm ra", "mở màn", "mở rèm cửa"]
     },
     {
       "action": "TURN_OFF",
       "device_type": "curtain",
-      "patterns": ["đóng rèm", "kéo rèm vào", "đóng màn"]
+      "patterns": ["đóng rèm", "kéo rèm vào", "đóng màn", "đóng rèm cửa"]
     },
     {
       "action": "TURN_ON",
@@ -118,16 +182,6 @@
         "giảm xuống mức",
         "giảm đến mức"
       ]
-    },
-    {
-      "action": "INCREASE_TEMPERATURE",
-      "device_type": "air_conditioner",
-      "patterns": ["tăng nhiệt độ", "tăng điều hòa", "tăng máy lạnh", "tăng nhiệt độ điều hòa"]
-    },
-    {
-      "action": "DECREASE_TEMPERATURE",
-      "device_type": "air_conditioner",
-      "patterns": ["giảm nhiệt độ", "giảm điều hòa", "giảm máy lạnh", "giảm nhiệt độ điều hòa"]
     }
   ]
 }
