@@ -23,6 +23,7 @@ public class DeviceUptimeResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class TimelinePoint {
+        private Integer hour;
         private String timestamp;
         private String state;
         private Long durationSeconds;
