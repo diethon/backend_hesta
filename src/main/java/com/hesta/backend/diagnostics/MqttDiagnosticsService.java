@@ -21,6 +21,8 @@ public interface MqttDiagnosticsService {
 
     NodeDiagnosticsResponse tripCircuitBreaker(String nodeCode);
 
+    NodeDiagnosticsResponse tripCircuitBreaker(UUID nodeId);
+
     void recordPacket(String topic, String direction, int qos, String payload);
 
     List<MqttPacketDto> getSnifferPackets();
