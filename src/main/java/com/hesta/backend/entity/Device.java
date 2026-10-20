@@ -70,6 +70,11 @@ public class Device {
     private Map<String, Object> currentState;
 
     @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "settings", columnDefinition = "jsonb")
+    @Builder.Default
+    private Map<String, Object> settings = new java.util.HashMap<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "capabilities", columnDefinition = "jsonb")
     @Builder.Default
     private DeviceCapabilities capabilities = new DeviceCapabilities();
