@@ -99,5 +99,33 @@ class DeviceProfilingServiceTest {
         assertTrue(response.getOnHours() > 0);
         assertTrue(response.getOffHours() > 0);
         assertTrue(response.getUptimePercent() >= 0 && response.getUptimePercent() <= 100);
+        assertEquals(24, response.getTimelinePoints().size());
+        for (int i = 0; i < 24; i++) {
+            assertEquals(i, response.getTimelinePoints().get(i).getHour());
+            assertNotNull(response.getTimelinePoints().get(i).getState());
+        }
+    }
+
+    @Test
+    @DisplayName("Uptime Profiling: accurately bounds totalHours when device was created less than requested days ago")
+    void testGetDeviceUptime_RecentlyCreatedDevice() {
+        OffsetDateTime now = OffsetDateTime.now();
+        Device recentDevice = Device.builder()
+                .id(deviceId)
+                .name("New Lamp")
+                .createdAt(now.minusDays(2))
+                .currentState(Map.of("power", true))
+                .build();
+
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(recentDevice));
+        when(historyRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(eq(deviceId), any(), any()))
+                .thenReturn(List.of());
+
+        DeviceUptimeResponse response = profilingService.getDeviceUptime(deviceId, 7);
+
+        assertNotNull(response);
+        // Expect approximately 48 hours (+- 1 hour due to test execution drift), NOT 168.0
+        assertTrue(response.getTotalHours() >= 47.0 && response.getTotalHours() <= 49.0);
+        assertEquals(24, response.getTimelinePoints().size());
     }
 }
