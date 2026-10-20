@@ -93,4 +93,32 @@ class TwinLayoutServiceIntegrationTest {
     }
 
     private BigDecimal bd(String value) { return new BigDecimal(value); }
+
+    @Test
+    void architecture_roundTripsPostgresJsonbAndLegacyPutPreservesIt() {
+        var point = new com.hesta.backend.dto.request.TwinArchitectureRequest.Point(0, 0);
+        var outline = List.of(point, new com.hesta.backend.dto.request.TwinArchitectureRequest.Point(1, 0),
+                new com.hesta.backend.dto.request.TwinArchitectureRequest.Point(1, 1), new com.hesta.backend.dto.request.TwinArchitectureRequest.Point(0, 1));
+        var furniture = new com.hesta.backend.dto.request.TwinArchitectureRequest.ObjectPlacement("sofa-1",
+                com.hesta.backend.dto.request.TwinArchitectureRequest.Kind.SOFA, 1, 1, 2.4, .9, .8, 90, null, null);
+        var architecture = new com.hesta.backend.dto.request.TwinArchitectureRequest(1,
+                Map.of(room.getId(), new com.hesta.backend.dto.request.TwinArchitectureRequest.RoomGeometry(
+                        com.hesta.backend.dto.request.TwinArchitectureRequest.Shape.RECTANGLE, outline, null, null, 2.7, .15, List.of(furniture), false)),
+                Map.of("DEVICE:" + device.getId(), 90.0), Map.of(2, new com.hesta.backend.dto.request.TwinArchitectureRequest.FloorGeometry(0, 2.7, .22)));
+        var roomGeometry = List.of(new TwinRoomLayoutRequest(room.getId(), 2, bd(".1"), bd(".1"), bd(".5"), bd(".5")));
+        var nodes = List.of(new TwinNodeLayoutRequest(com.hesta.backend.enums.TwinNodeType.DEVICE,
+                device.getId().toString(), room.getId(), bd(".2"), bd(".2")));
+        UUID savedHomeId = home.getId();
+        service.saveLayout(userId, savedHomeId, new TwinLayoutSaveRequest(0L, roomGeometry, nodes, architecture));
+        entityManager.flush(); entityManager.clear(); // Actual DB read, not the JPA first-level cache.
+        assertThat(service.getLayout(userId, savedHomeId).architecture()).isEqualTo(architecture);
+        assertThat(entityManager.createNativeQuery("SELECT jsonb_typeof(architecture) FROM twin_layouts WHERE home_id=:id")
+                .setParameter("id", savedHomeId).getSingleResult()).isEqualTo("object");
+        var legacy = service.saveLayout(userId, savedHomeId, new TwinLayoutSaveRequest(1L, roomGeometry, nodes));
+        assertThat(legacy.revision()).isEqualTo(2);
+        assertThat(legacy.architecture()).isEqualTo(architecture);
+        var removed = service.saveLayout(userId, savedHomeId, new TwinLayoutSaveRequest(2L, List.of(), List.of()));
+        assertThat(removed.architecture().rooms()).isEmpty();
+        assertThat(removed.architecture().nodeRotations()).isEmpty();
+    }
 }

@@ -75,4 +75,3 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     boolean existsBySerialNumber(String serialNumber);
 }
-
