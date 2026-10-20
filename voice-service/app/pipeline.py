@@ -30,6 +30,19 @@ from app.dialogue_state import DialogueState
 
 logger = logging.getLogger(__name__)
 
+# Bản dịch device_type → tiếng Việt để hiển thị lỗi cho người dùng
+DEVICE_TYPE_VI = {
+    "light": "đèn",
+    "fan": "quạt",
+    "air_conditioner": "điều hòa",
+    "door_lock": "khóa cửa",
+    "curtain": "rèm",
+    "water_heater": "bình nóng lạnh",
+    "gate": "cổng",
+    "water_pump": "máy bơm nước",
+    "led_rgb": "đèn RGB",
+}
+
 
 @dataclass
 class PipelineResult:
@@ -247,29 +260,38 @@ class VoicePipeline:
 
         # === BƯỚC 4: Device Resolution ===
         t0 = time.perf_counter()
-        if room:
-            devices = self.device_directory.resolve(room, device_type, home_id=home_id)
-        else:
-            # Không có room → thử dùng context hoặc báo lỗi
-            return PipelineResult(
-                success=False,
-                message="Không xác định được phòng. Vui lòng nói rõ tên phòng.",
-                transcript=transcript,
-                intent=intent,
-                total_duration_ms=(time.perf_counter() - t_start) * 1000,
-                step_durations=step_durations,
-            )
+        devices = self.device_directory.resolve(room or "", device_type, home_id=home_id)
+        if not devices and room and intent.room is None:
+            # Phòng đến từ context nhưng không có loại thiết bị này -> fallback tìm toàn bộ nhà
+            devices = self.device_directory.resolve("", device_type, home_id=home_id)
+            if devices:
+                room = None
         step_durations["device_resolve_ms"] = (time.perf_counter() - t0) * 1000
 
+        dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
         if not devices:
+            msg = f"Không tìm thấy {dev_type_vi} nào ở {room}." if room else f"Không tìm thấy {dev_type_vi} nào trong nhà."
             return PipelineResult(
                 success=False,
-                message=f"Không tìm thấy {device_type} nào ở {room}.",
+                message=msg,
                 transcript=transcript,
                 intent=intent,
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
+
+        # Nếu có nhiều thiết bị thuộc loại này ở nhiều phòng khác nhau mà người dùng không chỉ rõ phòng (trừ lệnh "tắt hết/bật hết")
+        if len(devices) > 1 and not room and "hết" not in (intent.matched_pattern or ""):
+            distinct_rooms = {d.room_name for d in devices if d.room_name}
+            if len(distinct_rooms) > 1:
+                return PipelineResult(
+                    success=False,
+                    message=f"Nhà có {len(devices)} {dev_type_vi} ở nhiều phòng khác nhau. Vui lòng nói rõ tên phòng.",
+                    transcript=transcript,
+                    intent=intent,
+                    total_duration_ms=(time.perf_counter() - t_start) * 1000,
+                    step_durations=step_durations,
+                )
 
         # === BƯỚC 5: Dispatch ===
         t0 = time.perf_counter()
@@ -357,28 +379,38 @@ class VoicePipeline:
             )
 
         t0 = time.perf_counter()
-        if room:
-            devices = self.device_directory.resolve(room, device_type, home_id=home_id)
-        else:
-            return PipelineResult(
-                success=False,
-                message="Không xác định được phòng.",
-                transcript=text,
-                intent=intent,
-                total_duration_ms=(time.perf_counter() - t_start) * 1000,
-                step_durations=step_durations,
-            )
+        devices = self.device_directory.resolve(room or "", device_type, home_id=home_id)
+        if not devices and room and intent.room is None:
+            # Phòng đến từ context nhưng không có loại thiết bị này -> fallback tìm toàn bộ nhà
+            devices = self.device_directory.resolve("", device_type, home_id=home_id)
+            if devices:
+                room = None
         step_durations["device_resolve_ms"] = (time.perf_counter() - t0) * 1000
 
+        dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
         if not devices:
+            msg = f"Không tìm thấy {dev_type_vi} nào ở {room}." if room else f"Không tìm thấy {dev_type_vi} nào trong nhà."
             return PipelineResult(
                 success=False,
-                message=f"Không tìm thấy {device_type} nào ở {room}.",
+                message=msg,
                 transcript=text,
                 intent=intent,
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
+
+        # Nếu có nhiều thiết bị thuộc loại này ở nhiều phòng khác nhau mà người dùng không chỉ rõ phòng (trừ lệnh "tắt hết/bật hết")
+        if len(devices) > 1 and not room and "hết" not in (intent.matched_pattern or ""):
+            distinct_rooms = {d.room_name for d in devices if d.room_name}
+            if len(distinct_rooms) > 1:
+                return PipelineResult(
+                    success=False,
+                    message=f"Nhà có {len(devices)} {dev_type_vi} ở nhiều phòng khác nhau. Vui lòng nói rõ tên phòng.",
+                    transcript=text,
+                    intent=intent,
+                    total_duration_ms=(time.perf_counter() - t_start) * 1000,
+                    step_durations=step_durations,
+                )
 
         t0 = time.perf_counter()
         device_ids = [d.device_id for d in devices]
