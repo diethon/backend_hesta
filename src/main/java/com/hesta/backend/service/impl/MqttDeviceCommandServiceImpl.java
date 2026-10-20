@@ -11,6 +11,14 @@ import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
+import com.hesta.backend.dto.response.TwinDeviceSnapshotResponse;
+import com.hesta.backend.enums.TwinHealthStatus;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
+import com.hesta.backend.realtime.model.RealtimeEvent;
+import com.hesta.backend.realtime.model.RealtimeEventType;
+import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +32,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -35,6 +42,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private final MqttGateway mqttGateway;
     private final DeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ApplicationEventPublisher applicationEventPublisher;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TwinSnapshotMapper twinSnapshotMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RealtimeEventPublisher realtimeEventPublisher;
 
     @org.springframework.beans.factory.annotation.Value("${mqtt.topic.prefix:hesta/nodes}")
     private String topicPrefix;
@@ -52,13 +68,17 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     @Transactional
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
-        CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         Long lastStartTime = commandStartTimes.get(deviceId);
         long now = System.currentTimeMillis();
 
-        if (existing != null && !existing.isDone()) {
-            if (lastStartTime != null && (now - lastStartTime < 2000)) {
-                log.warn("Idempotency / Anti-spam: Device {} click spam rejected (<2s).", deviceId);
+        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming giảm còn 60ms để kéo mượt, Relay nguồn 400ms để không bị khựng)
+        boolean isColorOrDimmer = "SET_RGB".equalsIgnoreCase(action)
+                || "SET_BRIGHTNESS".equalsIgnoreCase(action)
+                || "SET_COLOR".equalsIgnoreCase(action);
+        long antiSpamWindowMs = isColorOrDimmer ? 60L : 400L;
+        if (lastStartTime != null && (now - lastStartTime < antiSpamWindowMs)) {
+            if (!isColorOrDimmer) {
+                log.warn("Idempotency / Anti-spam: Device {} click spam rejected ({} ms < {} ms).", deviceId, now - lastStartTime, antiSpamWindowMs);
                 return CompletableFuture.completedFuture(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
                         .success(false)
@@ -67,13 +87,50 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                         .message("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục")
                         .build());
             }
-            log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
-            return existing;
         }
-        
+
+        // 2. Pending execution: Nếu lệnh trước chưa hoàn tất (đang đợi ACK)
+        CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
+        if (existing != null && !existing.isDone()) {
+            if (isColorOrDimmer) {
+                // Continuous adjustment: Lệnh mới nhất sẽ ghi đè (supersede) lệnh trước để người dùng kéo mượt, không bị drop hay reject
+                log.info("Idempotency: Superseding previous in-flight command for device {} with new {} command", deviceId, action);
+                existing.complete(CommandResult.builder()
+                        .commandId(UUID.randomUUID().toString())
+                        .success(true)
+                        .status("SUPERSEDED")
+                        .message("Superseded by newer stream command")
+                        .build());
+            } else {
+                log.warn("Idempotency / Anti-spam: Device {} already has a pending command in flight. Rejecting duplicate.", deviceId);
+                return CompletableFuture.completedFuture(CommandResult.builder()
+                        .commandId(UUID.randomUUID().toString())
+                        .success(false)
+                        .status("REJECTED")
+                        .errorCode("COMMAND_IN_PROGRESS_DUPLICATE_REJECTED")
+                        .message("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục")
+                        .build());
+            }
+        }
+
+        // 3. Nguyên tử hóa việc chiếm giữ Lock (Atomic Lock Acquisition chống Race Condition)
         String commandId = UUID.randomUUID().toString();
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
-        activeDeviceCommands.put(deviceId, future);
+        if (isColorOrDimmer) {
+            activeDeviceCommands.put(deviceId, future);
+        } else {
+            CompletableFuture<CommandResult> previous = activeDeviceCommands.putIfAbsent(deviceId, future);
+            if (previous != null && !previous.isDone()) {
+                log.warn("Idempotency: Concurrent race collision on device {}. Rejecting duplicate.", deviceId);
+                return CompletableFuture.completedFuture(CommandResult.builder()
+                        .commandId(commandId)
+                        .success(false)
+                        .status("REJECTED")
+                        .errorCode("COMMAND_IN_PROGRESS_DUPLICATE_REJECTED")
+                        .message("Thiết bị đang thực thi lệnh trước, vui lòng không click liên tục")
+                        .build());
+            }
+        }
         commandStartTimes.put(deviceId, now);
         
         String resolvedNodeCode = "unknown";
@@ -180,14 +237,11 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 if (br == null) br = effectiveParams.get("level");
                 if (br != null) {
                     try {
-                        if (Integer.parseInt(br.toString()) > 0) {
+                        int brInt = Math.max(0, Math.min(100, Integer.parseInt(br.toString())));
+                        effectiveParams.put("brightness", brInt);
+                        effectiveParams.put("level", brInt);
+                        if (brInt > 0) {
                             effectiveParams.put("power", "ON");
-                            if (!effectiveParams.containsKey("brightness")) {
-                                effectiveParams.put("brightness", br);
-                            }
-                            if (!effectiveParams.containsKey("level")) {
-                                effectiveParams.put("level", br);
-                            }
                         }
                     } catch (Exception ignored) {}
                 }
@@ -288,40 +342,73 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             
             long metricStartTime = System.currentTimeMillis();
             final String targetNodeCode = nodeCode;
-            return future.orTimeout(commandTimeoutMs, TimeUnit.MILLISECONDS)
-                    .whenComplete((res, ex) -> {
+            boolean isPowerCommand = "TURN_ON".equalsIgnoreCase(action)
+                    || "TURN_OFF".equalsIgnoreCase(action)
+                    || "POWER_ON".equalsIgnoreCase(action)
+                    || "POWER_OFF".equalsIgnoreCase(action)
+                    || "SET_POWER".equalsIgnoreCase(action);
+
+            long effectiveTimeout;
+            if (isColorOrDimmer) {
+                effectiveTimeout = 75L;
+            } else if (isPowerCommand) {
+                effectiveTimeout = 400L;
+            } else {
+                effectiveTimeout = commandTimeoutMs;
+            }
+
+            return future.orTimeout(effectiveTimeout, TimeUnit.MILLISECONDS)
+                    .handle((res, ex) -> {
                         activeDeviceCommands.remove(deviceId);
-                        commandStartTimes.remove(deviceId);
+                        pendingCommands.remove(commandId);
                         long roundtrip = System.currentTimeMillis() - metricStartTime;
+
                         if (ex == null && res != null && res.isSuccess()) {
                             log.info("[METRICS] MQTT Roundtrip (Success) completed in {} ms for commandId {}", roundtrip, commandId);
                             res.setLatencyMs(roundtrip);
                             if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
                                 diagnosticsService.recordCommandSuccess(targetNodeCode, roundtrip);
                             }
+                            return res;
                         } else {
+                            boolean isTimeout = ex instanceof java.util.concurrent.TimeoutException
+                                    || (ex != null && ex.getCause() instanceof java.util.concurrent.TimeoutException);
+
+                            boolean isFastReturnEligible = isColorOrDimmer || isPowerCommand;
+                            if (isFastReturnEligible && (isTimeout || (res != null && "SUPERSEDED".equals(res.getStatus())))) {
+                                log.info("[METRICS] Fast-return for command {} commandId {} after {} ms (dispatched to MQTT broker)", action, commandId, roundtrip);
+                                if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
+                                    diagnosticsService.recordCommandSuccess(targetNodeCode, roundtrip);
+                                }
+                                return CommandResult.builder()
+                                        .commandId(commandId)
+                                        .success(true)
+                                        .status("SUCCESS")
+                                        .message("Dispatched to MQTT broker")
+                                        .acknowledgedState(effectiveParams)
+                                        .latencyMs(roundtrip)
+                                        .build();
+                            }
+
+                            log.warn("[METRICS] MQTT Roundtrip (Failure/Timeout) after {} ms for commandId {}. Ex: {}", roundtrip, commandId, ex != null ? ex.getMessage() : "Timeout/No-Ack");
                             if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
                                 diagnosticsService.recordCommandFailure(targetNodeCode);
                             }
+                            String errCode = "TIMEOUT_NO_ACK";
+                            String errMsg = "Device did not acknowledge within " + commandTimeoutMs + " ms";
+                            if (ex != null && !isTimeout) {
+                                errCode = "INTERNAL_ERROR";
+                                errMsg = ex.getMessage() != null ? ex.getMessage() : "Unknown execution error";
+                            }
+                            return CommandResult.builder()
+                                    .commandId(commandId)
+                                    .success(false)
+                                    .status("TIMEOUT")
+                                    .errorCode(errCode)
+                                    .message(errMsg)
+                                    .latencyMs(roundtrip)
+                                    .build();
                         }
-                    })
-                    .exceptionally(ex -> {
-                        pendingCommands.remove(commandId);
-                        activeDeviceCommands.remove(deviceId);
-                        commandStartTimes.remove(deviceId);
-                        long roundtrip = System.currentTimeMillis() - metricStartTime;
-                        log.warn("[METRICS] MQTT Roundtrip (Timeout) after {} ms for commandId {}. Device {} timed out.", roundtrip, commandId, deviceId);
-                        if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
-                            diagnosticsService.recordCommandFailure(targetNodeCode);
-                        }
-                        return CommandResult.builder()
-                                .commandId(commandId)
-                                .success(false)
-                                .status("TIMEOUT")
-                                .errorCode("TIMEOUT_NO_ACK")
-                                .message("Device did not acknowledge within " + commandTimeoutMs + " ms")
-                                .latencyMs(roundtrip)
-                                .build();
                     });
 
         } catch (Exception e) {
@@ -670,17 +757,29 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     currentState.put("r", rVal);
                     currentState.put("g", gVal);
                     currentState.put("b", bVal);
+
+                    if (parameters != null && (parameters.containsKey("brightness") || parameters.containsKey("level"))) {
+                        Object br = parameters.containsKey("brightness") ? parameters.get("brightness") : parameters.get("level");
+                        if (br != null) {
+                            try {
+                                currentState.put("brightness", Math.max(0, Math.min(100, Integer.parseInt(br.toString()))));
+                            } catch (Exception ignored) {}
+                        }
+                    }
                     break;
                 case "SET_BRIGHTNESS":
                     if (parameters != null) {
                         Object br = parameters.containsKey("brightness") ? parameters.get("brightness") : parameters.get("level");
                         if (br != null) {
-                            currentState.put("brightness", br);
                             try {
-                                if (Integer.parseInt(br.toString()) > 0) {
+                                int brInt = Math.max(0, Math.min(100, Integer.parseInt(br.toString())));
+                                currentState.put("brightness", brInt);
+                                if (brInt > 0) {
                                     currentState.put("power", "ON");
                                 }
-                            } catch (Exception ignored) {}
+                            } catch (Exception ignored) {
+                                currentState.put("brightness", br);
+                            }
                         }
                     }
                     break;
@@ -713,8 +812,68 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             device.setCurrentState(currentState);
             deviceRepository.save(device);
             log.info("Updated device {} currentState in DB: {}", device.getId(), currentState);
+
+            UUID homeId = getHomeId(device);
+            if (homeId != null) {
+                try {
+                    TwinDeviceSnapshotResponse snapshot = twinSnapshotMapper != null
+                            ? twinSnapshotMapper.device(device)
+                            : new TwinDeviceSnapshotResponse(
+                                    device.getId(),
+                                    device.getRoom() != null ? device.getRoom().getId() : null,
+                                    device.getName(),
+                                    device.getDeviceType(),
+                                    device.getIcon(),
+                                    device.getStatus(),
+                                    objectMapper.valueToTree(currentState),
+                                    device.getLastSeen(),
+                                    TwinHealthStatus.ACTIVE
+                            );
+
+                    // 1. Gửi sự kiện cho Spring Transactional Listeners
+                    if (applicationEventPublisher != null) {
+                        applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
+                                homeId,
+                                snapshot
+                        ));
+                        log.info("Published DeviceStateChangedEvent for device {} in home {}", device.getId(), homeId);
+                    }
+
+                    // 2. Server Optimistic Broadcast: Bắn WebSocket STOMP tức thì (<1ms)
+                    // Giúp toàn bộ màn hình của các người dùng khác đồng bộ trạng thái ngay lập tức
+                    if (realtimeEventPublisher != null) {
+                        realtimeEventPublisher.publish(RealtimeEvent.create(
+                                RealtimeEventType.DEVICE_STATE_CHANGED,
+                                homeId,
+                                device.getId(),
+                                snapshot
+                        ));
+                        log.info("Server Optimistic Broadcast sent via realtimeEventPublisher for device {} in home {}", device.getId(), homeId);
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to publish realtime state for device {}", device.getId(), e);
+                }
+            }
         } catch (Exception e) {
             log.error("Failed to update currentState for device {}", device.getId(), e);
         }
+    }
+
+    private UUID getHomeId(Device device) {
+        if (device == null) return null;
+        try {
+            if (device.getRoom() != null && device.getRoom().getHome() != null) {
+                return device.getRoom().getHome().getId();
+            }
+            if (device.getNode() != null && device.getNode().getHome() != null) {
+                return device.getNode().getHome().getId();
+            }
+            if (device.getHome() != null) {
+                return device.getHome().getId();
+            }
+        } catch (Exception ex) {
+            log.warn("Could not determine homeId for device {}: {}", device.getId(), ex.getMessage());
+        }
+        return null;
     }
 }
