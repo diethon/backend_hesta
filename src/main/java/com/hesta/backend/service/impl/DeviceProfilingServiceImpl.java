@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -38,35 +39,48 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
         int effectiveDays = days > 0 ? days : 7;
         OffsetDateTime to = OffsetDateTime.now();
         OffsetDateTime from = to.minusDays(effectiveDays);
-        double totalHours = effectiveDays * 24.0;
 
-        List<DeviceStateHistory> histories = historyRepository
-                .findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, to);
+        // Lỗ hổng 4: Nếu thiết bị mới được thêm vào hệ thống chưa đủ 'effectiveDays', chỉ tính từ createdAt
+        if (device.getCreatedAt() != null && device.getCreatedAt().isAfter(from)) {
+            from = device.getCreatedAt();
+        }
 
-        List<DeviceUptimeResponse.TimelinePoint> timelinePoints = new ArrayList<>();
-        DateTimeFormatter dtf = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+        long totalSeconds = Math.max(1L, Duration.between(from, to).getSeconds());
+        double totalHours = Math.round((totalSeconds / 3600.0) * 100.0) / 100.0;
 
+        // Đảm bảo truy vấn bao gồm từ đầu ngày hôm nay để dựng timeline 24h
+        LocalDate today = to.toLocalDate();
+        OffsetDateTime todayStart = today.atTime(0, 0).atOffset(to.getOffset());
+        OffsetDateTime queryFrom = from.isBefore(todayStart) ? from : todayStart;
+
+        List<DeviceStateHistory> allHistories = historyRepository
+                .findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, queryFrom, to);
+
+        // Lỗ hổng 3: Xác định trạng thái ban đầu tại mốc queryFrom qua bản ghi gần nhất trước đó
+        boolean initialQueryState = resolveStateAt(deviceId, device, queryFrom, allHistories);
+
+        // 1. Tính toán onHours / offHours cho khoảng [from, to]
         double onSeconds = 0.0;
         double offSeconds = 0.0;
 
-        if (histories.isEmpty()) {
-            boolean isCurrentlyOn = isStateOn(device.getCurrentState());
-            long totalWindowSeconds = effectiveDays * 24L * 3600L;
-            if (isCurrentlyOn) {
-                onSeconds = totalWindowSeconds;
+        final OffsetDateTime effectiveFrom = from;
+        List<DeviceStateHistory> windowHistories = allHistories.stream()
+                .filter(h -> !h.getChangedAt().isBefore(effectiveFrom))
+                .toList();
+
+        boolean stateAtFrom = resolveStateAt(deviceId, device, from, allHistories);
+
+        if (windowHistories.isEmpty()) {
+            if (stateAtFrom) {
+                onSeconds = totalSeconds;
             } else {
-                offSeconds = totalWindowSeconds;
+                offSeconds = totalSeconds;
             }
-            timelinePoints.add(DeviceUptimeResponse.TimelinePoint.builder()
-                    .timestamp(from.format(dtf))
-                    .state(isCurrentlyOn ? "ON" : "OFF")
-                    .durationSeconds(totalWindowSeconds)
-                    .build());
         } else {
             OffsetDateTime cursor = from;
-            boolean currentState = isStateOn(histories.get(0).getPreviousState());
+            boolean currentState = stateAtFrom;
 
-            for (DeviceStateHistory h : histories) {
+            for (DeviceStateHistory h : windowHistories) {
                 OffsetDateTime changeTime = h.getChangedAt();
                 if (changeTime.isAfter(cursor)) {
                     long sec = Duration.between(cursor, changeTime).getSeconds();
@@ -75,11 +89,6 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
                     } else {
                         offSeconds += sec;
                     }
-                    timelinePoints.add(DeviceUptimeResponse.TimelinePoint.builder()
-                            .timestamp(cursor.format(dtf))
-                            .state(currentState ? "ON" : "OFF")
-                            .durationSeconds(sec)
-                            .build());
                     cursor = changeTime;
                 }
                 currentState = isStateOn(h.getNewState());
@@ -92,17 +101,16 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
                 } else {
                     offSeconds += sec;
                 }
-                timelinePoints.add(DeviceUptimeResponse.TimelinePoint.builder()
-                        .timestamp(cursor.format(dtf))
-                        .state(currentState ? "ON" : "OFF")
-                        .durationSeconds(sec)
-                        .build());
             }
         }
 
         double onHours = Math.round((onSeconds / 3600.0) * 100.0) / 100.0;
         double offHours = Math.round((offSeconds / 3600.0) * 100.0) / 100.0;
         double uptimePercent = totalHours > 0 ? Math.round(((onHours / totalHours) * 100.0) * 10.0) / 10.0 : 0.0;
+
+        // 2. Lỗ hổng 1: Dựng chính xác 24 Hourly Activity Buckets cho thanh UI hôm nay
+        List<DeviceUptimeResponse.TimelinePoint> timelinePoints = build24HourTimeline(
+                allHistories, todayStart, initialQueryState, to);
 
         return DeviceUptimeResponse.builder()
                 .uptimePercent(uptimePercent)
@@ -111,6 +119,107 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
                 .offHours(offHours)
                 .timelinePoints(timelinePoints)
                 .build();
+    }
+
+    private boolean resolveStateAt(UUID deviceId, Device device, OffsetDateTime pointInTime, List<DeviceStateHistory> histories) {
+        DeviceStateHistory lastBefore = null;
+        for (DeviceStateHistory h : histories) {
+            if (!h.getChangedAt().isAfter(pointInTime)) {
+                lastBefore = h;
+            } else {
+                break;
+            }
+        }
+
+        if (lastBefore != null && lastBefore.getNewState() != null && !lastBefore.getNewState().isEmpty()) {
+            return isStateOn(lastBefore.getNewState());
+        }
+
+        var recentPast = historyRepository.findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(deviceId, pointInTime);
+        if (recentPast.isPresent() && recentPast.get().getNewState() != null && !recentPast.get().getNewState().isEmpty()) {
+            return isStateOn(recentPast.get().getNewState());
+        }
+
+        return isStateOn(device.getCurrentState());
+    }
+
+    private List<DeviceUptimeResponse.TimelinePoint> build24HourTimeline(
+            List<DeviceStateHistory> histories,
+            OffsetDateTime todayStart,
+            boolean initialStateAtTodayStart,
+            OffsetDateTime now) {
+
+        List<DeviceUptimeResponse.TimelinePoint> points = new ArrayList<>(24);
+        DateTimeFormatter dtf = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+
+        for (int h = 0; h < 24; h++) {
+            OffsetDateTime slotStart = todayStart.plusHours(h);
+            OffsetDateTime slotEnd = slotStart.plusHours(1);
+
+            if (slotStart.isAfter(now)) {
+                points.add(DeviceUptimeResponse.TimelinePoint.builder()
+                        .hour(h)
+                        .timestamp(slotStart.format(dtf))
+                        .state("OFF")
+                        .durationSeconds(0L)
+                        .build());
+                continue;
+            }
+
+            OffsetDateTime effectiveSlotEnd = slotEnd.isBefore(now) ? slotEnd : now;
+            long slotDurationSec = Math.max(0L, Duration.between(slotStart, effectiveSlotEnd).getSeconds());
+
+            boolean stateAtSlotStart = initialStateAtTodayStart;
+            for (DeviceStateHistory hRecord : histories) {
+                if (!hRecord.getChangedAt().isAfter(slotStart)) {
+                    stateAtSlotStart = isStateOn(hRecord.getNewState());
+                } else {
+                    break;
+                }
+            }
+
+            List<DeviceStateHistory> slotEvents = new ArrayList<>();
+            for (DeviceStateHistory hRecord : histories) {
+                if (hRecord.getChangedAt().isAfter(slotStart) && !hRecord.getChangedAt().isAfter(effectiveSlotEnd)) {
+                    slotEvents.add(hRecord);
+                }
+            }
+
+            long onSecInSlot = 0L;
+            if (slotEvents.isEmpty()) {
+                if (stateAtSlotStart) {
+                    onSecInSlot = slotDurationSec;
+                }
+            } else {
+                OffsetDateTime cursor = slotStart;
+                boolean currentSlotState = stateAtSlotStart;
+                for (DeviceStateHistory ev : slotEvents) {
+                    if (ev.getChangedAt().isAfter(cursor)) {
+                        long diff = Duration.between(cursor, ev.getChangedAt()).getSeconds();
+                        if (currentSlotState) {
+                            onSecInSlot += diff;
+                        }
+                        cursor = ev.getChangedAt();
+                    }
+                    currentSlotState = isStateOn(ev.getNewState());
+                }
+                if (cursor.isBefore(effectiveSlotEnd)) {
+                    long diff = Duration.between(cursor, effectiveSlotEnd).getSeconds();
+                    if (currentSlotState) {
+                        onSecInSlot += diff;
+                    }
+                }
+            }
+
+            points.add(DeviceUptimeResponse.TimelinePoint.builder()
+                    .hour(h)
+                    .timestamp(slotStart.format(dtf))
+                    .state(onSecInSlot > 0 ? "ON" : "OFF")
+                    .durationSeconds(onSecInSlot)
+                    .build());
+        }
+
+        return points;
     }
 
     private boolean isStateOn(Map<String, Object> state) {
