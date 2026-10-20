@@ -12,6 +12,7 @@ import java.time.OffsetDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MqttPacketDto {
+    private String id;
     private OffsetDateTime timestamp;
     private String topic;
     private String direction;
