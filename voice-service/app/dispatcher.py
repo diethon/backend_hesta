@@ -25,7 +25,7 @@ class DispatchConfig:
     base_url: str = "http://localhost:8080"
     action_endpoint_template: str = "/internal/devices/{device_id}/actions"
     api_key_env: str = "INTERNAL_API_KEY"
-    request_timeout_seconds: float = 5.0
+    request_timeout_seconds: float = 8.0
 
 
 @dataclass
@@ -59,6 +59,8 @@ class DispatchBatchResult:
         action_vi = {
             "TURN_ON": "bật",
             "TURN_OFF": "tắt",
+            "OPEN": "mở",
+            "CLOSE": "đóng",
             "SET_TEMPERATURE": "đặt nhiệt độ",
             "INCREASE_TEMPERATURE": "tăng nhiệt độ",
             "DECREASE_TEMPERATURE": "giảm nhiệt độ",
@@ -74,6 +76,9 @@ class DispatchBatchResult:
             "door_lock": "khóa cửa",
             "curtain": "rèm",
             "water_heater": "bình nóng lạnh",
+            "gate": "cổng",
+            "water_pump": "máy bơm nước",
+            "led_rgb": "đèn RGB",
         }.get(device_type, device_type)
 
         room_str = f" {room}" if room else ""
