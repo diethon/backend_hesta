@@ -59,3 +59,7 @@ __pycache__/
 venv/
 ENV/
 .pytest_cache/
+client_secret_*.json
+token.json
+.aider*
+hesta-backend-*
