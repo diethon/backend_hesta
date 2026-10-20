@@ -17,10 +17,13 @@ import com.hesta.backend.entity.DeviceStateHistory;
 import com.hesta.backend.service.HomeAuthorizationService;
 import com.hesta.backend.mapper.TwinSnapshotMapper;
 import lombok.RequiredArgsConstructor;
+import com.hesta.backend.exception.AppException;
+import com.hesta.backend.exception.ErrorCode;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
@@ -78,7 +81,7 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public List<DeviceResponse> getDevicesByRoom(UUID userId, UUID roomId) {
         Room room = roomRepository.findById(roomId)
-                .orElseThrow(() -> new RuntimeException("Room not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.ROOM_NOT_FOUND));
         checkHomeAccess(userId, room.getHome().getId());
 
         return deviceRepository.findByRoomId(roomId).stream()
@@ -90,14 +93,14 @@ public class DeviceServiceImpl implements DeviceService {
         if (device.getHome() != null) {
             return device.getHome().getId();
         }
-        throw new RuntimeException("Device is not associated with any home");
+        throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
     }
 
     @Override
     @Transactional(readOnly = true)
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new RuntimeException("Device not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
         return mapWithOverride(device);
     }
@@ -157,10 +160,13 @@ public class DeviceServiceImpl implements DeviceService {
                 }
             }
             device.setLastSeen(OffsetDateTime.now());
+            if (device.getStatus() != com.hesta.backend.enums.DeviceStatus.ONLINE) {
+                device.setStatus(com.hesta.backend.enums.DeviceStatus.ONLINE);
+            }
 
             // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau, không làm gì thêm)
             if (prevState.equals(newState)) {
-                deviceRepository.save(device); // Chỉ lưu lastSeen
+                deviceRepository.save(device); // Lưu lastSeen và status ONLINE
                 return; // Ngắt mạch, không lưu History, không bắn Websocket
             }
 
@@ -189,7 +195,8 @@ public class DeviceServiceImpl implements DeviceService {
                     .changedAt(OffsetDateTime.now())
                     .build();
                 deviceStateHistoryRepository.save(history);
-                if (deviceHealthService != null) {
+                boolean isSensor = device.getDeviceType() != null && device.getDeviceType().endsWith("SENSOR");
+                if (deviceHealthService != null && !isSensor) {
                     try {
                         deviceHealthService.recordSwitch(device.getId());
                     } catch (Exception ignored) {}
@@ -208,7 +215,7 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional
     public DeviceResponse updateDeviceConfig(UUID userId, UUID deviceId, DeviceUpdateRequest request) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new RuntimeException("Device not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
         checkHomeOwner(userId, getHomeId(device));
 
@@ -218,9 +225,9 @@ public class DeviceServiceImpl implements DeviceService {
 
         if (request.getRoomId() != null) {
             Room room = roomRepository.findById(request.getRoomId())
-                    .orElseThrow(() -> new RuntimeException("Room not found"));
+                    .orElseThrow(() -> new AppException(ErrorCode.ROOM_NOT_FOUND));
             if (!room.getHome().getId().equals(getHomeId(device))) {
-                throw new RuntimeException("Room does not belong to this home");
+                throw new AppException(ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
             }
             device.setRoom(room);
         }
@@ -238,6 +245,12 @@ public class DeviceServiceImpl implements DeviceService {
             device.setDigitalTwinZ(request.getDigitalTwinZ());
         }
 
+        if (request.getSettings() != null) {
+            Map<String, Object> currentSettings = device.getSettings() != null ? new HashMap<>(device.getSettings()) : new HashMap<>();
+            currentSettings.putAll(request.getSettings());
+            device.setSettings(currentSettings);
+        }
+
         Device saved = deviceRepository.save(device);
         return DeviceResponse.fromEntity(saved);
     }
@@ -246,7 +259,7 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional
     public void removeDevice(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new RuntimeException("Device not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
         checkHomeOwner(userId, getHomeId(device));
 
@@ -258,7 +271,7 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new RuntimeException("Device not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
 
         return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
@@ -271,7 +284,7 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public byte[] exportDeviceHistoryCsv(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new RuntimeException("Device not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
 
         List<DeviceStateHistory> histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
@@ -295,14 +308,17 @@ public class DeviceServiceImpl implements DeviceService {
         sb.append("ID,Thời Gian,Thiết Bị,Phòng,Nguồn Kích Hoạt,Trạng Thái Trước,Trạng Thái Sau,Người Thực Hiện\n");
         java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-        for (DeviceStateHistory h : histories) {
+        // Giới hạn an toàn tối đa 2000 dòng chống OOM
+        List<DeviceStateHistory> safeList = histories.size() > 2000 ? histories.subList(0, 2000) : histories;
+
+        for (DeviceStateHistory h : safeList) {
             String id = h.getId() != null ? h.getId().toString() : "";
             String time = h.getChangedAt() != null ? h.getChangedAt().format(dtf) : "";
             String devName = h.getDevice() != null ? h.getDevice().getName() : "";
             String roomName = (h.getDevice() != null && h.getDevice().getRoom() != null) ? h.getDevice().getRoom().getName() : "N/A";
             String source = h.getSource() != null ? h.getSource().name() : "MANUAL";
-            String prev = h.getPreviousState() != null ? h.getPreviousState().toString() : "{}";
-            String curr = h.getNewState() != null ? h.getNewState().toString() : "{}";
+            String prev = formatStateHumanReadable(h.getPreviousState());
+            String curr = formatStateHumanReadable(h.getNewState());
             String user = h.getChangedBy() != null ? (h.getChangedBy().getFullName() != null ? h.getChangedBy().getFullName() : h.getChangedBy().getEmail()) : "Hệ thống";
 
             sb.append(escapeCsv(id)).append(",")
@@ -319,6 +335,10 @@ public class DeviceServiceImpl implements DeviceService {
 
     private String escapeCsv(String value) {
         if (value == null) return "\"\"";
+        String trimmed = value.trim();
+        if (trimmed.startsWith("=") || trimmed.startsWith("+") || trimmed.startsWith("-") || trimmed.startsWith("@")) {
+            value = "'" + value;
+        }
         String escaped = value.replace("\"", "\"\"");
         return "\"" + escaped + "\"";
     }
@@ -327,7 +347,7 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public byte[] exportDeviceHistoryExcel(UUID userId, UUID deviceId, OffsetDateTime from, OffsetDateTime to) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new RuntimeException("Device not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
 
         List<DeviceStateHistory> histories;
@@ -336,7 +356,17 @@ public class DeviceServiceImpl implements DeviceService {
         } else if (from != null) {
             histories = deviceStateHistoryRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, OffsetDateTime.now());
         } else {
-            histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
+            // Mặc định an toàn 30 ngày gần nhất nếu không chỉ định mốc thời gian
+            OffsetDateTime defaultFrom = OffsetDateTime.now().minusDays(30);
+            histories = deviceStateHistoryRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, defaultFrom, OffsetDateTime.now());
+            if (histories.isEmpty()) {
+                histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
+            }
+        }
+
+        // Giới hạn an toàn tối đa 2000 dòng để bảo vệ JVM heap
+        if (histories.size() > 2000) {
+            histories = histories.subList(0, 2000);
         }
 
         try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
@@ -383,23 +413,23 @@ public class DeviceServiceImpl implements DeviceService {
                 org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx++);
                 row.createCell(0).setCellValue(rowIdx - 1);
                 row.createCell(1).setCellValue(h.getChangedAt() != null ? h.getChangedAt().format(dtf) : "");
-                row.createCell(2).setCellValue(h.getDevice() != null ? h.getDevice().getName() : "");
-                row.createCell(3).setCellValue((h.getDevice() != null && h.getDevice().getRoom() != null) ? h.getDevice().getRoom().getName() : "N/A");
-                row.createCell(4).setCellValue(h.getSource() != null ? h.getSource().name() : "MANUAL");
+                row.createCell(2).setCellValue(sanitizeForExcel(h.getDevice() != null ? h.getDevice().getName() : ""));
+                row.createCell(3).setCellValue(sanitizeForExcel((h.getDevice() != null && h.getDevice().getRoom() != null) ? h.getDevice().getRoom().getName() : "N/A"));
+                row.createCell(4).setCellValue(sanitizeForExcel(h.getSource() != null ? h.getSource().name() : "MANUAL"));
 
-                String prev = h.getPreviousState() != null ? h.getPreviousState().toString() : "{}";
-                String curr = h.getNewState() != null ? h.getNewState().toString() : "{}";
+                String prev = formatStateHumanReadable(h.getPreviousState());
+                String curr = formatStateHumanReadable(h.getNewState());
 
-                row.createCell(5).setCellValue(prev);
+                row.createCell(5).setCellValue(sanitizeForExcel(prev));
 
                 org.apache.poi.ss.usermodel.Cell currCell = row.createCell(6);
-                currCell.setCellValue(curr);
+                currCell.setCellValue(sanitizeForExcel(curr));
 
                 boolean isOn = isStateOn(h.getNewState());
                 currCell.setCellStyle(isOn ? onStyle : offStyle);
 
                 String user = h.getChangedBy() != null ? (h.getChangedBy().getFullName() != null ? h.getChangedBy().getFullName() : h.getChangedBy().getEmail()) : "Hệ thống";
-                row.createCell(7).setCellValue(user);
+                row.createCell(7).setCellValue(sanitizeForExcel(user));
             }
 
             for (int i = 0; i < headers.length; i++) {
@@ -412,6 +442,52 @@ public class DeviceServiceImpl implements DeviceService {
         } catch (Exception e) {
             throw new RuntimeException("Lỗi khi tạo file Excel lịch sử thiết bị: " + e.getMessage(), e);
         }
+    }
+
+    private String formatStateHumanReadable(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) return "Không xác định";
+
+        if (state.containsKey("state") && state.get("state") != null) {
+            String s = state.get("state").toString().toUpperCase();
+            if ("OPEN".equals(s)) return "MỞ";
+            if ("CLOSED".equals(s)) return "ĐÓNG";
+            if ("OPENING".equals(s)) return "ĐANG MỞ";
+            if ("CLOSING".equals(s)) return "ĐANG ĐÓNG";
+            if ("STOPPED".equals(s)) return "DỪNG LẠI";
+        }
+
+        boolean isOn = isStateOn(state);
+        if (!isOn) return "TẮT";
+
+        List<String> details = new ArrayList<>();
+        if (state.get("brightness") != null) {
+            details.add("Sáng: " + state.get("brightness") + "%");
+        }
+        if (state.get("temperature") != null) {
+            details.add("Nhiệt độ: " + state.get("temperature") + "°C");
+        }
+        if (state.get("mode") != null) {
+            details.add("Chế độ: " + state.get("mode"));
+        }
+        if (state.get("fan") != null) {
+            details.add("Gió: " + state.get("fan"));
+        }
+        if (state.get("speed") != null) {
+            details.add("Tốc độ: " + state.get("speed"));
+        }
+        if (state.get("color") instanceof Map<?, ?> colorMap) {
+            Object r = colorMap.get("r");
+            Object g = colorMap.get("g");
+            Object b = colorMap.get("b");
+            if (r != null && g != null && b != null) {
+                details.add(String.format("RGB(%s, %s, %s)", r, g, b));
+            }
+        }
+
+        if (details.isEmpty()) {
+            return "BẬT";
+        }
+        return "BẬT (" + String.join(", ", details) + ")";
     }
 
     private boolean isStateOn(Map<String, Object> state) {
@@ -434,6 +510,15 @@ public class DeviceServiceImpl implements DeviceService {
             if ("ON".equals(sStr) || "TRUE".equals(sStr) || "OPEN".equals(sStr)) return true;
         }
         return false;
+    }
+
+    private String sanitizeForExcel(String value) {
+        if (value == null) return "";
+        String trimmed = value.trim();
+        if (trimmed.startsWith("=") || trimmed.startsWith("+") || trimmed.startsWith("-") || trimmed.startsWith("@")) {
+            return "'" + value;
+        }
+        return value;
     }
 
     public static Map<String, List<String>> resolveDeviceCapabilities(Device device) {

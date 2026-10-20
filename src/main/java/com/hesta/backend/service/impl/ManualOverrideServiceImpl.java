@@ -31,7 +31,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
     public OffsetDateTime activate(Device device, UUID userId, String reason) {
         OffsetDateTime now = OffsetDateTime.now();
         var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
-        events.save(BehaviorEvent.builder().home(device.getRoom() != null ? device.getRoom().getHome() : null).device(device).room(device.getRoom())
+        events.save(BehaviorEvent.builder().home(device.getHome()).device(device).room(device.getRoom())
                 .user(user).eventType("MANUAL_OVERRIDE").action(reason).eventSource("MANUAL")
                 .currentState(Map.of("expiresAt", now.plus(OVERRIDE_DURATION).toString()))
                 .occurredAt(now).build());
@@ -46,7 +46,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
         OffsetDateTime expiresAt = now.plusMinutes(minutes);
         var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
         events.save(BehaviorEvent.builder()
-                .home(device.getRoom() != null ? device.getRoom().getHome() : null)
+                .home(device.getHome())
                 .device(device)
                 .room(device.getRoom())
                 .user(user)
@@ -69,7 +69,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
         OffsetDateTime newExpiresAt = baseTime.plusMinutes(minutes);
         var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
         events.save(BehaviorEvent.builder()
-                .home(device.getRoom() != null ? device.getRoom().getHome() : null)
+                .home(device.getHome())
                 .device(device)
                 .room(device.getRoom())
                 .user(user)
@@ -117,7 +117,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
     public void resumeAutomation(Device device, UUID userId) {
         OffsetDateTime now = OffsetDateTime.now();
         var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
-        events.save(BehaviorEvent.builder().home(device.getRoom() != null ? device.getRoom().getHome() : null).device(device).room(device.getRoom())
+        events.save(BehaviorEvent.builder().home(device.getHome()).device(device).room(device.getRoom())
                 .user(user).eventType("MANUAL_OVERRIDE").action("RESUME").eventSource("MANUAL")
                 .currentState(Map.of("resumedAt", now.toString()))
                 .occurredAt(now).build());
