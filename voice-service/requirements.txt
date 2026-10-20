@@ -8,3 +8,5 @@ httpx                # gọi REST nội bộ tới Spring Boot
 sounddevice          # capture audio từ micro
 numpy                # audio gate (RMS) + xử lý mảng audio
 python-dotenv        # load INTERNAL_API_KEY từ file .env
+fastapi>=0.104.0     # HTTP server cho voice pipeline
+uvicorn[standard]    # ASGI server chạy FastAPI

@@ -24,4 +24,7 @@ public interface DeviceService {
     byte[] exportDeviceHistoryCsv(UUID userId, UUID deviceId);
     byte[] exportHomeHistoryCsv(UUID userId, UUID homeId);
     byte[] exportDeviceHistoryExcel(UUID userId, UUID deviceId, java.time.OffsetDateTime from, java.time.OffsetDateTime to);
+
+    com.hesta.backend.dto.response.HomeCapabilitiesResponse getHomeCapabilities(UUID userId, UUID homeId);
+    com.hesta.backend.dto.response.DeviceCapabilityInfoResponse getDeviceCapabilities(UUID userId, UUID deviceId);
 }

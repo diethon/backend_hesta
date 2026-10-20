@@ -112,7 +112,37 @@ public class Device {
 
     public boolean supportsAction(String action) {
         if (this.capabilities == null || this.capabilities.isEmpty()) return true;
-        return this.capabilities.values().stream().flatMap(java.util.List::stream).anyMatch(act -> act.equalsIgnoreCase(action));
+        if ("SET_STATE".equalsIgnoreCase(action)) return true;
+        boolean directMatch = this.capabilities.values().stream()
+                .flatMap(java.util.List::stream)
+                .anyMatch(act -> act.equalsIgnoreCase(action));
+        if (directMatch) return true;
+        if ("TOGGLE".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+        }
+        if ("SET_COLOR".equalsIgnoreCase(action) || "SET_RGB".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_COLOR") || act.equalsIgnoreCase("SET_RGB"));
+        }
+        if ("SET_SPEED".equalsIgnoreCase(action) || "SET_FAN".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_SPEED") || act.equalsIgnoreCase("SET_FAN"));
+        }
+        if ("TURN_ON".equalsIgnoreCase(action) || "POWER_ON".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+        }
+        if ("TURN_OFF".equalsIgnoreCase(action) || "POWER_OFF".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_OFF") || act.equalsIgnoreCase("POWER_OFF") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+        }
+        return false;
     }
 
     @JsonProperty("capabilities")

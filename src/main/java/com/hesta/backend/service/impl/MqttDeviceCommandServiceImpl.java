@@ -71,7 +71,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         Long lastStartTime = commandStartTimes.get(deviceId);
         long now = System.currentTimeMillis();
 
-        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming giảm còn 60ms để kéo mượt, Relay nguồn 400ms để không bị khựng)
+        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming 60ms để kéo mượt, Relay nguồn 400ms)
         boolean isColorOrDimmer = "SET_RGB".equalsIgnoreCase(action)
                 || "SET_BRIGHTNESS".equalsIgnoreCase(action)
                 || "SET_COLOR".equalsIgnoreCase(action);
@@ -93,7 +93,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         if (existing != null && !existing.isDone()) {
             if (isColorOrDimmer) {
-                // Continuous adjustment: Lệnh mới nhất sẽ ghi đè (supersede) lệnh trước để người dùng kéo mượt, không bị drop hay reject
+                // Continuous adjustment: Lệnh mới nhất sẽ ghi đè (supersede) lệnh trước để người dùng kéo mượt
                 log.info("Idempotency: Superseding previous in-flight command for device {} with new {} command", deviceId, action);
                 existing.complete(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
@@ -101,6 +101,11 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                         .status("SUPERSEDED")
                         .message("Superseded by newer stream command")
                         .build());
+            } else if (source != StateChangeSource.MANUAL) {
+                // Khi chạy kịch bản Automation / Scene: nối chuỗi thực thi sau khi lệnh trước xong
+                log.info("Automation / Scene chaining command for device {}", deviceId);
+                return existing.handle((res, ex) -> null)
+                        .thenCompose(ignored -> sendCommand(deviceId, action, parameters, source));
             } else {
                 log.warn("Idempotency / Anti-spam: Device {} already has a pending command in flight. Rejecting duplicate.", deviceId);
                 return CompletableFuture.completedFuture(CommandResult.builder()
@@ -246,8 +251,26 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     } catch (Exception ignored) {}
                 }
             }
-
             if ("SET_RGB".equalsIgnoreCase(normalizedAction) || "SET_COLOR".equalsIgnoreCase(normalizedAction)) {
+                effectiveParams.put("power", "ON");
+                if (!effectiveParams.containsKey("brightness")) {
+                    effectiveParams.put("brightness", 100);
+                }
+
+                // 1. Phân tích chuỗi Hex nếu truyền dạng #RRGGBB
+                if (!effectiveParams.containsKey("r") || !effectiveParams.containsKey("g") || !effectiveParams.containsKey("b")) {
+                    Object hexVal = effectiveParams.get("hex");
+                    if (hexVal == null) hexVal = effectiveParams.get("color");
+                    if (hexVal instanceof String hexStr && hexStr.startsWith("#") && hexStr.length() == 7) {
+                        try {
+                            effectiveParams.put("r", Integer.parseInt(hexStr.substring(1, 3), 16));
+                            effectiveParams.put("g", Integer.parseInt(hexStr.substring(3, 5), 16));
+                            effectiveParams.put("b", Integer.parseInt(hexStr.substring(5, 7), 16));
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                // 2. Trích xuất từ color map object
                 if (effectiveParams.get("color") instanceof Map<?, ?> colorMapParam) {
                     if (!effectiveParams.containsKey("r") && colorMapParam.containsKey("r")) {
                         effectiveParams.put("r", colorMapParam.get("r"));
@@ -288,8 +311,6 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 colorMap.put("g", g);
                 colorMap.put("b", b);
                 effectiveParams.put("color", colorMap);
-
-                effectiveParams.put("power", "ON");
             }
             Map<String, Object> payload = new HashMap<>();
             if (isGateOrDoor) {
@@ -485,9 +506,11 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             switch (act) {
                 case "GATE_OPEN":
                 case "OPEN":
+                case "TURN_ON":
                     return "OPEN";
                 case "GATE_CLOSE":
                 case "CLOSE":
+                case "TURN_OFF":
                     return "CLOSE";
                 case "GATE_STOP":
                 case "STOP":
@@ -537,9 +560,6 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     return boolVal ? "POWER_ON" : "POWER_OFF";
                 }
                 return "POWER_ON";
-            case "SET_COLOR":
-            case "SET_RGB":
-                return "SET_RGB";
             case "TEMP_UP":
             case "INCREASE_TEMPERATURE":
                 return "TEMPERATURE_PLUS";
@@ -555,6 +575,17 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             case "GATE_STOP":
             case "STOP":
                 return "STOP";
+            case "SET_COLOR":
+            case "SET_RGB":
+                if (device != null && device.getCapabilities() != null) {
+                    boolean hasRgb = device.getCapabilities().values().stream()
+                            .flatMap(List::stream).anyMatch("SET_RGB"::equalsIgnoreCase);
+                    boolean hasColor = device.getCapabilities().values().stream()
+                            .flatMap(List::stream).anyMatch("SET_COLOR"::equalsIgnoreCase);
+                    if (hasRgb && !hasColor) return "SET_RGB";
+                    if (hasColor && !hasRgb) return "SET_COLOR";
+                }
+                return act;
             default:
                 return act;
         }
@@ -734,6 +765,14 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     int bVal = defaultBState;
 
                     if (parameters != null) {
+                        if (parameters.containsKey("hex") && parameters.get("hex") instanceof String hexStr && hexStr.startsWith("#") && hexStr.length() == 7) {
+                            try {
+                                rVal = clampRgb(Integer.parseInt(hexStr.substring(1, 3), 16), defaultRState);
+                                gVal = clampRgb(Integer.parseInt(hexStr.substring(3, 5), 16), defaultGState);
+                                bVal = clampRgb(Integer.parseInt(hexStr.substring(5, 7), 16), defaultBState);
+                            } catch (Exception ignored) {}
+                        }
+
                         Object rObj = parameters.get("r");
                         Object gObj = parameters.get("g");
                         Object bObj = parameters.get("b");
@@ -742,6 +781,12 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             if (rObj == null) rObj = colorMapParam.get("r");
                             if (gObj == null) gObj = colorMapParam.get("g");
                             if (bObj == null) bObj = colorMapParam.get("b");
+                        } else if (parameters.get("color") instanceof String cHex && cHex.startsWith("#") && cHex.length() == 7) {
+                            try {
+                                rVal = clampRgb(Integer.parseInt(cHex.substring(1, 3), 16), defaultRState);
+                                gVal = clampRgb(Integer.parseInt(cHex.substring(3, 5), 16), defaultGState);
+                                bVal = clampRgb(Integer.parseInt(cHex.substring(5, 7), 16), defaultBState);
+                            } catch (Exception ignored) {}
                         }
 
                         if (rObj != null) rVal = clampRgb(rObj, defaultRState);
