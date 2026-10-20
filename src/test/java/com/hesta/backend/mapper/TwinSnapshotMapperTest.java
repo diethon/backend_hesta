@@ -13,6 +13,26 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TwinSnapshotMapperTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "LIGHT", "LED_RGB", "SMART_PLUG", "IR_REMOTE", "TEMP_HUMID_SENSOR",
+            "MOTION_SENSOR", "SMOKE_SENSOR", "CAMERA_AI"
+    })
+    void home_preservesCurrentDeviceTypeForAssignedAndUnassignedDevices(String type) {
+        var assigned = fixture.device(98, fixture.living, "Assigned", type, Map.of("value", 0));
+        var unassigned = fixture.device(99, null, "Unassigned", type, Map.of("value", false));
+        var result = mapper.home(fixture.home, fixture.rooms, List.of(assigned, unassigned), List.of());
+        assertThat(result.rooms().getFirst().devices()).singleElement().satisfies(node -> {
+            assertThat(node.deviceType()).isEqualTo(type);
+            assertThat(node.currentState().path("value").asInt()).isZero();
+        });
+        assertThat(result.unassignedDevices()).singleElement().satisfies(node -> {
+            assertThat(node.deviceType()).isEqualTo(type);
+            assertThat(node.roomId()).isNull();
+            assertThat(node.currentState().path("value").asBoolean()).isFalse();
+        });
+    }
+
     @Test
     void health_usesIndependentAuthoritativeTimesAndPreservesDeviceStatus() {
         var clock = new com.hesta.backend.support.MutableClock(TwinFixtures.TIME.toInstant());
