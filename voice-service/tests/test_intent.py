@@ -319,6 +319,28 @@ class TestIntentMapping:
         assert result.action == "INCREASE_BRIGHTNESS"
         assert result.device_type == "led_rgb"
 
+    def test_light_modes(self, mapper):
+        """Bật đèn kèm chế độ gợi ý hoặc chế độ tùy chỉnh người dùng lưu."""
+        # Chế độ tùy chỉnh
+        r1 = mapper.map("bật đèn phòng ngủ chế độ chơi game")
+        assert r1 is not None
+        assert r1.action == "TURN_ON"
+        assert r1.room == "phòng ngủ"
+        assert r1.parameters.get("mode") == "chơi game"
+
+        # Ngữ cảnh gợi ý
+        r2 = mapper.map("bật đèn phòng ngủ chế độ thư giãn")
+        assert r2 is not None
+        assert r2.room == "phòng ngủ"
+        assert r2.parameters.get("mode") == "thư giãn"
+
+        # Chế độ cho đèn LED
+        r3 = mapper.map("bật đèn led phòng khách chế độ đọc sách")
+        assert r3 is not None
+        assert r3.device_type == "led_rgb"
+        assert r3.room == "phòng khách"
+        assert r3.parameters.get("mode") == "đọc sách"
+
 
 class TestIntentMapperNoLoad:
     def test_map_without_loading(self):

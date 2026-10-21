@@ -44,6 +44,102 @@ class DeviceInfo:
     device_type: str
     room_name: str
     home_id: str
+    settings: dict[str, Any] = field(default_factory=dict)
+
+
+# Ngữ cảnh ánh sáng gợi ý mặc định (Built-in Mood Presets) đồng bộ với Frontend
+BUILTIN_MOOD_PRESETS: list[dict[str, Any]] = [
+    {
+        "name": "Thư giãn",
+        "aliases": ["thư giãn", "thu gian", "thư giản", "thu gian", "relax", "hoàng hôn", "hoang hon", "ấm áp", "am ap"],
+        "hex": "#ff9d5c",
+        "rgb": [255, 157, 92],
+        "brightness": 40,
+    },
+    {
+        "name": "Đọc sách",
+        "aliases": ["đọc sách", "doc sach", "reading", "học bài", "hoc bai", "nghiên cứu"],
+        "hex": "#fff1d6",
+        "rgb": [255, 241, 214],
+        "brightness": 80,
+    },
+    {
+        "name": "Tập trung",
+        "aliases": ["tập trung", "tap trung", "focus", "làm việc", "lam viec", "work"],
+        "hex": "#48cae4",
+        "rgb": [72, 202, 228],
+        "brightness": 100,
+    },
+    {
+        "name": "Điện ảnh",
+        "aliases": ["điện ảnh", "dien anh", "xem phim", "xem tivi", "cinema", "movie"],
+        "hex": "#7209b7",
+        "rgb": [114, 9, 183],
+        "brightness": 30,
+    },
+    {
+        "name": "Cyberpunk",
+        "aliases": ["cyberpunk", "cyber", "neon", "hồng neon", "hong neon", "hồng tím"],
+        "hex": "#f72585",
+        "rgb": [247, 37, 133],
+        "brightness": 70,
+    },
+    {
+        "name": "Dịu êm",
+        "aliases": ["dịu êm", "diu em", "dịu dàng", "êm dịu", "pastel", "nhẹ nhàng"],
+        "hex": "#a7c957",
+        "rgb": [167, 201, 87],
+        "brightness": 35,
+    },
+    {
+        "name": "Trắng ấm",
+        "aliases": ["trắng ấm", "trang am", "warm white"],
+        "hex": "#fff4e5",
+        "rgb": [255, 244, 229],
+        "brightness": 80,
+    },
+    {
+        "name": "Vàng nắng",
+        "aliases": ["vàng nắng", "vang nang", "nắng ấm"],
+        "hex": "#ffc107",
+        "rgb": [255, 193, 7],
+        "brightness": 85,
+    },
+    {
+        "name": "Xanh băng",
+        "aliases": ["xanh băng", "xanh bang", "ice blue"],
+        "hex": "#00bcd4",
+        "rgb": [0, 188, 212],
+        "brightness": 75,
+    },
+    {
+        "name": "Ngủ ngon",
+        "aliases": ["ngủ ngon", "ngu ngon", "đi ngủ", "di ngu", "đêm muộn", "dem muon", "ngủ"],
+        "hex": "#ff6b35",
+        "rgb": [255, 107, 53],
+        "brightness": 10,
+    },
+]
+
+BUILTIN_COLOR_NAMES: dict[str, list[int]] = {
+    "đỏ": [255, 0, 0],
+    "do": [255, 0, 0],
+    "xanh lá": [0, 255, 0],
+    "xanh la": [0, 255, 0],
+    "xanh lục": [0, 255, 0],
+    "xanh dương": [0, 100, 255],
+    "xanh duong": [0, 100, 255],
+    "xanh lam": [0, 100, 255],
+    "vàng": [255, 255, 0],
+    "vang": [255, 255, 0],
+    "cam": [255, 128, 0],
+    "tím": [128, 0, 128],
+    "tim": [128, 0, 128],
+    "hồng": [255, 105, 180],
+    "hong": [255, 105, 180],
+    "trắng": [255, 255, 255],
+    "trang": [255, 255, 255],
+}
 
 
 class DeviceDirectory:
@@ -157,6 +253,7 @@ class DeviceDirectory:
                     if "quạt" in db_name or "fan" in db_name:
                         types_to_register.add("fan")
 
+                dev_settings = dev.get("settings") if isinstance(dev.get("settings"), dict) else {}
                 for t in types_to_register:
                     info = DeviceInfo(
                         device_id=str(dev["id"]),
@@ -164,6 +261,7 @@ class DeviceDirectory:
                         device_type=t,
                         room_name=str(dev.get("roomName", dev.get("room", ""))).strip().lower(),
                         home_id=str(dev.get("homeId", dev.get("home_id", ""))),
+                        settings=dev_settings,
                     )
                     key = (info.home_id, info.room_name, t)
                     if key not in cache:
@@ -375,3 +473,135 @@ class DeviceDirectory:
     def last_refresh_time(self) -> float:
         """Timestamp lần refresh cuối cùng."""
         return self._last_refresh_time
+
+    def find_light_mode(
+        self,
+        mode_query: str,
+        devices: list[DeviceInfo] | None = None,
+        home_id: str = "",
+    ) -> dict[str, Any] | None:
+        """Tìm cấu hình màu/ánh sáng cho một chế độ hoặc màu sắc.
+        
+        Ưu tiên tra cứu:
+        1. Màu tùy chỉnh do người dùng tạo (customColors trong settings của thiết bị)
+        2. Ngữ cảnh ánh sáng gợi ý có sẵn (BUILTIN_MOOD_PRESETS)
+        3. Tên màu sắc cơ bản tiếng Việt (BUILTIN_COLOR_NAMES)
+        
+        Returns:
+            Dict chứa: name, hex, rgb, r, g, b, brightness, is_custom hoặc None
+        """
+        import re
+        from app.text_normalize import strip_vietnamese_tones
+
+        if not mode_query:
+            return None
+
+        q_clean = mode_query.strip().lower()
+        # Loại bỏ các tiền tố như "màu", "chế độ" nếu người dùng nói lặp lại
+        q_clean = re.sub(r"^(chế độ|che do|màu|mau)\s+", "", q_clean).strip()
+        q_norm = strip_vietnamese_tones(q_clean)
+
+        # 1. Tìm trong customColors của các thiết bị được chỉ định
+        target_devices: list[DeviceInfo] = list(devices) if devices else []
+        with self._lock:
+            if not target_devices and home_id:
+                for (h_id, _, _), d_list in self._cache.items():
+                    if h_id == home_id:
+                        target_devices.extend(d_list)
+            elif not target_devices:
+                for d_list in self._cache.values():
+                    target_devices.extend(d_list)
+
+        for dev in target_devices:
+            custom_colors = dev.settings.get("customColors", [])
+            if isinstance(custom_colors, list):
+                for opt in custom_colors:
+                    if not isinstance(opt, dict):
+                        continue
+                    opt_name = str(opt.get("name", "")).strip()
+                    opt_norm = strip_vietnamese_tones(opt_name.lower())
+                    if not opt_norm:
+                        continue
+
+                    # So khớp chính xác hoặc chứa nhau
+                    if opt_norm == q_norm or opt_norm in q_norm or q_norm in opt_norm:
+                        rgb = opt.get("rgb")
+                        if not rgb and opt.get("hex"):
+                            hex_clean = opt["hex"].lstrip("#")
+                            if len(hex_clean) == 6:
+                                rgb = [int(hex_clean[i:i+2], 16) for i in (0, 2, 4)]
+                        if not rgb or len(rgb) < 3:
+                            rgb = [255, 255, 255]
+                        return {
+                            "name": opt_name,
+                            "hex": opt.get("hex", ""),
+                            "rgb": rgb,
+                            "r": int(rgb[0]),
+                            "g": int(rgb[1]),
+                            "b": int(rgb[2]),
+                            "brightness": int(opt.get("brightness", 100)),
+                            "is_custom": True,
+                        }
+
+        # 2. Tìm trong BUILTIN_MOOD_PRESETS
+        for preset in BUILTIN_MOOD_PRESETS:
+            preset_name_norm = strip_vietnamese_tones(preset["name"].lower())
+            if q_norm == preset_name_norm:
+                return {
+                    "name": preset["name"],
+                    "hex": preset["hex"],
+                    "rgb": preset["rgb"],
+                    "r": preset["rgb"][0],
+                    "g": preset["rgb"][1],
+                    "b": preset["rgb"][2],
+                    "brightness": preset["brightness"],
+                    "is_custom": False,
+                }
+            for alias in preset.get("aliases", []):
+                alias_norm = strip_vietnamese_tones(alias.lower())
+                if q_norm == alias_norm or alias_norm in q_norm or q_norm in alias_norm:
+                    return {
+                        "name": preset["name"],
+                        "hex": preset["hex"],
+                        "rgb": preset["rgb"],
+                        "r": preset["rgb"][0],
+                        "g": preset["rgb"][1],
+                        "b": preset["rgb"][2],
+                        "brightness": preset["brightness"],
+                        "is_custom": False,
+                    }
+
+        # 3. Tìm trong BUILTIN_COLOR_NAMES
+        for c_name, rgb in BUILTIN_COLOR_NAMES.items():
+            c_norm = strip_vietnamese_tones(c_name.lower())
+            if q_norm == c_norm:
+                return {
+                    "name": c_name,
+                    "hex": "",
+                    "rgb": rgb,
+                    "r": rgb[0],
+                    "g": rgb[1],
+                    "b": rgb[2],
+                    "brightness": 100,
+                    "is_custom": False,
+                }
+
+        return None
+
+    def get_all_custom_mode_names(self, home_id: str = "") -> list[str]:
+        """Lấy danh sách tất cả các tên chế độ gợi ý và tùy chỉnh đã lưu."""
+        names = set()
+        for preset in BUILTIN_MOOD_PRESETS:
+            names.add(preset["name"])
+
+        with self._lock:
+            for (h_id, _, _), d_list in self._cache.items():
+                if not home_id or h_id == home_id:
+                    for dev in d_list:
+                        custom_colors = dev.settings.get("customColors", [])
+                        if isinstance(custom_colors, list):
+                            for opt in custom_colors:
+                                if isinstance(opt, dict) and opt.get("name"):
+                                    names.add(opt["name"].strip())
+
+        return sorted(list(names))

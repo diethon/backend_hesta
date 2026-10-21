@@ -28,7 +28,7 @@ SAMPLE_DEVICES = [
     {"id": "dev-003", "name": "Đèn ngủ", "type": "light", "room": "Phòng ngủ", "homeId": "home-1"},
     {"id": "dev-004", "name": "Quạt trần", "type": "fan", "room": "Phòng khách", "homeId": "home-1"},
     {"id": "dev-005", "name": "Điều hòa", "type": "air_conditioner", "room": "Phòng ngủ", "homeId": "home-1"},
-    {"id": "dev-006", "name": "Đèn LED RGB", "type": "led_rgb", "room": "Phòng ngủ", "homeId": "home-1"},
+    {"id": "dev-006", "name": "Đèn LED RGB", "type": "led_rgb", "room": "Phòng ngủ", "homeId": "home-1", "settings": {"customColors": [{"id": "c1", "name": "Chơi game", "hex": "#00ff80", "rgb": [0, 255, 128]}]}},
     {"id": "dev-007", "name": "Dây LED trang trí", "type": "light", "room": "Ban công", "homeId": "home-1"},
 ]
 
@@ -280,3 +280,47 @@ class TestAuthHeader:
         directory.refresh()
 
         assert request_headers.get("x-internal-api-key") == "secret-key-456"
+
+
+class TestFindLightMode:
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_builtin_preset(self, directory):
+        """Tìm ngữ cảnh ánh sáng gợi ý có sẵn: Thư giãn, Đọc sách, Cyberpunk."""
+        directory.refresh()
+        mode = directory.find_light_mode("thư giãn")
+        assert mode is not None
+        assert mode["name"] == "Thư giãn"
+        assert mode["rgb"] == [255, 157, 92]
+        assert mode["is_custom"] is False
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_builtin_preset_accent_tolerance(self, directory):
+        """Khớp không dấu hoặc sai dấu: 'thu gian', 'thư giản' -> 'Thư giãn'."""
+        directory.refresh()
+        m1 = directory.find_light_mode("thu gian")
+        assert m1 is not None
+        assert m1["name"] == "Thư giãn"
+
+        m2 = directory.find_light_mode("thư giản")
+        assert m2 is not None
+        assert m2["name"] == "Thư giãn"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_custom_color_saved_by_user(self, directory):
+        """Tìm màu tùy chỉnh 'Chơi game' do người dùng tự tạo trên web."""
+        directory.refresh()
+        # Tìm với device dev-006 hoặc home-1
+        devs = directory.resolve("phòng ngủ", "led_rgb", home_id="home-1")
+        assert len(devs) == 1
+        mode = directory.find_light_mode("chơi game", devices=devs, home_id="home-1")
+        assert mode is not None
+        assert mode["name"] == "Chơi game"
+        assert mode["rgb"] == [0, 255, 128]
+        assert mode["is_custom"] is True
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_light_mode_not_found(self, directory):
+        """Chế độ không tồn tại -> None."""
+        directory.refresh()
+        mode = directory.find_light_mode("chế độ siêu nhân", home_id="home-1")
+        assert mode is None

@@ -101,7 +101,14 @@ class DispatchBatchResult:
         
         param_str = ""
         if parameters:
-            if "temperature" in parameters:
+            if "mode" in parameters:
+                param_str = f" chế độ {parameters['mode']}"
+                if action in ("SET_COLOR", "SET_RGB", "SET_BRIGHTNESS"):
+                    if "đổi" in pattern_lower or "chuyển" in pattern_lower:
+                        action_vi = "chuyển"
+                    else:
+                        action_vi = "bật"
+            elif "temperature" in parameters:
                 param_str = f" về {parameters['temperature']} độ"
             elif "color" in parameters:
                 param_str = f" sang màu {parameters['color']}"

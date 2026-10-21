@@ -17,7 +17,15 @@
         "mở đèn phòng ngủ",
         "bật đèn phòng khách",
         "bật đèn trần",
-        "bật đèn bàn"
+        "bật đèn bàn",
+        "bật đèn chế độ",
+        "mở đèn chế độ",
+        "đổi đèn sang chế độ",
+        "chuyển đèn sang chế độ",
+        "đèn chế độ",
+        "đổi màu đèn",
+        "chuyển màu đèn",
+        "chỉnh màu đèn"
       ]
     },
     {
@@ -118,7 +126,19 @@
         "đèn led màu",
         "đèn rgb màu",
         "led màu",
-        "rgb màu"
+        "rgb màu",
+        "bật đèn led chế độ",
+        "bật led chế độ",
+        "bật đèn rgb chế độ",
+        "bật rgb chế độ",
+        "đổi đèn led sang chế độ",
+        "chuyển đèn led sang chế độ",
+        "đổi đèn rgb sang chế độ",
+        "chuyển đèn rgb sang chế độ",
+        "đèn led chế độ",
+        "đèn rgb chế độ",
+        "led chế độ",
+        "rgb chế độ"
       ]
     },
     {

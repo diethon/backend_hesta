@@ -271,3 +271,16 @@ class TestDispatchBatchResultMessages:
         msg = batch.summary_message("TURN_ON", "light", "phòng ngủ", pattern="bật đèn ngủ")
         assert "bật" in msg
         assert "đèn ngủ" in msg
+
+    def test_summary_mode(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg = batch.summary_message(
+            "SET_COLOR", "led_rgb", "phòng ngủ",
+            parameters={"mode": "Chơi game", "r": 0, "g": 255, "b": 128},
+            pattern="bật đèn led phòng ngủ chế độ chơi game"
+        )
+        assert "bật" in msg
+        assert "chế độ Chơi game" in msg
+        assert "phòng ngủ" in msg

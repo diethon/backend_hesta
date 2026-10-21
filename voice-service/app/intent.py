@@ -268,8 +268,8 @@ class IntentMapper:
 
         return None, text_lower
 
-    def extract_parameters(self, text: str, intent_def: dict) -> tuple[str, dict[str, Any]]:
-        """Trích xuất tham số từ câu nói (VD: nhiệt độ, độ sáng, màu sắc).
+    def extract_parameters(self, text: str, intent_def: dict, mode_extracted: str | None = None) -> tuple[str, dict[str, Any]]:
+        """Trích xuất tham số từ câu nói (VD: nhiệt độ, độ sáng, màu sắc, chế độ).
 
         Logic phân biệt tuyệt đối vs tương đối:
         - Nhiệt độ 16-30: luôn là tuyệt đối (SET_TEMPERATURE) vì không ai "tăng thêm 26 độ"
@@ -281,6 +281,7 @@ class IntentMapper:
         Args:
             text: câu nói gốc
             intent_def: definition của intent
+            mode_extracted: tên chế độ / màu đã bóc tách từ trước (nếu có)
 
         Returns:
             (action đã chốt, Dict tham số)
@@ -290,8 +291,11 @@ class IntentMapper:
         dev_type = intent_def["device_type"]
         text_num = normalize_spoken_numbers(text.lower())
 
+        if mode_extracted:
+            params["mode"] = mode_extracted.strip()
+
         # 1. Trích xuất màu sắc cho led_rgb hoặc SET_COLOR
-        if dev_type == "led_rgb" or action == "SET_COLOR":
+        if dev_type == "led_rgb" or action == "SET_COLOR" or (dev_type == "light" and mode_extracted):
             color_map = {
                 "đỏ": (255, 0, 0),
                 "do": (255, 0, 0),
@@ -389,11 +393,50 @@ class IntentMapper:
         # Bước 1: Tách room
         room, remaining = self.extract_room(text_norm_nums)
 
-        # Bước 2: Fuzzy match phần còn lại với tất cả patterns
         if not remaining:
             return None
-            
-        remaining_norm = strip_vietnamese_tones(remaining)
+
+        # Bước 1.5: Trích xuất chế độ ánh sáng / màu tùy chỉnh (nếu có)
+        mode_extracted = None
+        # 1. Tìm cụm từ "chế độ <tên>" hoặc "(sang/thành/về) chế độ <tên>"
+        mode_match = re.search(
+            r"(?:(?:sang|thành|về)\s+)?chế\s+độ\s+([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+            remaining,
+            re.IGNORECASE,
+        )
+        if not mode_match:
+            # 2. Tìm cụm từ chuyển đích: "(sang|thành|về) [màu] <tên>"
+            mode_match = re.search(
+                r"(?:sang|thành|về)\s+(?:màu\s+)?([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+                remaining,
+                re.IGNORECASE,
+            )
+        if not mode_match:
+            # 3. Tìm cụm "màu <tên>" không đứng ngay sau động từ đổi/chuyển/chỉnh/đặt
+            m_color = re.search(
+                r"\bmàu\s+([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+                remaining,
+                re.IGNORECASE,
+            )
+            if m_color:
+                pre = remaining[:m_color.start()].rstrip().split()
+                last_word = pre[-1].lower() if pre else ""
+                if last_word not in {"đổi", "doi", "chuyển", "chuyen", "chỉnh", "chinh", "đặt", "dat"}:
+                    mode_match = m_color
+
+        remaining_for_match = remaining
+        if mode_match:
+            candidate_mode = mode_match.group(1).strip()
+            if candidate_mode:
+                mode_extracted = candidate_mode
+                start, end = mode_match.span()
+                remaining_for_match = (remaining[:start] + " " + remaining[end:]).strip()
+                remaining_for_match = re.sub(r"\s+", " ", remaining_for_match).strip()
+                if not remaining_for_match:
+                    remaining_for_match = "bật đèn"
+
+        # Bước 2: Fuzzy match phần còn lại với tất cả patterns
+        remaining_norm = strip_vietnamese_tones(remaining_for_match)
         
         # Tạo danh sách các pattern đã được chuẩn hóa
         all_norm_patterns = [p_norm for _, p_norm, _ in self._pattern_index]
@@ -421,7 +464,7 @@ class IntentMapper:
             return None
 
         # Bước 3: Trích xuất tham số
-        action, params = self.extract_parameters(text, intent_def)
+        action, params = self.extract_parameters(text, intent_def, mode_extracted=mode_extracted)
 
         # Bước 4: Trích xuất gợi ý tên thiết bị cụ thể (device_name_hint)
         # Giúp phân biệt chính xác giữa 'đèn ngủ' và 'đèn trần' hoặc 'đèn led'

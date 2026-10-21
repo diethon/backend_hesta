@@ -262,6 +262,14 @@ class VoicePipeline:
         t0 = time.perf_counter()
         is_all = "hết" in (intent.matched_pattern or "") or "tất cả" in transcript.lower() or "toàn bộ" in transcript.lower()
         hint = getattr(intent, "device_name_hint", "")
+        mode_query = (intent.parameters or {}).get("mode")
+
+        # Nếu có yêu cầu chế độ ánh sáng / màu sắc mà device_type đang là light, ưu tiên tìm xem phòng có đèn LED RGB không
+        if mode_query and device_type == "light":
+            rgb_test = self.device_directory.resolve(room or "", "led_rgb", home_id=home_id)
+            if rgb_test:
+                device_type = "led_rgb"
+
         devices = self.device_directory.resolve(
             room or "", device_type, home_id=home_id,
             device_name_hint=hint, is_all=is_all
@@ -298,6 +306,37 @@ class VoicePipeline:
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
+
+        # Xử lý tham số mode nếu có: tra cứu preset hoặc màu tùy chỉnh
+        if mode_query:
+            mode_info = self.device_directory.find_light_mode(mode_query, devices=devices, home_id=home_id)
+            if mode_info is None:
+                room_str = f" ở {room}" if room else ""
+                return PipelineResult(
+                    success=False,
+                    message=f"Không tìm thấy chế độ hoặc màu \"{mode_query}\"{room_str}. Bạn có thể tạo màu này trên ứng dụng trước.",
+                    transcript=transcript,
+                    intent=intent,
+                    total_duration_ms=(time.perf_counter() - t_start) * 1000,
+                    step_durations=step_durations,
+                )
+
+            if device_type == "led_rgb":
+                intent.action = "SET_COLOR"
+                intent.parameters = {
+                    "r": mode_info["r"],
+                    "g": mode_info["g"],
+                    "b": mode_info["b"],
+                    "hex": mode_info.get("hex", ""),
+                    "brightness": mode_info.get("brightness", 100),
+                    "mode": mode_info["name"],
+                }
+            elif device_type == "light":
+                intent.action = "SET_BRIGHTNESS"
+                intent.parameters = {
+                    "brightness": mode_info.get("brightness", 80),
+                    "mode": mode_info["name"],
+                }
 
         # Nếu có nhiều thiết bị thuộc loại này ở nhiều phòng khác nhau mà người dùng không chỉ rõ phòng (trừ lệnh "tắt hết/bật hết")
         if len(devices) > 1 and not room and not is_all and "hết" not in (intent.matched_pattern or ""):
@@ -404,6 +443,14 @@ class VoicePipeline:
         t0 = time.perf_counter()
         is_all = "hết" in (intent.matched_pattern or "") or "tất cả" in text.lower() or "toàn bộ" in text.lower()
         hint = getattr(intent, "device_name_hint", "")
+        mode_query = (intent.parameters or {}).get("mode")
+
+        # Nếu có yêu cầu chế độ ánh sáng / màu sắc mà device_type đang là light, ưu tiên tìm xem phòng có đèn LED RGB không
+        if mode_query and device_type == "light":
+            rgb_test = self.device_directory.resolve(room or "", "led_rgb", home_id=home_id)
+            if rgb_test:
+                device_type = "led_rgb"
+
         devices = self.device_directory.resolve(
             room or "", device_type, home_id=home_id,
             device_name_hint=hint, is_all=is_all
@@ -440,6 +487,37 @@ class VoicePipeline:
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
+
+        # Xử lý tham số mode nếu có: tra cứu preset hoặc màu tùy chỉnh
+        if mode_query:
+            mode_info = self.device_directory.find_light_mode(mode_query, devices=devices, home_id=home_id)
+            if mode_info is None:
+                room_str = f" ở {room}" if room else ""
+                return PipelineResult(
+                    success=False,
+                    message=f"Không tìm thấy chế độ hoặc màu \"{mode_query}\"{room_str}. Bạn có thể tạo màu này trên ứng dụng trước.",
+                    transcript=text,
+                    intent=intent,
+                    total_duration_ms=(time.perf_counter() - t_start) * 1000,
+                    step_durations=step_durations,
+                )
+
+            if device_type == "led_rgb":
+                intent.action = "SET_COLOR"
+                intent.parameters = {
+                    "r": mode_info["r"],
+                    "g": mode_info["g"],
+                    "b": mode_info["b"],
+                    "hex": mode_info.get("hex", ""),
+                    "brightness": mode_info.get("brightness", 100),
+                    "mode": mode_info["name"],
+                }
+            elif device_type == "light":
+                intent.action = "SET_BRIGHTNESS"
+                intent.parameters = {
+                    "brightness": mode_info.get("brightness", 80),
+                    "mode": mode_info["name"],
+                }
 
         # Nếu có nhiều thiết bị thuộc loại này ở nhiều phòng khác nhau mà người dùng không chỉ rõ phòng (trừ lệnh "tắt hết/bật hết")
         if len(devices) > 1 and not room and not is_all and "hết" not in (intent.matched_pattern or ""):
