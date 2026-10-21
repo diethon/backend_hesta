@@ -41,6 +41,9 @@ DEVICE_TYPE_VI = {
     "gate": "cổng",
     "water_pump": "máy bơm nước",
     "led_rgb": "đèn RGB",
+    "socket": "ổ cắm",
+    "tv": "tivi",
+    "all": "thiết bị",
 }
 
 
@@ -260,7 +263,14 @@ class VoicePipeline:
 
         # === BƯỚC 4: Device Resolution ===
         t0 = time.perf_counter()
-        is_all = "hết" in (intent.matched_pattern or "") or "tất cả" in transcript.lower() or "toàn bộ" in transcript.lower()
+        is_all = (
+            device_type == "all"
+            or "hết" in (intent.matched_pattern or "").lower()
+            or any(kw in transcript.lower() for kw in [
+                "tất cả", "tat ca", "toàn bộ", "toan bo", "cả nhà", "ca nha",
+                "hết", "het", "các", "cac", "mọi", "moi"
+            ])
+        )
         hint = getattr(intent, "device_name_hint", "")
         mode_query = (intent.parameters or {}).get("mode")
 
@@ -441,7 +451,14 @@ class VoicePipeline:
             )
 
         t0 = time.perf_counter()
-        is_all = "hết" in (intent.matched_pattern or "") or "tất cả" in text.lower() or "toàn bộ" in text.lower()
+        is_all = (
+            device_type == "all"
+            or "hết" in (intent.matched_pattern or "").lower()
+            or any(kw in text.lower() for kw in [
+                "tất cả", "tat ca", "toàn bộ", "toan bo", "cả nhà", "ca nha",
+                "hết", "het", "các", "cac", "mọi", "moi"
+            ])
+        )
         hint = getattr(intent, "device_name_hint", "")
         mode_query = (intent.parameters or {}).get("mode")
 

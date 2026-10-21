@@ -284,3 +284,25 @@ class TestDispatchBatchResultMessages:
         assert "bật" in msg
         assert "chế độ Chơi game" in msg
         assert "phòng ngủ" in msg
+
+    def test_summary_all_devices(self):
+        batch = DispatchBatchResult(
+            total_devices=3, successful_count=3, failed_count=0
+        )
+        msg = batch.summary_message("TURN_OFF", "all", "phòng ngủ", pattern="tắt tất cả thiết bị phòng ngủ")
+        assert "tắt" in msg
+        assert "tất cả 3 thiết bị" in msg
+        assert "phòng ngủ" in msg
+
+        batch_house = DispatchBatchResult(
+            total_devices=7, successful_count=7, failed_count=0
+        )
+        msg_house = batch_house.summary_message("TURN_OFF", "all", None, pattern="tắt cả nhà")
+        assert "tắt" in msg_house
+        assert "tất cả 7 thiết bị trong nhà" in msg_house
+
+        batch_fans = DispatchBatchResult(
+            total_devices=2, successful_count=2, failed_count=0
+        )
+        msg_fans = batch_fans.summary_message("TURN_OFF", "fan", None, pattern="tắt tất cả quạt")
+        assert "tất cả 2 quạt trong nhà" in msg_fans

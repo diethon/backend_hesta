@@ -43,15 +43,17 @@ SAMPLE_DEVICES = [
 
 SAMPLE_INTENTS = {
     "intents": [
-        {"action": "TURN_ON", "device_type": "light", "patterns": ["bật đèn", "mở đèn", "bật đèn ngủ", "bật đèn chế độ"]},
-        {"action": "TURN_OFF", "device_type": "light", "patterns": ["tắt đèn", "tắt hết đèn", "tắt đèn ngủ"]},
-        {"action": "TURN_ON", "device_type": "led_rgb", "patterns": ["bật đèn led", "bật đèn rgb", "bật led", "bật rgb", "bật đèn led chế độ"]},
-        {"action": "TURN_OFF", "device_type": "led_rgb", "patterns": ["tắt đèn led", "tắt đèn rgb", "tắt led", "tắt rgb"]},
+        {"action": "TURN_OFF", "device_type": "all", "patterns": ["tắt tất cả thiết bị", "tắt hết thiết bị", "tắt cả nhà", "tắt phòng", "tắt tất cả"]},
+        {"action": "TURN_ON", "device_type": "all", "patterns": ["bật tất cả thiết bị", "bật hết thiết bị", "bật cả nhà", "bật phòng", "bật tất cả"]},
+        {"action": "TURN_ON", "device_type": "light", "patterns": ["bật đèn", "mở đèn", "bật đèn ngủ", "bật đèn chế độ", "bật tất cả đèn"]},
+        {"action": "TURN_OFF", "device_type": "light", "patterns": ["tắt đèn", "tắt hết đèn", "tắt đèn ngủ", "tắt tất cả đèn"]},
+        {"action": "TURN_ON", "device_type": "led_rgb", "patterns": ["bật đèn led", "bật đèn rgb", "bật led", "bật rgb", "bật đèn led chế độ", "bật tất cả đèn led"]},
+        {"action": "TURN_OFF", "device_type": "led_rgb", "patterns": ["tắt đèn led", "tắt đèn rgb", "tắt led", "tắt rgb", "tắt tất cả đèn led"]},
         {"action": "SET_COLOR", "device_type": "led_rgb", "patterns": ["đổi màu đèn", "đổi màu led", "chuyển đèn sang chế độ"]},
-        {"action": "TURN_ON", "device_type": "fan", "patterns": ["bật quạt", "mở quạt"]},
-        {"action": "TURN_OFF", "device_type": "fan", "patterns": ["tắt quạt"]},
-        {"action": "TURN_ON", "device_type": "air_conditioner", "patterns": ["bật điều hòa", "mở điều hòa"]},
-        {"action": "TURN_OFF", "device_type": "air_conditioner", "patterns": ["tắt điều hòa"]},
+        {"action": "TURN_ON", "device_type": "fan", "patterns": ["bật quạt", "mở quạt", "bật tất cả quạt"]},
+        {"action": "TURN_OFF", "device_type": "fan", "patterns": ["tắt quạt", "tắt tất cả quạt"]},
+        {"action": "TURN_ON", "device_type": "air_conditioner", "patterns": ["bật điều hòa", "mở điều hòa", "bật tất cả điều hòa"]},
+        {"action": "TURN_OFF", "device_type": "air_conditioner", "patterns": ["tắt điều hòa", "tắt tất cả điều hòa"]},
         {
             "action": "SET_TEMPERATURE", "device_type": "air_conditioner",
             "patterns": ["chỉnh điều hòa", "đặt nhiệt độ"], "has_parameter": "temperature"
@@ -350,3 +352,44 @@ class TestPipelineWithAudio:
         result = pipeline.process_audio(audio)
         assert "stt_ms" in result.step_durations
         assert "intent_ms" in result.step_durations
+
+
+class TestPipelineMultiDevice:
+    """Test các lệnh nâng cao điều khiển nhiều thiết bị cùng lúc (all devices, cả nhà, toàn bộ phòng, tất cả đèn/quạt)."""
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_off_all_devices_whole_house(self, pipeline):
+        """'tắt tất cả thiết bị' -> tắt 6 thiết bị trong nhà."""
+        result = pipeline.process_text("tắt tất cả thiết bị")
+        assert result.success is True
+        assert result.dispatch_result is not None
+        assert result.dispatch_result.total_devices == 6
+        assert "tất cả 6 thiết bị trong nhà" in result.message
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_off_all_devices_room(self, pipeline):
+        """'tắt tất cả thiết bị phòng ngủ' -> tắt 3 thiết bị ở phòng ngủ."""
+        result = pipeline.process_text("tắt tất cả thiết bị phòng ngủ")
+        assert result.success is True
+        assert result.dispatch_result is not None
+        assert result.dispatch_result.total_devices == 3
+        assert "tất cả 3 thiết bị phòng ngủ" in result.message
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_off_all_fans(self, pipeline):
+        """'tắt tất cả quạt' -> tắt toàn bộ quạt trong nhà."""
+        result = pipeline.process_text("tắt tất cả quạt")
+        assert result.success is True
+        assert result.dispatch_result is not None
+        assert result.dispatch_result.total_devices == 1
+        assert "tắt quạt" in result.message
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_off_all_lights(self, pipeline):
+        """'tắt tất cả đèn' -> tắt cả đèn thường và đèn LED RGB trong nhà."""
+        result = pipeline.process_text("tắt tất cả đèn")
+        assert result.success is True
+        assert result.dispatch_result is not None
+        # 4 đèn (dev-001, dev-002, dev-003, dev-006)
+        assert result.dispatch_result.total_devices == 4
+        assert "tất cả 4 đèn trong nhà" in result.message

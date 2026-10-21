@@ -351,8 +351,18 @@ class DeviceDirectory:
             return filtered if filtered else devs
 
         def _lookup() -> list[DeviceInfo]:
-            # Trường hợp is_all cho đèn (bật/tắt hết đèn): trả về cả light và led_rgb
-            if is_all and d_type in {"light", "led_rgb"}:
+            # Trường hợp tìm kiếm all thiết bị (tắt/bật tất cả thiết bị, cả nhà, cả phòng)
+            if d_type in {"all", "all_devices", "device", "devices"}:
+                CONTROLLABLE_TYPES = {"light", "led_rgb", "fan", "air_conditioner", "water_heater", "socket", "tv"}
+                all_devs: dict[str, DeviceInfo] = {}
+                for (h, r, t), ds in self._cache.items():
+                    if (not home_id or h == home_id) and (not r_name or r == r_name) and t in CONTROLLABLE_TYPES:
+                        for d in ds:
+                            all_devs[d.device_id] = d
+                return list(all_devs.values())
+
+            # Trường hợp is_all cho đèn thông thường (bật/tắt hết đèn): trả về cả light và led_rgb
+            if is_all and d_type == "light":
                 all_devs: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
                     if (not home_id or h == home_id) and (not r_name or r == r_name) and t in {"light", "led_rgb"}:
@@ -396,20 +406,21 @@ class DeviceDirectory:
                 devs = self._cache.get(key, [])
                 if devs:
                     return _filter_hint(list(devs))
-                if not home_id:
-                    matched = []
-                    for (h, r, t), ds in self._cache.items():
-                        if r == r_name and t == d_type:
-                            matched.extend(ds)
-                    if matched:
-                        return _filter_hint(matched)
+                matched: dict[str, DeviceInfo] = {}
+                for (h, r, t), ds in self._cache.items():
+                    if (not home_id or h == home_id) and r == r_name and t == d_type:
+                        for d in ds:
+                            matched[d.device_id] = d
+                if matched:
+                    return _filter_hint(list(matched.values()))
             else:
-                matched = []
+                matched: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
                     if t == d_type and (not home_id or h == home_id):
-                        matched.extend(ds)
+                        for d in ds:
+                            matched[d.device_id] = d
                 if matched:
-                    return _filter_hint(matched)
+                    return _filter_hint(list(matched.values()))
             return []
 
         with self._lock:

@@ -95,9 +95,19 @@ class DispatchBatchResult:
                 "gate": "cổng",
                 "water_pump": "máy bơm nước",
                 "led_rgb": "đèn RGB",
+                "socket": "ổ cắm",
+                "tv": "tivi",
+                "all": "thiết bị",
             }.get(device_type, device_type)
 
+        is_all_cmd = (
+            device_type == "all"
+            or any(w in pattern_lower for w in ["tất cả", "tat ca", "toàn bộ", "toan bo", "hết", "het", "cả nhà", "ca nha"])
+        )
+
         room_str = f" {room}" if room else ""
+        if not room and (device_type == "all" or is_all_cmd) and self.total_devices > 1:
+            room_str = " trong nhà"
         
         param_str = ""
         if parameters:
@@ -124,7 +134,10 @@ class DispatchBatchResult:
             if self.total_devices == 1:
                 return f"Đã {action_vi} {type_vi}{room_str}{param_str}"
             else:
-                return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}"
+                if is_all_cmd:
+                    return f"Đã {action_vi} tất cả {self.successful_count} {type_vi}{room_str}{param_str}"
+                else:
+                    return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}"
         elif self.successful_count > 0:
             return (f"Đã {action_vi} {self.successful_count}/{self.total_devices} "
                     f"{type_vi}{room_str}, {self.failed_count} thiết bị lỗi")

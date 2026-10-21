@@ -67,10 +67,6 @@ ROOM_PHONETIC_VARIANTS = {
     "phang nhe": "phòng ngủ",
     "phong nu": "phòng ngủ",
     "phang nu": "phòng ngủ",
-    "dem phong mua": "phòng ngủ",
-    "den phang mua": "phòng ngủ",
-    "dem phong ngu": "phòng ngủ",
-    "den phong ngu": "phòng ngủ",
     # Ghép tắt đèn ngủ / đèn phòng ngủ
     "den ngu": "phòng ngủ",
     "den led ngu": "phòng ngủ",
@@ -239,7 +235,12 @@ class IntentMapper:
         if best_overall_score >= 60.0 and best_overall_room:
             # Special case: nếu match qua 'den ngu', 'den led ngu'..., giữ lại từ khóa thiết bị để intent mapper xử lý tiếp
             matched_slice = text_words_norm[best_overall_start : best_overall_start + best_overall_len]
-            if matched_slice == ["den", "ngu"]:
+            if matched_slice in [["den", "ngu"], ["dem", "ngu"]]:
+                remaining_words = (
+                    text_words_orig[:best_overall_start + 1]
+                    + text_words_orig[best_overall_start + best_overall_len:]
+                )
+            elif matched_slice in [["den", "phong", "ngu"], ["dem", "phong", "ngu"]]:
                 remaining_words = (
                     text_words_orig[:best_overall_start + 1]
                     + text_words_orig[best_overall_start + best_overall_len:]

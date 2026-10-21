@@ -207,6 +207,32 @@ class TestResolve:
         assert devs[0].device_id == "dev-007"
 
     @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_all_devices_room(self, directory):
+        """d_type='all' cho 'phòng ngủ' -> trả tất cả thiết bị trong phòng ngủ."""
+        directory.refresh()
+        devs = directory.resolve("phòng ngủ", "all", home_id="home-1")
+        assert len(devs) == 3
+        dev_ids = {d.device_id for d in devs}
+        assert dev_ids == {"dev-003", "dev-005", "dev-006"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_all_devices_whole_house(self, directory):
+        """d_type='all' không có phòng -> trả tất cả thiết bị điều khiển được trong nhà."""
+        directory.refresh()
+        devs = directory.resolve("", "all", home_id="home-1")
+        assert len(devs) == 7
+        dev_ids = {d.device_id for d in devs}
+        assert dev_ids == {"dev-001", "dev-002", "dev-003", "dev-004", "dev-005", "dev-006", "dev-007"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_all_fans_whole_house(self, directory):
+        """d_type='fan' không có phòng -> trả tất cả quạt trong nhà."""
+        directory.refresh()
+        devs = directory.resolve("", "fan", home_id="home-1", is_all=True)
+        assert len(devs) == 1
+        assert devs[0].device_id == "dev-004"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
     def test_cache_miss_triggers_refresh(self, config):
         """Cache miss → tự động refresh rồi thử lại."""
         call_count = 0

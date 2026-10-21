@@ -25,7 +25,16 @@
         "đèn chế độ",
         "đổi màu đèn",
         "chuyển màu đèn",
-        "chỉnh màu đèn"
+        "chỉnh màu đèn",
+        "bật tất cả đèn",
+        "bật hết đèn",
+        "bật toàn bộ đèn",
+        "bật tất cả các đèn",
+        "bật hết các đèn",
+        "bật toàn bộ các đèn",
+        "mở tất cả đèn",
+        "mở hết đèn",
+        "mở toàn bộ đèn"
       ]
     },
     {
@@ -34,10 +43,17 @@
       "patterns": [
         "tắt đèn",
         "tắt hết đèn",
+        "tắt tất cả đèn",
+        "tắt toàn bộ đèn",
+        "tắt tất cả các đèn",
+        "tắt hết các đèn",
+        "tắt toàn bộ các đèn",
         "tắt điện",
         "tắt sáng",
         "tắt đèn đi",
         "tắt hết điện",
+        "tắt tất cả điện",
+        "tắt toàn bộ điện",
         "tắt đèn ngủ",
         "tắt đèn ngủ đi",
         "tắt đèn phòng ngủ",
@@ -79,7 +95,24 @@
         "mở led lên",
         "mở rgb lên",
         "mở đèn led lên",
-        "mở đèn rgb lên"
+        "mở đèn rgb lên",
+        "bật tất cả đèn led",
+        "bật hết đèn led",
+        "bật toàn bộ đèn led",
+        "bật tất cả led",
+        "bật hết led",
+        "bật toàn bộ led",
+        "bật tất cả đèn rgb",
+        "bật hết đèn rgb",
+        "bật toàn bộ đèn rgb",
+        "bật tất cả rgb",
+        "bật hết rgb",
+        "bật toàn bộ rgb",
+        "mở tất cả đèn led",
+        "mở hết đèn led",
+        "mở toàn bộ đèn led",
+        "mở tất cả led",
+        "mở hết led"
       ]
     },
     {
@@ -100,7 +133,19 @@
         "tắt led đi",
         "tắt rgb đi",
         "tắt đèn led đi",
-        "tắt đèn rgb đi"
+        "tắt đèn rgb đi",
+        "tắt tất cả đèn led",
+        "tắt hết đèn led",
+        "tắt toàn bộ đèn led",
+        "tắt tất cả led",
+        "tắt hết led",
+        "tắt toàn bộ led",
+        "tắt tất cả đèn rgb",
+        "tắt hết đèn rgb",
+        "tắt toàn bộ đèn rgb",
+        "tắt tất cả rgb",
+        "tắt hết rgb",
+        "tắt toàn bộ rgb"
       ]
     },
     {
@@ -202,22 +247,79 @@
     {
       "action": "TURN_ON",
       "device_type": "fan",
-      "patterns": ["bật quạt", "mở quạt", "bật quạt lên", "mở quạt lên", "bật quạt trần", "mở quạt trần"]
+      "patterns": [
+        "bật quạt",
+        "mở quạt",
+        "bật quạt lên",
+        "mở quạt lên",
+        "bật quạt trần",
+        "mở quạt trần",
+        "bật tất cả quạt",
+        "bật hết quạt",
+        "bật toàn bộ quạt",
+        "bật tất cả các quạt",
+        "bật hết các quạt",
+        "bật toàn bộ các quạt",
+        "mở tất cả quạt",
+        "mở hết quạt",
+        "mở toàn bộ quạt"
+      ]
     },
     {
       "action": "TURN_OFF",
       "device_type": "fan",
-      "patterns": ["tắt quạt", "tắt hết quạt", "tắt quạt đi", "tắt quạt trần"]
+      "patterns": [
+        "tắt quạt",
+        "tắt hết quạt",
+        "tắt quạt đi",
+        "tắt quạt trần",
+        "tắt tất cả quạt",
+        "tắt toàn bộ quạt",
+        "tắt tất cả các quạt",
+        "tắt hết các quạt",
+        "tắt toàn bộ các quạt"
+      ]
     },
     {
       "action": "TURN_ON",
       "device_type": "air_conditioner",
-      "patterns": ["bật điều hòa", "mở điều hòa", "bật máy lạnh", "mở máy lạnh", "bật điều hoà", "mở điều hoà", "bật điều hòa lên", "mở máy lạnh lên"]
+      "patterns": [
+        "bật điều hòa",
+        "mở điều hòa",
+        "bật máy lạnh",
+        "mở máy lạnh",
+        "bật điều hoà",
+        "mở điều hoà",
+        "bật điều hòa lên",
+        "mở máy lạnh lên",
+        "bật tất cả điều hòa",
+        "bật hết điều hòa",
+        "bật toàn bộ điều hòa",
+        "bật tất cả máy lạnh",
+        "bật hết máy lạnh",
+        "bật toàn bộ máy lạnh",
+        "mở tất cả điều hòa",
+        "mở hết điều hòa",
+        "mở tất cả máy lạnh",
+        "mở hết máy lạnh"
+      ]
     },
     {
       "action": "TURN_OFF",
       "device_type": "air_conditioner",
-      "patterns": ["tắt điều hòa", "tắt máy lạnh", "tắt điều hoà", "tắt điều hòa đi", "tắt máy lạnh đi"]
+      "patterns": [
+        "tắt điều hòa",
+        "tắt máy lạnh",
+        "tắt điều hoà",
+        "tắt điều hòa đi",
+        "tắt máy lạnh đi",
+        "tắt tất cả điều hòa",
+        "tắt hết điều hòa",
+        "tắt toàn bộ điều hòa",
+        "tắt tất cả máy lạnh",
+        "tắt hết máy lạnh",
+        "tắt toàn bộ máy lạnh"
+      ]
     },
     {
       "action": "SET_TEMPERATURE",
@@ -370,6 +472,72 @@
         "giảm sáng xuống",
         "giảm xuống mức",
         "giảm đến mức"
+      ]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "all",
+      "patterns": [
+        "tắt tất cả thiết bị",
+        "tắt hết thiết bị",
+        "tắt toàn bộ thiết bị",
+        "tắt tất cả thiết bị điện",
+        "tắt hết thiết bị điện",
+        "tắt toàn bộ thiết bị điện",
+        "tắt các thiết bị",
+        "tắt các thiết bị điện",
+        "tắt hết các thiết bị",
+        "tắt tất cả các thiết bị",
+        "tắt toàn bộ các thiết bị",
+        "tắt điện cả nhà",
+        "tắt hết điện cả nhà",
+        "tắt toàn bộ điện cả nhà",
+        "tắt cả nhà",
+        "tắt hết cả nhà",
+        "tắt toàn bộ cả nhà",
+        "tắt hết nhà",
+        "tắt toàn bộ nhà",
+        "tắt hết",
+        "tắt toàn bộ",
+        "tắt hết đi",
+        "tắt đi hết",
+        "tắt phòng",
+        "tắt hết phòng",
+        "tắt toàn bộ phòng",
+        "tắt tất cả"
+      ]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "all",
+      "patterns": [
+        "bật tất cả thiết bị",
+        "bật hết thiết bị",
+        "bật toàn bộ thiết bị",
+        "bật tất cả thiết bị điện",
+        "bật hết thiết bị điện",
+        "bật toàn bộ thiết bị điện",
+        "bật các thiết bị",
+        "bật các thiết bị điện",
+        "bật hết các thiết bị",
+        "bật tất cả các thiết bị",
+        "bật toàn bộ các thiết bị",
+        "bật điện cả nhà",
+        "bật hết điện cả nhà",
+        "bật toàn bộ điện cả nhà",
+        "bật cả nhà",
+        "bật hết cả nhà",
+        "bật toàn bộ cả nhà",
+        "bật hết nhà",
+        "bật toàn bộ nhà",
+        "bật hết",
+        "bật toàn bộ",
+        "bật hết lên",
+        "bật lên hết",
+        "bật phòng",
+        "bật hết phòng",
+        "bật toàn bộ phòng",
+        "bật tất cả"
       ]
     }
   ]

@@ -21,22 +21,22 @@ SAMPLE_INTENTS = {
         {
             "action": "TURN_ON",
             "device_type": "light",
-            "patterns": ["bật đèn", "mở đèn", "bật sáng"]
+            "patterns": ["bật đèn", "mở đèn", "bật sáng", "bật tất cả đèn", "bật hết đèn"]
         },
         {
             "action": "TURN_OFF",
             "device_type": "light",
-            "patterns": ["tắt đèn", "tắt hết đèn"]
+            "patterns": ["tắt đèn", "tắt hết đèn", "tắt tất cả đèn", "tắt toàn bộ đèn"]
         },
         {
             "action": "TURN_ON",
             "device_type": "fan",
-            "patterns": ["bật quạt", "mở quạt"]
+            "patterns": ["bật quạt", "mở quạt", "bật tất cả quạt", "bật hết quạt"]
         },
         {
             "action": "TURN_OFF",
             "device_type": "fan",
-            "patterns": ["tắt quạt"]
+            "patterns": ["tắt quạt", "tắt tất cả quạt", "tắt hết quạt"]
         },
         {
             "action": "SET_TEMPERATURE",
@@ -80,6 +80,16 @@ SAMPLE_INTENTS = {
             "action": "INCREASE_BRIGHTNESS",
             "device_type": "led_rgb",
             "patterns": ["tăng độ sáng đèn rgb", "tăng độ sáng đèn led", "tăng sáng đèn led"]
+        },
+        {
+            "action": "TURN_OFF",
+            "device_type": "all",
+            "patterns": ["tắt tất cả thiết bị", "tắt hết thiết bị", "tắt toàn bộ thiết bị", "tắt cả nhà", "tắt hết cả nhà", "tắt phòng", "tắt hết phòng", "tắt tất cả"]
+        },
+        {
+            "action": "TURN_ON",
+            "device_type": "all",
+            "patterns": ["bật tất cả thiết bị", "bật hết thiết bị", "bật toàn bộ thiết bị", "bật cả nhà", "bật hết cả nhà", "bật phòng", "bật hết phòng", "bật tất cả"]
         },
     ]
 }
@@ -340,6 +350,53 @@ class TestIntentMapping:
         assert r3.device_type == "led_rgb"
         assert r3.room == "phòng khách"
         assert r3.parameters.get("mode") == "đọc sách"
+
+    def test_multi_device_intents(self, mapper):
+        """Các lệnh điều khiển nhiều thiết bị cùng lúc (all devices, cả nhà, toàn bộ phòng, tất cả đèn/quạt)."""
+        # Tắt tất cả thiết bị cả nhà
+        r1 = mapper.map("tắt tất cả thiết bị")
+        assert r1 is not None
+        assert r1.action == "TURN_OFF"
+        assert r1.device_type == "all"
+        assert r1.room is None
+
+        # Tắt tất cả thiết bị trong phòng ngủ
+        r2 = mapper.map("tắt tất cả thiết bị phòng ngủ")
+        assert r2 is not None
+        assert r2.action == "TURN_OFF"
+        assert r2.device_type == "all"
+        assert r2.room == "phòng ngủ"
+
+        # Bật tất cả thiết bị
+        r3 = mapper.map("bật tất cả thiết bị")
+        assert r3 is not None
+        assert r3.action == "TURN_ON"
+        assert r3.device_type == "all"
+
+        # Tắt cả nhà
+        r4 = mapper.map("tắt cả nhà")
+        assert r4 is not None
+        assert r4.action == "TURN_OFF"
+        assert r4.device_type == "all"
+
+        # Tắt tất cả quạt
+        r5 = mapper.map("tắt tất cả quạt")
+        assert r5 is not None
+        assert r5.action == "TURN_OFF"
+        assert r5.device_type == "fan"
+
+        # Bật tất cả quạt phòng khách
+        r6 = mapper.map("bật tất cả quạt phòng khách")
+        assert r6 is not None
+        assert r6.action == "TURN_ON"
+        assert r6.device_type == "fan"
+        assert r6.room == "phòng khách"
+
+        # Tắt tất cả đèn
+        r7 = mapper.map("tắt tất cả đèn")
+        assert r7 is not None
+        assert r7.action == "TURN_OFF"
+        assert r7.device_type == "light"
 
 
 class TestIntentMapperNoLoad:
