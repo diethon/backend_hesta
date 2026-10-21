@@ -52,7 +52,7 @@ class DispatchBatchResult:
     def all_success(self) -> bool:
         return self.failed_count == 0 and self.successful_count > 0
 
-    def summary_message(self, action: str, device_type: str, room: str | None = None, parameters: dict[str, Any] | None = None) -> str:
+    def summary_message(self, action: str, device_type: str, room: str | None = None, parameters: dict[str, Any] | None = None, pattern: str = "", hint: str = "") -> str:
         """Tạo thông báo xác nhận cho người dùng.
         VD: 'Đã bật 2 đèn phòng khách' hoặc 'Đã chỉnh nhiệt độ điều hòa phòng ngủ về 26 độ'
         """
@@ -67,19 +67,35 @@ class DispatchBatchResult:
             "SET_BRIGHTNESS": "đặt độ sáng",
             "INCREASE_BRIGHTNESS": "tăng sáng",
             "DECREASE_BRIGHTNESS": "giảm sáng",
+            "SET_COLOR": "đổi màu",
+            "SET_RGB": "đổi màu",
         }.get(action, action)
 
-        type_vi = {
-            "light": "đèn",
-            "fan": "quạt",
-            "air_conditioner": "điều hòa",
-            "door_lock": "khóa cửa",
-            "curtain": "rèm",
-            "water_heater": "bình nóng lạnh",
-            "gate": "cổng",
-            "water_pump": "máy bơm nước",
-            "led_rgb": "đèn RGB",
-        }.get(device_type, device_type)
+        pattern_lower = pattern.lower() if pattern else ""
+        hint_lower = hint.lower() if hint else ""
+        if device_type == "led_rgb":
+            if "rgb" in pattern_lower or "rgb" in hint_lower:
+                type_vi = "đèn RGB"
+            elif "led" in pattern_lower or "led" in hint_lower:
+                type_vi = "đèn LED"
+            else:
+                type_vi = "đèn LED RGB"
+        elif device_type == "light" and (hint_lower == "ngủ" or "den ngu" in pattern_lower or "đèn ngủ" in pattern_lower):
+            type_vi = "đèn ngủ"
+            if room == "phòng ngủ":
+                room = None  # tự nhiên hơn: "Đã bật đèn ngủ" thay vì "Đã bật đèn ngủ phòng ngủ"
+        else:
+            type_vi = {
+                "light": "đèn",
+                "fan": "quạt",
+                "air_conditioner": "điều hòa",
+                "door_lock": "khóa cửa",
+                "curtain": "rèm",
+                "water_heater": "bình nóng lạnh",
+                "gate": "cổng",
+                "water_pump": "máy bơm nước",
+                "led_rgb": "đèn RGB",
+            }.get(device_type, device_type)
 
         room_str = f" {room}" if room else ""
         
@@ -87,6 +103,8 @@ class DispatchBatchResult:
         if parameters:
             if "temperature" in parameters:
                 param_str = f" về {parameters['temperature']} độ"
+            elif "color" in parameters:
+                param_str = f" sang màu {parameters['color']}"
             elif "brightness" in parameters:
                 param_str = f" về mức {parameters['brightness']}"
             elif "amount" in parameters:

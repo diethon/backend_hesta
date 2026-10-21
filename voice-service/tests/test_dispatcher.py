@@ -236,3 +236,38 @@ class TestDispatchBatchResultMessages:
         msg = batch.summary_message("TURN_ON", "light")
         assert "đèn" in msg
         # Không có tên phòng
+
+    def test_summary_led_rgb(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg_led = batch.summary_message("TURN_ON", "led_rgb", "phòng khách", pattern="bật đèn led")
+        assert "bật" in msg_led
+        assert "đèn LED" in msg_led
+        assert "phòng khách" in msg_led
+
+        msg_rgb = batch.summary_message("TURN_OFF", "led_rgb", "phòng ngủ", pattern="tắt đèn rgb")
+        assert "tắt" in msg_rgb
+        assert "đèn RGB" in msg_rgb
+        assert "phòng ngủ" in msg_rgb
+
+    def test_summary_set_color(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg = batch.summary_message(
+            "SET_COLOR", "led_rgb", "phòng khách",
+            parameters={"color": "đỏ", "r": 255, "g": 0, "b": 0},
+            pattern="đổi màu đèn led sang màu đỏ"
+        )
+        assert "đổi màu" in msg
+        assert "màu đỏ" in msg
+        assert "đèn LED" in msg
+
+    def test_summary_night_light(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg = batch.summary_message("TURN_ON", "light", "phòng ngủ", pattern="bật đèn ngủ")
+        assert "bật" in msg
+        assert "đèn ngủ" in msg

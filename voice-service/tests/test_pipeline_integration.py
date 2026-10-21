@@ -38,12 +38,15 @@ SAMPLE_DEVICES = [
     {"id": "dev-003", "name": "Đèn ngủ", "type": "light", "room": "Phòng ngủ", "homeId": "home-1"},
     {"id": "dev-004", "name": "Quạt trần", "type": "fan", "room": "Phòng khách", "homeId": "home-1"},
     {"id": "dev-005", "name": "Điều hòa", "type": "air_conditioner", "room": "Phòng ngủ", "homeId": "home-1"},
+    {"id": "dev-006", "name": "Đèn LED RGB", "type": "led_rgb", "room": "Phòng ngủ", "homeId": "home-1"},
 ]
 
 SAMPLE_INTENTS = {
     "intents": [
-        {"action": "TURN_ON", "device_type": "light", "patterns": ["bật đèn", "mở đèn"]},
-        {"action": "TURN_OFF", "device_type": "light", "patterns": ["tắt đèn", "tắt hết đèn"]},
+        {"action": "TURN_ON", "device_type": "light", "patterns": ["bật đèn", "mở đèn", "bật đèn ngủ"]},
+        {"action": "TURN_OFF", "device_type": "light", "patterns": ["tắt đèn", "tắt hết đèn", "tắt đèn ngủ"]},
+        {"action": "TURN_ON", "device_type": "led_rgb", "patterns": ["bật đèn led", "bật đèn rgb", "bật led", "bật rgb"]},
+        {"action": "TURN_OFF", "device_type": "led_rgb", "patterns": ["tắt đèn led", "tắt đèn rgb", "tắt led", "tắt rgb"]},
         {"action": "TURN_ON", "device_type": "fan", "patterns": ["bật quạt", "mở quạt"]},
         {"action": "TURN_OFF", "device_type": "fan", "patterns": ["tắt quạt"]},
         {"action": "TURN_ON", "device_type": "air_conditioner", "patterns": ["bật điều hòa", "mở điều hòa"]},
@@ -177,6 +180,26 @@ class TestSingleTurnPipeline:
         result = pipeline.process_text("hôm nay thời tiết thế nào")
         assert result.success is False
         assert "không hiểu" in result.message.lower()
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_on_led_rgb(self, pipeline):
+        """Bật đèn LED phòng ngủ -> chỉ dispatch dev-006 (Đèn LED RGB), không bật đèn ngủ."""
+        result = pipeline.process_text("bật đèn led phòng ngủ")
+        assert result.success is True
+        assert result.dispatch_result is not None
+        assert result.dispatch_result.total_devices == 1
+        assert result.dispatch_result.results[0].device_id == "dev-006"
+        assert "đèn LED" in result.message
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_on_night_light(self, pipeline):
+        """Bật đèn ngủ -> chỉ dispatch dev-003 (Đèn ngủ), không bật Đèn LED RGB."""
+        result = pipeline.process_text("bật đèn ngủ")
+        assert result.success is True
+        assert result.dispatch_result is not None
+        assert result.dispatch_result.total_devices == 1
+        assert result.dispatch_result.results[0].device_id == "dev-003"
+        assert "đèn ngủ" in result.message
 
 
 class TestMultiTurnPipeline:

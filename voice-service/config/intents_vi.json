@@ -3,12 +3,181 @@
     {
       "action": "TURN_ON",
       "device_type": "light",
-      "patterns": ["bật đèn", "mở đèn", "bật điện", "mở điện", "bật sáng", "bật đèn lên", "mở đèn lên"]
+      "patterns": [
+        "bật đèn",
+        "mở đèn",
+        "bật điện",
+        "mở điện",
+        "bật sáng",
+        "bật đèn lên",
+        "mở đèn lên",
+        "bật đèn ngủ",
+        "mở đèn ngủ",
+        "bật đèn phòng ngủ",
+        "mở đèn phòng ngủ",
+        "bật đèn phòng khách",
+        "bật đèn trần",
+        "bật đèn bàn"
+      ]
     },
     {
       "action": "TURN_OFF",
       "device_type": "light",
-      "patterns": ["tắt đèn", "tắt hết đèn", "tắt điện", "tắt sáng", "tắt đèn đi", "tắt hết điện"]
+      "patterns": [
+        "tắt đèn",
+        "tắt hết đèn",
+        "tắt điện",
+        "tắt sáng",
+        "tắt đèn đi",
+        "tắt hết điện",
+        "tắt đèn ngủ",
+        "tắt đèn ngủ đi",
+        "tắt đèn phòng ngủ",
+        "tắt đèn phòng khách",
+        "tắt đèn trần",
+        "tắt đèn bàn"
+      ]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "led_rgb",
+      "patterns": [
+        "bật đèn led",
+        "mở đèn led",
+        "bật đèn rgb",
+        "mở đèn rgb",
+        "bật đèn led rgb",
+        "mở đèn led rgb",
+        "bật led",
+        "mở led",
+        "bật rgb",
+        "mở rgb",
+        "bật led rgb",
+        "mở led rgb",
+        "bật dải led",
+        "mở dải led",
+        "bật dây led",
+        "mở dây led",
+        "bật dải đèn led",
+        "mở dải đèn led",
+        "bật đèn màu",
+        "mở đèn màu",
+        "bật đèn đổi màu",
+        "mở đèn đổi màu",
+        "bật led lên",
+        "bật rgb lên",
+        "bật đèn led lên",
+        "bật đèn rgb lên",
+        "mở led lên",
+        "mở rgb lên",
+        "mở đèn led lên",
+        "mở đèn rgb lên"
+      ]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "led_rgb",
+      "patterns": [
+        "tắt đèn led",
+        "tắt đèn rgb",
+        "tắt đèn led rgb",
+        "tắt led",
+        "tắt rgb",
+        "tắt led rgb",
+        "tắt dải led",
+        "tắt dây led",
+        "tắt dải đèn led",
+        "tắt đèn màu",
+        "tắt đèn đổi màu",
+        "tắt led đi",
+        "tắt rgb đi",
+        "tắt đèn led đi",
+        "tắt đèn rgb đi"
+      ]
+    },
+    {
+      "action": "SET_COLOR",
+      "device_type": "led_rgb",
+      "patterns": [
+        "đổi màu đèn led",
+        "đổi màu đèn rgb",
+        "đổi màu led",
+        "đổi màu rgb",
+        "chỉnh màu đèn led",
+        "chỉnh màu đèn rgb",
+        "chỉnh màu led",
+        "chỉnh màu rgb",
+        "đặt màu đèn led",
+        "đặt màu đèn rgb",
+        "đặt màu led",
+        "đặt màu rgb",
+        "chuyển màu đèn led",
+        "chuyển màu đèn rgb",
+        "chuyển màu led",
+        "chuyển màu rgb",
+        "đèn led màu",
+        "đèn rgb màu",
+        "led màu",
+        "rgb màu"
+      ]
+    },
+    {
+      "action": "SET_BRIGHTNESS",
+      "device_type": "led_rgb",
+      "patterns": [
+        "đặt độ sáng đèn led",
+        "đặt độ sáng đèn rgb",
+        "đặt độ sáng led",
+        "đặt độ sáng rgb",
+        "chỉnh độ sáng đèn led",
+        "chỉnh độ sáng đèn rgb",
+        "chỉnh độ sáng led",
+        "chỉnh độ sáng rgb",
+        "để độ sáng đèn led",
+        "để độ sáng đèn rgb",
+        "đặt mức sáng đèn led",
+        "đặt mức sáng đèn rgb",
+        "chỉnh mức sáng đèn led",
+        "chỉnh mức sáng đèn rgb",
+        "độ sáng đèn led",
+        "độ sáng đèn rgb",
+        "độ sáng led",
+        "độ sáng rgb",
+        "mức sáng đèn led",
+        "mức sáng đèn rgb"
+      ]
+    },
+    {
+      "action": "INCREASE_BRIGHTNESS",
+      "device_type": "led_rgb",
+      "patterns": [
+        "tăng độ sáng đèn led",
+        "tăng độ sáng đèn rgb",
+        "tăng độ sáng led",
+        "tăng độ sáng rgb",
+        "tăng sáng đèn led",
+        "tăng sáng đèn rgb",
+        "tăng sáng led",
+        "tăng sáng rgb",
+        "cho đèn led sáng thêm",
+        "cho đèn rgb sáng thêm"
+      ]
+    },
+    {
+      "action": "DECREASE_BRIGHTNESS",
+      "device_type": "led_rgb",
+      "patterns": [
+        "giảm độ sáng đèn led",
+        "giảm độ sáng đèn rgb",
+        "giảm độ sáng led",
+        "giảm độ sáng rgb",
+        "giảm sáng đèn led",
+        "giảm sáng đèn rgb",
+        "giảm sáng led",
+        "giảm sáng rgb",
+        "cho đèn led tối đi",
+        "cho đèn rgb tối đi"
+      ]
     },
     {
       "action": "TURN_ON",

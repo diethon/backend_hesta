@@ -5,10 +5,10 @@ stt:
   vad_filter: true
   temperature: 0.0
   condition_on_previous_text: false
-  initial_prompt: "Điều khiển nhà thông minh HESTA: tắt đèn, bật đèn phòng ngủ, phòng khách, điều hòa, quạt, quạt trần, cổng, máy bơm, máy bơm nước, đặt độ sáng là 10, giảm độ sáng xuống 10, tăng lên 100, tăng nhiệt độ lên 28, giảm xuống 26 độ, mở cổng, đóng cổng, bật máy bơm, tắt bơm nước."
+  initial_prompt: "Điều khiển nhà thông minh HESTA: tắt đèn, bật đèn phòng ngủ, đèn ngủ, đèn LED, đèn RGB, đèn LED RGB, phòng khách, điều hòa, quạt, quạt trần, cổng, máy bơm, máy bơm nước, đổi màu đỏ, màu xanh, đặt độ sáng là 10, giảm độ sáng xuống 10, tăng lên 100, tăng nhiệt độ lên 28, giảm xuống 26 độ, mở cổng, đóng cổng, bật máy bơm, tắt bơm nước."
   repetition_penalty: 1.2
   no_repeat_ngram_size: 3
-  hotwords: "là 10, xuống 10, mức 10, mười, 10"
+  hotwords: "đèn LED, đèn RGB, đèn ngủ, LED, RGB, là 10, xuống 10, mức 10, mười, 10"
 audio_gate:
   rms_threshold: 200        # hiệu chỉnh theo môi trường thật (Mục 8.4 bước 3)
   min_speech_ms: 60

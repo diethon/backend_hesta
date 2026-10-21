@@ -54,6 +54,33 @@ SAMPLE_INTENTS = {
             "device_type": "air_conditioner",
             "patterns": ["tắt điều hòa", "tắt máy lạnh"]
         },
+        {
+            "action": "TURN_ON",
+            "device_type": "led_rgb",
+            "patterns": ["bật đèn led", "mở đèn led", "bật đèn rgb", "mở đèn rgb", "bật led", "mở led", "bật rgb", "mở rgb", "bật đèn led rgb"]
+        },
+        {
+            "action": "TURN_OFF",
+            "device_type": "led_rgb",
+            "patterns": ["tắt đèn led", "tắt đèn rgb", "tắt led", "tắt rgb", "tắt đèn led rgb"]
+        },
+        {
+            "action": "SET_COLOR",
+            "device_type": "led_rgb",
+            "patterns": ["đổi màu đèn", "đổi màu đèn led", "đổi màu đèn rgb", "đổi màu led", "đổi màu rgb", "chỉnh màu đèn", "chỉnh màu led", "đổi màu", "chỉnh màu"],
+            "has_parameter": "color"
+        },
+        {
+            "action": "SET_BRIGHTNESS",
+            "device_type": "led_rgb",
+            "patterns": ["đặt độ sáng đèn led", "đặt độ sáng đèn rgb", "chỉnh độ sáng đèn led", "chỉnh độ sáng đèn rgb"],
+            "has_parameter": "brightness"
+        },
+        {
+            "action": "INCREASE_BRIGHTNESS",
+            "device_type": "led_rgb",
+            "patterns": ["tăng độ sáng đèn rgb", "tăng độ sáng đèn led", "tăng sáng đèn led"]
+        },
     ]
 }
 
@@ -198,6 +225,99 @@ class TestIntentMapping:
         result = mapper.map("bật đèn phòng khách")
         assert result is not None
         assert result.raw_text == "bật đèn phòng khách"
+
+    def test_turn_on_led_rgb(self, mapper):
+        """Bật đèn LED / RGB -> mapped vào device_type='led_rgb'."""
+        for phrase in ["bật đèn led", "bật đèn rgb", "bật led", "bật rgb", "bật đèn led rgb"]:
+            result = mapper.map(phrase)
+            assert result is not None, f"Failed on '{phrase}'"
+            assert result.action == "TURN_ON"
+            assert result.device_type == "led_rgb"
+
+    def test_turn_off_led_rgb(self, mapper):
+        """Tắt đèn LED / RGB -> mapped vào device_type='led_rgb'."""
+        for phrase in ["tắt đèn led", "tắt đèn rgb", "tắt led", "tắt rgb"]:
+            result = mapper.map(phrase)
+            assert result is not None, f"Failed on '{phrase}'"
+            assert result.action == "TURN_OFF"
+            assert result.device_type == "led_rgb"
+
+    def test_led_rgb_with_room(self, mapper):
+        """Đèn LED/RGB có tên phòng."""
+        result = mapper.map("bật đèn led phòng khách")
+        assert result is not None
+        assert result.action == "TURN_ON"
+        assert result.device_type == "led_rgb"
+        assert result.room == "phòng khách"
+
+        result = mapper.map("tắt đèn rgb phòng ngủ")
+        assert result is not None
+        assert result.action == "TURN_OFF"
+        assert result.device_type == "led_rgb"
+        assert result.room == "phòng ngủ"
+
+    def test_night_light_vs_bedroom_light(self, mapper):
+        """Phân biệt 'đèn ngủ' (hint='ngủ') và 'đèn phòng ngủ' (hint='')."""
+        # Đèn ngủ
+        result = mapper.map("bật đèn ngủ")
+        assert result is not None
+        assert result.action == "TURN_ON"
+        assert result.device_type == "light"
+        assert result.room == "phòng ngủ"
+        assert result.device_name_hint == "ngủ"
+
+        result = mapper.map("tắt đèn ngủ")
+        assert result is not None
+        assert result.action == "TURN_OFF"
+        assert result.device_type == "light"
+        assert result.room == "phòng ngủ"
+        assert result.device_name_hint == "ngủ"
+
+        # Đèn phòng ngủ (thông thường)
+        result = mapper.map("bật đèn phòng ngủ")
+        assert result is not None
+        assert result.action == "TURN_ON"
+        assert result.device_type == "light"
+        assert result.room == "phòng ngủ"
+        assert result.device_name_hint == ""
+
+        result = mapper.map("tắt đèn phòng ngủ")
+        assert result is not None
+        assert result.action == "TURN_OFF"
+        assert result.device_type == "light"
+        assert result.room == "phòng ngủ"
+        assert result.device_name_hint == ""
+
+    def test_led_rgb_set_color(self, mapper):
+        """Đổi màu đèn led/rgb."""
+        result = mapper.map("đổi màu đèn led sang màu đỏ")
+        assert result is not None
+        assert result.action == "SET_COLOR"
+        assert result.device_type == "led_rgb"
+        assert result.parameters.get("color") == "đỏ"
+        assert result.parameters.get("r") == 255
+        assert result.parameters.get("g") == 0
+        assert result.parameters.get("b") == 0
+
+        result = mapper.map("đổi màu rgb sang xanh lá")
+        assert result is not None
+        assert result.action == "SET_COLOR"
+        assert result.device_type == "led_rgb"
+        assert result.parameters.get("color") == "xanh lá"
+        assert result.parameters.get("g") == 255
+
+    def test_led_rgb_brightness(self, mapper):
+        """Chỉnh độ sáng đèn led/rgb."""
+        result = mapper.map("đặt độ sáng đèn led 80")
+        assert result is not None
+        assert result.action == "SET_BRIGHTNESS"
+        assert result.device_type == "led_rgb"
+        assert result.parameters.get("brightness") == 80
+
+        result = mapper.map("tăng độ sáng đèn rgb")
+        assert result is not None
+        assert result.action == "INCREASE_BRIGHTNESS"
+        assert result.device_type == "led_rgb"
 
 
 class TestIntentMapperNoLoad:

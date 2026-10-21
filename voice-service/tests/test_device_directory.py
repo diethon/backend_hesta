@@ -28,6 +28,8 @@ SAMPLE_DEVICES = [
     {"id": "dev-003", "name": "Đèn ngủ", "type": "light", "room": "Phòng ngủ", "homeId": "home-1"},
     {"id": "dev-004", "name": "Quạt trần", "type": "fan", "room": "Phòng khách", "homeId": "home-1"},
     {"id": "dev-005", "name": "Điều hòa", "type": "air_conditioner", "room": "Phòng ngủ", "homeId": "home-1"},
+    {"id": "dev-006", "name": "Đèn LED RGB", "type": "led_rgb", "room": "Phòng ngủ", "homeId": "home-1"},
+    {"id": "dev-007", "name": "Dây LED trang trí", "type": "light", "room": "Ban công", "homeId": "home-1"},
 ]
 
 
@@ -166,6 +168,43 @@ class TestResolve:
         directory.refresh()
         devices = directory.resolve("Phòng Khách", "LIGHT", home_id="home-1")
         assert len(devices) == 2
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_led_rgb_distinct_from_regular_light(self, directory):
+        """Phòng ngủ có cả đèn ngủ (light) và đèn LED RGB (led_rgb) -> resolve độc lập."""
+        directory.refresh()
+        rgb_devs = directory.resolve("phòng ngủ", "led_rgb", home_id="home-1")
+        assert len(rgb_devs) == 1
+        assert rgb_devs[0].device_id == "dev-006"
+
+        light_devs = directory.resolve("phòng ngủ", "light", home_id="home-1")
+        assert len(light_devs) == 1
+        assert light_devs[0].device_id == "dev-003"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_light_with_device_name_hint(self, directory):
+        """Tìm 'đèn ngủ' với hint='ngủ' trong phòng ngủ -> trả đúng dev-003."""
+        directory.refresh()
+        devs = directory.resolve("phòng ngủ", "light", home_id="home-1", device_name_hint="ngủ")
+        assert len(devs) == 1
+        assert devs[0].device_id == "dev-003"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_light_is_all(self, directory):
+        """is_all=True cho 'light' trong phòng ngủ -> trả cả đèn thường và đèn LED RGB."""
+        directory.refresh()
+        devs = directory.resolve("phòng ngủ", "light", home_id="home-1", is_all=True)
+        assert len(devs) == 2
+        dev_ids = {d.device_id for d in devs}
+        assert dev_ids == {"dev-003", "dev-006"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_light_fallback_to_led_rgb(self, directory):
+        """Phòng chỉ có đèn LED (Ban công) mà không có đèn thường -> fallback điều khiển đèn LED."""
+        directory.refresh()
+        devs = directory.resolve("ban công", "light", home_id="home-1")
+        assert len(devs) == 1
+        assert devs[0].device_id == "dev-007"
 
     @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
     def test_cache_miss_triggers_refresh(self, config):
