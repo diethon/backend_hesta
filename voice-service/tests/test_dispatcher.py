@@ -194,6 +194,31 @@ class TestDispatchBatch:
         assert batch.total_devices == 0
         assert batch.successful_count == 0
 
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_batch_parallel_execution(self, config):
+        """Kiểm tra batch dispatch chạy song song (parallel) thay vì tuần tự."""
+        import time
+
+        def slow_handler(request: httpx.Request) -> httpx.Response:
+            time.sleep(0.08)  # Mỗi request tốn 80ms
+            return httpx.Response(200, json={"status": "ok"})
+
+        transport = httpx.MockTransport(slow_handler)
+        client = httpx.Client(base_url=config.base_url, transport=transport)
+        dispatcher = Dispatcher(config=config, http_client=client)
+
+        t_start = time.perf_counter()
+        batch = dispatcher.dispatch_batch(
+            ["dev-1", "dev-2", "dev-3", "dev-4"],
+            "TURN_ON",
+        )
+        total_time = time.perf_counter() - t_start
+
+        assert batch.total_devices == 4
+        assert batch.all_success is True
+        # Nếu tuần tự: 4 * 0.08 = 0.32s. Nếu song song: < 0.25s
+        assert total_time < 0.25, f"Expected parallel batch < 0.25s, but took {total_time:.3f}s"
+
 
 class TestDispatchBatchResultMessages:
     def test_summary_single_success(self):

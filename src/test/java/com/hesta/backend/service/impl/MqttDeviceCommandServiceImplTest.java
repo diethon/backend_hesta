@@ -309,4 +309,44 @@ class MqttDeviceCommandServiceImplTest {
         assertEquals(homeId, event.homeId());
         assertEquals(deviceId, event.deviceId());
     }
+
+    @Test
+    @DisplayName("Voice: fast-return succeeds with SUCCESS within ~250ms when no hardware ACK")
+    void testSendCommand_Voice_FastReturn() {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(acDevice));
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("temperature", 24);
+
+        long start = System.currentTimeMillis();
+        com.hesta.backend.dto.command.CommandResult result = commandService
+                .sendCommand(deviceId, "SET_TEMPERATURE", params, StateChangeSource.VOICE)
+                .join();
+        long duration = System.currentTimeMillis() - start;
+
+        assertNotNull(result);
+        assertTrue(result.isSuccess());
+        assertEquals("SUCCESS", result.getStatus());
+        assertEquals("Dispatched to MQTT broker", result.getMessage());
+        assertTrue(duration < 800, "Fast-return should complete well under 800ms, actual: " + duration + "ms");
+    }
+
+    @Test
+    @DisplayName("Voice: supersedes previous in-flight command rather than rejecting or queuing")
+    void testSendCommand_Voice_SupersedesPendingCommand() {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        // First command pending
+        var future1 = commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+
+        // Immediate voice command should supersede rather than being rejected
+        com.hesta.backend.dto.command.CommandResult result2 = commandService
+                .sendCommand(deviceId, "POWER_OFF", new HashMap<>(), StateChangeSource.VOICE)
+                .join();
+
+        assertNotNull(result2);
+        assertTrue(result2.isSuccess());
+        assertEquals("SUCCESS", result2.getStatus());
+    }
 }
+

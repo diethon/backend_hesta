@@ -18,6 +18,8 @@ backend:
   internal_api_key_env: "INTERNAL_API_KEY"
   devices_endpoint: "/internal/devices"
   action_endpoint: "/internal/devices/{device_id}/actions"
+  request_timeout_seconds: 3.0
+  max_workers: 10
 device_directory:
   refresh_interval_seconds: 60
 intent:

@@ -164,6 +164,8 @@ class VoicePipeline:
                 "action_endpoint", "/internal/devices/{device_id}/actions"
             ),
             api_key_env=backend_cfg.get("internal_api_key_env", "INTERNAL_API_KEY"),
+            request_timeout_seconds=float(backend_cfg.get("request_timeout_seconds", 3.0)),
+            max_workers=int(backend_cfg.get("max_workers", 10)),
         ))
 
         dialogue_state = DialogueState(

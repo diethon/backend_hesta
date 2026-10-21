@@ -8,6 +8,7 @@ voice-service KHÔNG publish MQTT trực tiếp — đó là trách nhiệm củ
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import time
@@ -25,7 +26,11 @@ class DispatchConfig:
     base_url: str = "http://localhost:8080"
     action_endpoint_template: str = "/internal/devices/{device_id}/actions"
     api_key_env: str = "INTERNAL_API_KEY"
-    request_timeout_seconds: float = 8.0
+    request_timeout_seconds: float = 3.0
+    max_workers: int = 10
+    max_connections: int = 50
+    max_keepalive_connections: int = 20
+    keepalive_expiry: float = 30.0
 
 
 @dataclass
@@ -163,9 +168,15 @@ class Dispatcher:
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
+            limits = httpx.Limits(
+                max_keepalive_connections=self.config.max_keepalive_connections,
+                max_connections=self.config.max_connections,
+                keepalive_expiry=self.config.keepalive_expiry,
+            )
             self._client = httpx.Client(
                 base_url=self.config.base_url,
                 timeout=self.config.request_timeout_seconds,
+                limits=limits,
             )
         return self._client
 
@@ -243,8 +254,9 @@ class Dispatcher:
                        parameters: dict[str, Any] | None = None) -> DispatchBatchResult:
         """Gửi cùng 1 action tới nhiều thiết bị (Mục 2.4 bước 3).
 
-        Dùng khi có nhiều thiết bị cùng loại trong 1 phòng.
-        Dispatch tuần tự (không parallel) — đơn giản, phù hợp quy mô MVP.
+        Dùng khi có nhiều thiết bị cùng loại trong 1 phòng hoặc toàn nhà.
+        Dispatch song song (parallel) qua ThreadPoolExecutor kết hợp connection pooling
+        giúp giảm thời gian trễ từ N * delay xuống ~1 * delay.
 
         Args:
             device_ids: danh sách device ID
@@ -254,12 +266,24 @@ class Dispatcher:
         Returns:
             DispatchBatchResult tổng hợp.
         """
+        if not device_ids:
+            return DispatchBatchResult(
+                results=[],
+                total_devices=0,
+                successful_count=0,
+                failed_count=0,
+                total_duration_ms=0.0,
+            )
+
         t0 = time.perf_counter()
         results: list[DispatchResult] = []
 
-        for device_id in device_ids:
-            result = self.dispatch(device_id, action, parameters)
-            results.append(result)
+        if len(device_ids) == 1:
+            results.append(self.dispatch(device_ids[0], action, parameters))
+        else:
+            workers = min(self.config.max_workers, len(device_ids))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                results = list(executor.map(lambda d_id: self.dispatch(d_id, action, parameters), device_ids))
 
         total_duration = (time.perf_counter() - t0) * 1000
         success_count = sum(1 for r in results if r.success)
@@ -273,8 +297,8 @@ class Dispatcher:
         )
 
         logger.info(
-            "Batch dispatch: %d/%d success, %.0fms total",
-            success_count, len(device_ids), total_duration,
+            "Batch dispatch: %d/%d success, %.0fms total (parallel across %d devices)",
+            success_count, len(device_ids), total_duration, len(device_ids),
         )
 
         return batch_result
