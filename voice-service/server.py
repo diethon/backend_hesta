@@ -13,11 +13,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+import urllib.parse
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
+
 
 # Setup logging
 logging.basicConfig(
@@ -102,11 +105,36 @@ class VoiceCommandResponse(BaseModel):
     deviceType: str | None = None
     totalDurationMs: float = 0.0
     stepDurations: dict[str, float] = {}
+    audioUrl: str | None = None
 
 
 class HealthResponse(BaseModel):
     status: str
     pipelineReady: bool
+
+
+# --- Helper TTS Synthesis ---
+async def generate_tts_mp3(text: str, voice: str = "vi-VN-HoaiMyNeural") -> bytes:
+    """Tạo âm thanh MP3 tiếng Việt chuẩn tự nhiên qua edge-tts."""
+    import edge_tts
+
+    clean_text = (
+        text.replace("✅", "")
+        .replace("⚠️", "")
+        .replace("❌", "")
+        .replace("⚡", "")
+        .replace("📝", "")
+        .strip()
+    )
+    if not clean_text:
+        return b""
+
+    comm = edge_tts.Communicate(clean_text, voice)
+    mp3_bytes = bytearray()
+    async for chunk in comm.stream():
+        if chunk["type"] == "audio":
+            mp3_bytes.extend(chunk["data"])
+    return bytes(mp3_bytes)
 
 
 # --- Endpoints ---
@@ -117,6 +145,29 @@ async def health_check():
         status="ok",
         pipelineReady=_pipeline is not None,
     )
+
+
+@app.get("/api/voice/tts")
+async def get_voice_tts(
+    text: str,
+    voice: str = "vi-VN-HoaiMyNeural",
+):
+    """
+    Phát âm thanh tiếng Việt chất lượng cao (Neural TTS) cho phản hồi.
+    Mặc định: vi-VN-HoaiMyNeural (giọng nữ Hà Nội chuẩn tự nhiên).
+    """
+    clean_text = text.strip()
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Text is empty")
+
+    try:
+        mp3_data = await generate_tts_mp3(clean_text, voice)
+        if not mp3_data:
+            raise HTTPException(status_code=500, detail="Failed to synthesize speech")
+        return Response(content=mp3_data, media_type="audio/mpeg")
+    except Exception as e:
+        logger.error("TTS generation error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/voice/process", response_model=VoiceCommandResponse)
@@ -150,6 +201,8 @@ async def process_voice_command(
         logger.exception("Pipeline error")
         raise HTTPException(status_code=500, detail=str(e))
 
+    audio_url = f"/api/voice/tts?text={urllib.parse.quote(result.message)}" if result.message else None
+
     return VoiceCommandResponse(
         success=result.success,
         message=result.message,
@@ -159,6 +212,7 @@ async def process_voice_command(
         deviceType=result.intent.device_type if result.intent else None,
         totalDurationMs=result.total_duration_ms,
         stepDurations=result.step_durations,
+        audioUrl=audio_url,
     )
 
 
