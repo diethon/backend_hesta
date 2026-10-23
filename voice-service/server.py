@@ -76,6 +76,20 @@ async def lifespan(app: FastAPI):
 
     # Khởi động pre-warming giọng nói thông dụng ngầm trong background
     tts_manager.start_warmup(extra_phrases)
+
+    # Pre-warm kết nối HTTP Keep-Alive tới Backend & Database pool (chống khựng lệnh đầu tiên)
+    try:
+        if pipeline and hasattr(pipeline, "dispatcher") and pipeline.dispatcher:
+            client = pipeline.dispatcher._get_client()
+            client.get(
+                "/internal/devices",
+                headers={"X-Internal-Api-Key": pipeline.dispatcher._get_api_key()},
+                timeout=1.5,
+            )
+            logger.info("✅ Pre-warmed connection to Backend & Database pool")
+    except Exception as e:
+        logger.debug("Backend pre-ping warning: %s", e)
+
     yield
     global _pipeline
     if _pipeline:

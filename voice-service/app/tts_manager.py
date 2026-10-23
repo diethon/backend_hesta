@@ -19,6 +19,7 @@ logger = logging.getLogger("hesta.tts")
 
 DEFAULT_VOICE = "vi-VN-HoaiMyNeural"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache" / "tts"
+BUNDLED_DIR = Path(__file__).resolve().parent.parent / "assets" / "tts_cache"
 
 
 def clean_tts_text(text: str) -> str:
@@ -37,8 +38,14 @@ def clean_tts_text(text: str) -> str:
 class TTSManager:
     """Quản lý sinh âm thanh và bộ nhớ đệm giọng nói tiếng Việt."""
 
-    def __init__(self, cache_dir: Path = CACHE_DIR, default_voice: str = DEFAULT_VOICE):
+    def __init__(
+        self,
+        cache_dir: Path = CACHE_DIR,
+        bundled_dir: Path = BUNDLED_DIR,
+        default_voice: str = DEFAULT_VOICE,
+    ):
         self.cache_dir = cache_dir
+        self.bundled_dir = bundled_dir
         self.default_voice = default_voice
         self._memory_cache: dict[str, bytes] = {}
         self._lock = asyncio.Lock()
@@ -47,6 +54,7 @@ class TTSManager:
         # Đảm bảo thư mục cache tồn tại
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.bundled_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.warning("Could not create TTS cache dir: %s", e)
 
@@ -56,7 +64,7 @@ class TTSManager:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
     def get_cached_audio(self, text: str, voice: str | None = None) -> bytes | None:
-        """Lấy âm thanh MP3 từ cache (RAM hoặc Disk). Trả về None nếu chưa có."""
+        """Lấy âm thanh MP3 từ cache (RAM, Disk Cache, hoặc Bundled Assets). Trả về None nếu chưa có."""
         voice = voice or self.default_voice
         clean = clean_tts_text(text)
         if not clean:
@@ -68,7 +76,7 @@ class TTSManager:
         if key in self._memory_cache:
             return self._memory_cache[key]
 
-        # 2. Kiểm tra Disk cache
+        # 2. Kiểm tra Disk cache (.cache/tts)
         file_path = self.cache_dir / f"{key}.mp3"
         if file_path.is_file():
             try:
@@ -78,6 +86,17 @@ class TTSManager:
                     return data
             except Exception as e:
                 logger.warning("Error reading disk cache for key %s: %s", key, e)
+
+        # 3. Kiểm tra Bundled Assets (assets/tts_cache có sẵn trong mã nguồn cho thiết bị mới)
+        bundled_file = self.bundled_dir / f"{key}.mp3"
+        if bundled_file.is_file():
+            try:
+                data = bundled_file.read_bytes()
+                if data:
+                    self._memory_cache[key] = data
+                    return data
+            except Exception as e:
+                logger.warning("Error reading bundled assets for key %s: %s", key, e)
 
         return None
 
