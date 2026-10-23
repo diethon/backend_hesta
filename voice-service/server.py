@@ -9,17 +9,21 @@ Chạy: uvicorn server:app --host 0.0.0.0 --port 8001
 Hoặc: python server.py
 """
 
+import asyncio
+import base64
 import logging
 import os
+import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
-import urllib.parse
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+from app.tts_manager import clean_tts_text, tts_manager
 
 
 # Setup logging
@@ -54,6 +58,8 @@ def _get_pipeline():
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     _get_pipeline()
+    # Khởi động pre-warming giọng nói thông dụng ngầm trong background
+    tts_manager.start_warmup()
     yield
     global _pipeline
     if _pipeline:
@@ -106,35 +112,12 @@ class VoiceCommandResponse(BaseModel):
     totalDurationMs: float = 0.0
     stepDurations: dict[str, float] = {}
     audioUrl: str | None = None
+    audioData: str | None = None
 
 
 class HealthResponse(BaseModel):
     status: str
     pipelineReady: bool
-
-
-# --- Helper TTS Synthesis ---
-async def generate_tts_mp3(text: str, voice: str = "vi-VN-HoaiMyNeural") -> bytes:
-    """Tạo âm thanh MP3 tiếng Việt chuẩn tự nhiên qua edge-tts."""
-    import edge_tts
-
-    clean_text = (
-        text.replace("✅", "")
-        .replace("⚠️", "")
-        .replace("❌", "")
-        .replace("⚡", "")
-        .replace("📝", "")
-        .strip()
-    )
-    if not clean_text:
-        return b""
-
-    comm = edge_tts.Communicate(clean_text, voice)
-    mp3_bytes = bytearray()
-    async for chunk in comm.stream():
-        if chunk["type"] == "audio":
-            mp3_bytes.extend(chunk["data"])
-    return bytes(mp3_bytes)
 
 
 # --- Endpoints ---
@@ -153,18 +136,21 @@ async def get_voice_tts(
     voice: str = "vi-VN-HoaiMyNeural",
 ):
     """
-    Phát âm thanh tiếng Việt chất lượng cao (Neural TTS) cho phản hồi.
-    Mặc định: vi-VN-HoaiMyNeural (giọng nữ Hà Nội chuẩn tự nhiên).
+    Phát âm thanh tiếng Việt chất lượng cao (Neural TTS) có caching siêu tốc (< 5ms).
     """
-    clean_text = text.strip()
+    clean_text = clean_tts_text(text)
     if not clean_text:
         raise HTTPException(status_code=400, detail="Text is empty")
 
     try:
-        mp3_data = await generate_tts_mp3(clean_text, voice)
+        mp3_data = await tts_manager.synthesize(clean_text, voice)
         if not mp3_data:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech")
-        return Response(content=mp3_data, media_type="audio/mpeg")
+        return Response(
+            content=mp3_data,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
     except Exception as e:
         logger.error("TTS generation error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -179,7 +165,7 @@ async def process_voice_command(
     Xử lý lệnh voice dạng text.
 
     Frontend gửi text (đã chuyển từ speech qua Web Speech API)
-    + homeId → pipeline xử lý → trả kết quả.
+    + homeId → pipeline xử lý → trả kết quả kèm audio MP3 tức thì nếu có sẵn trong cache.
     """
     _verify_api_key(x_api_key)
 
@@ -201,7 +187,20 @@ async def process_voice_command(
         logger.exception("Pipeline error")
         raise HTTPException(status_code=500, detail=str(e))
 
-    audio_url = f"/api/voice/tts?text={urllib.parse.quote(result.message)}" if result.message else None
+    # Tối ưu hóa phản hồi giọng nói
+    audio_url = None
+    audio_data = None
+    if result.message:
+        clean_msg = clean_tts_text(result.message)
+        audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
+
+        # Kiểm tra nhanh trong cache: nếu đã có, gửi kèm Base64 để Frontend phát NGAY LẬP TỨC (< 10ms)
+        cached_bytes = tts_manager.get_cached_audio(clean_msg)
+        if cached_bytes:
+            audio_data = f"data:audio/mpeg;base64,{base64.b64encode(cached_bytes).decode('ascii')}"
+        else:
+            # Nếu chưa có, kích hoạt sinh ngầm ngay để sẵn sàng khi Frontend gọi /api/voice/tts
+            asyncio.create_task(tts_manager.synthesize(clean_msg))
 
     return VoiceCommandResponse(
         success=result.success,
@@ -213,6 +212,7 @@ async def process_voice_command(
         totalDurationMs=result.total_duration_ms,
         stepDurations=result.step_durations,
         audioUrl=audio_url,
+        audioData=audio_data,
     )
 
 
