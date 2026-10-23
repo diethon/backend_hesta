@@ -57,9 +57,25 @@ def _get_pipeline():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
-    _get_pipeline()
+    pipeline = _get_pipeline()
+    # Tự động trích xuất danh sách thiết bị để pre-warm sẵn giọng đọc thành công & báo lỗi
+    extra_phrases = []
+    try:
+        if pipeline and hasattr(pipeline, "device_directory") and pipeline.device_directory:
+            for dev in getattr(pipeline.device_directory, "_raw_devices", []):
+                name = dev.get("name")
+                if name:
+                    extra_phrases.extend([
+                        f"Đã bật {name}",
+                        f"Đã tắt {name}",
+                        f"Không thể bật {name} — tất cả thiết bị đều lỗi",
+                        f"Không thể tắt {name} — tất cả thiết bị đều lỗi",
+                    ])
+    except Exception as e:
+        logger.debug("Could not extract extra phrases from devices: %s", e)
+
     # Khởi động pre-warming giọng nói thông dụng ngầm trong background
-    tts_manager.start_warmup()
+    tts_manager.start_warmup(extra_phrases)
     yield
     global _pipeline
     if _pipeline:
