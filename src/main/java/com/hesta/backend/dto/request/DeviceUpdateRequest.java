@@ -20,4 +20,6 @@ public class DeviceUpdateRequest {
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
     private BigDecimal digitalTwinZ;
+
+    private java.util.Map<String, Object> settings;
 }

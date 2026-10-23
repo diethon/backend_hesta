@@ -1,4 +1,4 @@
-# HESTA Backend - Change Log
+# HESTA Backend - Nhật ký thay đổi
 
 File này ghi lại các thay đổi do Codex thực hiện để dễ theo dõi. Các lần sửa hoặc thay thế tiếp theo trong backend sẽ được bổ sung vào đây.
 
@@ -29,38 +29,40 @@ Các lỗi liên quan đến `jwtAuthenticationFilter`, `customUserDetailsServic
 
 ### Kiểm chứng
 
-- Maven biên dịch thành công 90 source files và 7 test source files.
-- Chạy riêng 24 test liên quan Scene: **24 passed, 0 failed, 0 errors**.
-- Hibernate/H2 sinh cột `order_index SMALLINT` và các repository test đọc/ghi SceneAction thành công.
-- Khi test context kết nối trực tiếp PostgreSQL local/cloud, lỗi sai kiểu `order_index` không còn xuất hiện. Hibernate đã kiểm tra tiếp và báo lỗi schema kế tiếp: thiếu cột `action` trong bảng `scene_actions`.
+- Maven biên dịch thành công 90 tệp mã nguồn và 7 tệp mã kiểm thử.
+- Chạy riêng 24 kiểm thử liên quan Scene: **24 đạt, 0 thất bại, 0 lỗi**.
+- Hibernate/H2 sinh cột `order_index SMALLINT`; các kiểm thử repository đọc/ghi SceneAction thành công.
+- Khi context kiểm thử kết nối trực tiếp PostgreSQL cục bộ/Cloud, lỗi sai kiểu
+  `order_index` không còn. Hibernate tiếp tục kiểm tra và báo lỗi lược đồ kế tiếp:
+  thiếu cột `action` trong bảng `scene_actions`.
 
 ### Việc cần làm với database đang kết nối
 
-Database hiện tại chưa được áp dụng migration Scene có sẵn:
+Cơ sở dữ liệu hiện tại chưa được áp dụng các migration Scene có sẵn:
 
 - `supabase/migrations/20260911160000_scene_management_foundation.sql`
 - `supabase/migrations/20260911170000_scene_crud_management.sql`
 
-Với Supabase local, có thể dựng lại database từ toàn bộ migration:
+Với Supabase cục bộ, có thể dựng lại cơ sở dữ liệu từ toàn bộ migration:
 
 ```powershell
 npx supabase db reset
 ```
 
-Với Supabase Cloud dùng chung, release owner cần kiểm tra trước rồi mới đẩy migration:
+Với Supabase Cloud dùng chung, người phụ trách phát hành cần kiểm tra trước rồi mới đẩy migration:
 
 ```powershell
 npx supabase db push --dry-run
 npx supabase db push
 ```
 
-Không tự động chạy hai lệnh Cloud ở trên trong lần sửa này vì chúng thay đổi schema database dùng chung.
+Không tự động chạy hai lệnh Cloud ở trên trong lần sửa này vì chúng thay đổi lược đồ cơ sở dữ liệu dùng chung.
 
-### Trạng thái full test suite
+### Trạng thái toàn bộ bộ kiểm thử
 
-Lệnh `mvn test` chạy 38 test: 35 test hoàn tất, 3 errors không phát sinh từ thay đổi JDBC type:
+Lệnh `mvn test` chạy 38 kiểm thử: 35 hoàn tất, 3 lỗi không phát sinh từ thay đổi kiểu JDBC:
 
-- `BackendApplicationTests.contextLoads`: database đang thiếu migration Scene như mô tả ở trên.
-- Hai test trong `AuthServiceTest`: mock `HomeRepository` chưa được khởi tạo trong test (`NullPointerException`).
+- `BackendApplicationTests.contextLoads`: cơ sở dữ liệu đang thiếu migration Scene như mô tả ở trên.
+- Hai kiểm thử trong `AuthServiceTest`: mock `HomeRepository` chưa được khởi tạo (`NullPointerException`).
 
 Maven Wrapper (`mvnw.cmd`) cũng đang có lỗi script PowerShell `Cannot index into a null array`, nên việc kiểm chứng được chạy bằng Maven hệ thống (`mvn`).

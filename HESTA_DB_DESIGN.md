@@ -80,3 +80,19 @@ Hệ thống được thiết kế với sự phân định rạch ròi giữa q
 1. **Giới hạn phần cứng:** Dựa trên yêu cầu mở rộng linh hoạt, giới hạn cứng số lượng thiết bị ESP32 (Hub) ở mức Database đã được gỡ bỏ. Hệ thống cho phép khả năng mở rộng thoải mái hoặc có thể được điều chỉnh giới hạn ngay tại tầng Backend Application (Service).
 2. **Quản lý Dữ liệu Chuỗi thời gian (Time-series):** Bảng `sensor_readings` hiện tại phục vụ tốt cho quy mô dự án Capstone (Join/Report dễ dàng). Tuy nhiên, khi hệ thống xử lý luồng dữ liệu khổng lồ trong thực tế, cần xem xét tích hợp InfluxDB hoặc TimescaleDB theo NFR 5.2.5, và cài đặt các Cron Job định kỳ dọn dẹp dữ liệu cũ (Retention Job).
 3. **Bảo mật Dữ liệu Riêng tư:** Các dữ liệu nhạy cảm như file Audio gốc từ tính năng Voice Control, hay Video Keypoints từ tính năng Gesture Control được định hướng xử lý cục bộ trên Edge Node (hoặc không lưu trữ lâu dài trên cloud), nhằm tuân thủ tiêu chuẩn bảo mật IoT. Cơ sở dữ liệu chỉ lưu trữ nội dung văn bản (Transcript) và Sự kiện (Event).
+
+## 6. Bố cục hiển thị Digital Twin (lược đồ bổ sung)
+
+Migration có timestamp `20260917102640_create_twin_layout.sql` lưu bố cục hiển
+thị tách biệt với trạng thái Twin khi vận hành; migration này thuộc lịch sử
+chuẩn trong `supabase/migrations/`. Migration tạo một dòng `twin_layouts` cho
+mỗi Home, `twin_room_layouts` cho hình học phòng đã chuẩn hóa và
+`twin_node_layouts` cho vị trí hiển thị DEVICE/SENSOR. Migration không tạo thực
+thể Sensor và không sao chép giá trị từ `devices` hoặc `sensor_readings`.
+
+Tọa độ dùng `NUMERIC(10,3)`. Các kiểm tra trong cơ sở dữ liệu bảo đảm giới hạn
+chuẩn hóa, hình chữ nhật nằm trong khung, loại nút được hỗ trợ và tính duy nhất.
+Khóa ngoại đặt các bản ghi bố cục con phụ thuộc vào bố cục/nhà nhưng không bao
+giờ xóa dòng Room, Device hoặc số đo. Kiểm tra ở ứng dụng còn xác minh tham
+chiếu phòng, thiết bị thuộc nhà khác và Sensor theo định danh chuẩn
+`<device UUID>:<metricType>`.

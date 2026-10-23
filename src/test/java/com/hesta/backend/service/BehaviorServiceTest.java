@@ -1,7 +1,6 @@
 package com.hesta.backend.service;
 
 import com.hesta.backend.entity.*;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.*;
 import com.hesta.backend.service.impl.BehaviorServiceImpl;
 import org.junit.jupiter.api.Test;
@@ -30,7 +29,7 @@ class BehaviorServiceTest {
         Home home = Home.builder().id(homeId).name("Home").build();
         Room room = Room.builder().id(UUID.randomUUID()).home(home).name("Bedroom").build();
         Device lamp = Device.builder().id(UUID.randomUUID()).room(room).name("Lamp")
-                .deviceType(DeviceType.LIGHT).build();
+                .deviceType("LIGHT").build();
         OffsetDateTime from = OffsetDateTime.parse("2026-09-01T00:00:00+07:00");
         OffsetDateTime to = OffsetDateTime.parse("2026-09-03T23:59:00+07:00");
         List<BehaviorEvent> events = List.of(

@@ -40,6 +40,9 @@ public class MqttConfig {
     @Value("${mqtt.topic.prefix:hesta/nodes}")
     private String topicPrefix;
 
+    @Value("${mqtt.inbound.auto-startup:true}")
+    private boolean inboundAutoStartup;
+
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
@@ -92,14 +95,22 @@ public class MqttConfig {
                 topicPrefix + "/+/devices/+/ack",
                 topicPrefix + "/+/devices/+/sensor",
                 topicPrefix + "/+/devices/+/status",
-                topicPrefix + "/+/devices/+/telemetry"
+                topicPrefix + "/+/devices/+/telemetry",
+                topicPrefix + "/+/discovery",
+                topicPrefix + "/+/register",
+                topicPrefix + "/+/catalog",
+                topicPrefix + "/+/status",
+                "hesta/device/+/ack",
+                "hesta/device/+/state"
         };
+
         MqttPahoMessageDrivenChannelAdapter adapter =
                 new MqttPahoMessageDrivenChannelAdapter(clientId + "_in", mqttClientFactory(), topics);
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(mqttInputChannel());
+        adapter.setAutoStartup(inboundAutoStartup);
         return adapter;
     }
 }

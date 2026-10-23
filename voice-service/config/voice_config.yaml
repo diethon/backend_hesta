@@ -1,0 +1,28 @@
+stt:
+  model_size: small          # tiny/base/small — theo kết quả benchmark Giai đoạn 1
+  language: vi
+  compute_type: int8
+  vad_filter: true
+  temperature: 0.0
+  condition_on_previous_text: false
+  initial_prompt: "Điều khiển nhà thông minh HESTA: tắt tất cả thiết bị, bật tất cả thiết bị, tắt cả nhà, bật cả nhà, tắt toàn bộ thiết bị, tắt tất cả đèn, tắt hết đèn, tắt tất cả quạt, bật tất cả quạt, bật tất cả điều hòa, tắt điều hòa, tắt đèn phòng ngủ, đèn ngủ, đèn LED, đèn RGB, đèn LED RGB, phòng khách, điều hòa, quạt, quạt trần, cổng, máy bơm, đổi màu đỏ, màu xanh, chế độ thư giãn, chế độ đọc sách, chế độ tập trung, chế độ chơi game, chế độ điện ảnh, chế độ xem phim, chế độ ngủ ngon, trắng ấm, vàng nắng, xanh băng, đặt độ sáng là 10, giảm độ sáng xuống 10, tăng lên 100, tăng nhiệt độ lên 28, giảm xuống 26 độ, mở cổng, đóng cổng, bật máy bơm, tắt bơm nước."
+  repetition_penalty: 1.2
+  no_repeat_ngram_size: 3
+  hotwords: "tất cả thiết bị, cả nhà, toàn bộ thiết bị, tất cả đèn, tất cả quạt, tất cả điều hòa, đèn LED, đèn RGB, đèn ngủ, LED, RGB, chế độ, thư giãn, đọc sách, tập trung, chơi game, điện ảnh, xem phim, trắng ấm, vàng nắng, xanh băng, là 10, xuống 10, mức 10, mười, 10"
+audio_gate:
+  rms_threshold: 200        # hiệu chỉnh theo môi trường thật (Mục 8.4 bước 3)
+  min_speech_ms: 60
+  max_silence_ms: 600        # ngắt câu sau 600ms im lặng (giảm lag)
+backend:
+  base_url: "${BACKEND_BASE_URL}"
+  internal_api_key_env: "INTERNAL_API_KEY"
+  devices_endpoint: "/internal/devices"
+  action_endpoint: "/internal/devices/{device_id}/actions"
+  request_timeout_seconds: 3.0
+  max_workers: 10
+device_directory:
+  refresh_interval_seconds: 60
+intent:
+  mapping_file: "intents_vi.json"
+  min_confidence: 50.0
+  context_ttl_seconds: 45
