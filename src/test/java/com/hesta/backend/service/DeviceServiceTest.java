@@ -147,7 +147,7 @@ class DeviceServiceTest {
                 .deviceType("GATE").status(DeviceStatus.ONLINE).room(Room.builder().home(home).build())
                 .currentState(Map.of("state", "CLOSED")).build();
 
-        when(deviceRepository.findByHomeId(homeId)).thenReturn(List.of(d1, d2));
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(List.of(d1, d2));
 
         List<com.hesta.backend.dto.response.DeviceResponse> result = service.getDevicesByHome(userId, homeId);
 

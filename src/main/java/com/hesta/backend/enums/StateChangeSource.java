@@ -8,5 +8,5 @@ package com.hesta.backend.enums;
  * - TEST: Chạy test.
  */
 public enum StateChangeSource {
-    MANUAL, VOICE, GESTURE, SCENE, AUTOMATION, SCHEDULE, TEST
+    MANUAL, VOICE, GESTURE, SCENE, AUTOMATION, SCHEDULE, TEST, WEB_APP, DEMAND_RESPONSE, OTA
 }

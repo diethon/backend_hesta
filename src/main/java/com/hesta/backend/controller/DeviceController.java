@@ -46,6 +46,8 @@ public class DeviceController {
     private com.hesta.backend.service.DeviceProfilingService deviceProfilingService;
     @Autowired(required = false)
     private com.hesta.backend.service.DeviceHealthService deviceHealthService;
+    @Autowired(required = false)
+    private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
 
     @GetMapping("/devices/qr/{token}")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DevicePublicPreviewResponse>> resolveQrToken(
@@ -359,5 +361,47 @@ public class DeviceController {
         }
         return deviceCommandService.sendRoomCommand(roomId, actionStr, params, StateChangeSource.MANUAL)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<List<CommandResult>>builder().result(result).build()));
+    }
+
+    @GetMapping("/devices/{deviceId}/shadow")
+    public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> getDeviceShadow(
+            @PathVariable UUID deviceId) {
+        if (deviceShadowService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder().build());
+        }
+        com.hesta.backend.shadow.DeviceShadowDto shadow = deviceShadowService.getShadow(deviceId);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder()
+                .code(1000)
+                .result(shadow)
+                .build());
+    }
+
+    @PutMapping("/devices/{deviceId}/shadow/desired")
+    public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> updateDesiredShadow(
+            @PathVariable UUID deviceId,
+            @RequestBody Map<String, Object> desiredState) {
+        if (deviceShadowService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder().build());
+        }
+        com.hesta.backend.shadow.DeviceShadowDto shadow = deviceShadowService.updateDesiredState(deviceId, desiredState);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder()
+                .code(1000)
+                .message("Đã cập nhật Desired State cho Device Shadow")
+                .result(shadow)
+                .build());
+    }
+
+    @PostMapping("/devices/{deviceId}/shadow/reconcile")
+    public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> reconcileDeviceShadow(
+            @PathVariable UUID deviceId) {
+        if (deviceShadowService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder().build());
+        }
+        com.hesta.backend.shadow.DeviceShadowDto shadow = deviceShadowService.reconcile(deviceId);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder()
+                .code(1000)
+                .message("Đã kích hoạt Reconcile Device Shadow")
+                .result(shadow)
+                .build());
     }
 }

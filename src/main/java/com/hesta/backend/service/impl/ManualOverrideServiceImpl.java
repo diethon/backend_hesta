@@ -2,6 +2,7 @@ package com.hesta.backend.service.impl;
 
 import com.hesta.backend.entity.BehaviorEvent;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.User;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.BehaviorEventRepository;
@@ -26,13 +27,25 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
     private final UserRepository users;
     private final DeviceRepository devices;
 
+    private User resolveUser(UUID userId, Device device) {
+        if (userId != null) {
+            return users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        }
+        // Khi kích hoạt từ công tắc cơ vật lý (không có session đăng nhập), fallback về Home Owner
+        if (device != null && device.getHome() != null && device.getHome().getCreatedBy() != null) {
+            return device.getHome().getCreatedBy();
+        }
+        return users.findAll().stream().findFirst().orElse(null);
+    }
+
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public OffsetDateTime activate(Device device, UUID userId, String reason) {
         OffsetDateTime now = OffsetDateTime.now();
-        var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        User user = resolveUser(userId, device);
+        String eventSource = (userId == null) ? "PHYSICAL_SWITCH" : "MANUAL";
         events.save(BehaviorEvent.builder().home(device.getHome()).device(device).room(device.getRoom())
-                .user(user).eventType("MANUAL_OVERRIDE").action(reason).eventSource("MANUAL")
+                .user(user).eventType("MANUAL_OVERRIDE").action(reason).eventSource(eventSource)
                 .currentState(Map.of("expiresAt", now.plus(OVERRIDE_DURATION).toString()))
                 .occurredAt(now).build());
         return now.plus(OVERRIDE_DURATION);
@@ -44,7 +57,8 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
         Device device = devices.findById(deviceId).orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime expiresAt = now.plusMinutes(minutes);
-        var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        User user = resolveUser(userId, device);
+        String eventSource = (userId == null) ? "PHYSICAL_SWITCH" : "MANUAL";
         events.save(BehaviorEvent.builder()
                 .home(device.getHome())
                 .device(device)
@@ -52,7 +66,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .user(user)
                 .eventType("MANUAL_OVERRIDE")
                 .action("OVERRIDE")
-                .eventSource("MANUAL")
+                .eventSource(eventSource)
                 .currentState(Map.of("expiresAt", expiresAt.toString()))
                 .occurredAt(now)
                 .build());
@@ -67,7 +81,8 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
         OffsetDateTime currentUntil = getOverrideUntil(deviceId);
         OffsetDateTime baseTime = (currentUntil != null && currentUntil.isAfter(now)) ? currentUntil : now;
         OffsetDateTime newExpiresAt = baseTime.plusMinutes(minutes);
-        var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        User user = resolveUser(userId, device);
+        String eventSource = (userId == null) ? "PHYSICAL_SWITCH" : "MANUAL";
         events.save(BehaviorEvent.builder()
                 .home(device.getHome())
                 .device(device)
@@ -75,7 +90,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .user(user)
                 .eventType("MANUAL_OVERRIDE")
                 .action("EXTEND")
-                .eventSource("MANUAL")
+                .eventSource(eventSource)
                 .currentState(Map.of("expiresAt", newExpiresAt.toString()))
                 .occurredAt(now)
                 .build());
@@ -102,6 +117,26 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
 
     @Override
     @Transactional(readOnly = true)
+    public java.util.Map<UUID, OffsetDateTime> getOverridesUntil(java.util.Collection<UUID> deviceIds) {
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            return java.util.Collections.emptyMap();
+        }
+        java.util.List<BehaviorEvent> latestEvents = events.findLatestEventsByDeviceIdsAndEventType(deviceIds, "MANUAL_OVERRIDE");
+        java.util.Map<UUID, OffsetDateTime> result = new java.util.HashMap<>();
+        OffsetDateTime now = OffsetDateTime.now();
+        for (BehaviorEvent event : latestEvents) {
+            if (event.getDevice() == null || event.getDevice().getId() == null) continue;
+            if ("RESUME".equalsIgnoreCase(event.getAction())) continue;
+            OffsetDateTime expiry = calculateExpiry(event);
+            if (expiry != null && expiry.isAfter(now)) {
+                result.put(event.getDevice().getId(), expiry);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public OffsetDateTime getOverrideUntil(UUID deviceId) {
         return events.findTopByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")
                 .filter(event -> !"RESUME".equalsIgnoreCase(event.getAction()))
@@ -116,10 +151,11 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void resumeAutomation(Device device, UUID userId) {
         OffsetDateTime now = OffsetDateTime.now();
-        var user = users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        User user = resolveUser(userId, device);
+        String eventSource = (userId == null) ? "PHYSICAL_SWITCH" : "MANUAL";
         events.save(BehaviorEvent.builder().home(device.getHome()).device(device).room(device.getRoom())
-                .user(user).eventType("MANUAL_OVERRIDE").action("RESUME").eventSource("MANUAL")
+                .user(user).eventType("MANUAL_OVERRIDE").action("RESUME").eventSource(eventSource)
                 .currentState(Map.of("resumedAt", now.toString()))
                 .occurredAt(now).build());
     }
-}
+}

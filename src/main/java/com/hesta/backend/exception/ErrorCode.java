@@ -109,9 +109,14 @@ public enum ErrorCode {
     DEVICE_ALREADY_CLAIMED(1045, "Thiết bị này đã được thêm vào hệ thống", HttpStatus.CONFLICT),
     ROOM_NOT_FOUND(1046, "Phòng không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
     ROOM_ACCESS_DENIED(1047, "Bạn không có quyền thêm thiết bị vào phòng này", HttpStatus.FORBIDDEN),
-    SERIAL_NUMBER_REQUIRED(1048, "Số serial không được để trống", HttpStatus.BAD_REQUEST),
+    ROOM_NAME_INVALID(1051, "Tên phòng không được để trống", HttpStatus.BAD_REQUEST),
+    ROOM_NAME_ALREADY_EXISTS(1052, "Tên phòng đã tồn tại trong ngôi nhà", HttpStatus.CONFLICT),
+    SERIAL_NUMBER_REQUIRED(1049, "Số serial không được để trống", HttpStatus.BAD_REQUEST),
     DEVICE_NAME_REQUIRED(1049, "Tên thiết bị không được để trống", HttpStatus.BAD_REQUEST),
-    DEVICE_TYPE_REQUIRED(1050, "Loại thiết bị không được để trống", HttpStatus.BAD_REQUEST);
+    DEVICE_TYPE_REQUIRED(1050, "Loại thiết bị không được để trống", HttpStatus.BAD_REQUEST),
+    OTA_PACKAGE_NOT_FOUND(1600, "Firmware package not found", HttpStatus.NOT_FOUND),
+    OTA_CAMPAIGN_CONFLICT(1601, "Active OTA campaign already exists for this device type", HttpStatus.CONFLICT),
+    OTA_CAMPAIGN_NOT_FOUND(1602, "OTA campaign not found", HttpStatus.NOT_FOUND);
 
 
     private final int code;

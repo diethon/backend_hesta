@@ -125,6 +125,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             activeDeviceCommands.put(deviceId, future);
         } else {
             CompletableFuture<CommandResult> previous = activeDeviceCommands.putIfAbsent(deviceId, future);
+            if (previous != null && previous.isDone()) {
+                activeDeviceCommands.put(deviceId, future);
+            }
             if (previous != null && !previous.isDone()) {
                 log.warn("Idempotency: Concurrent race collision on device {}. Rejecting duplicate.", deviceId);
                 return CompletableFuture.completedFuture(CommandResult.builder()
@@ -197,7 +200,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             if (diagnosticsService != null && nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)
                     && !diagnosticsService.allowExecution(nodeCode)) {
                 log.warn("Circuit Breaker OPEN for node {}. Blocking command to device {}.", nodeCode, deviceId);
-                activeDeviceCommands.remove(deviceId);
+                activeDeviceCommands.remove(deviceId, future);
                 commandStartTimes.remove(deviceId);
                 return CompletableFuture.completedFuture(CommandResult.builder()
                         .commandId(commandId)
@@ -380,8 +383,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
             return future.orTimeout(effectiveTimeout, TimeUnit.MILLISECONDS)
                     .handle((res, ex) -> {
-                        activeDeviceCommands.remove(deviceId);
-                        pendingCommands.remove(commandId);
+                        activeDeviceCommands.remove(deviceId, future);
+                        pendingCommands.remove(commandId, future);
                         long roundtrip = System.currentTimeMillis() - metricStartTime;
 
                         if (ex == null && res != null && res.isSuccess()) {
@@ -433,7 +436,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     });
 
         } catch (Exception e) {
-            activeDeviceCommands.remove(deviceId);
+            activeDeviceCommands.remove(deviceId, future);
+            pendingCommands.remove(commandId, future);
             commandStartTimes.remove(deviceId);
             if (diagnosticsService != null && resolvedNodeCode != null && !"unknown".equalsIgnoreCase(resolvedNodeCode)) {
                 diagnosticsService.recordCommandFailure(resolvedNodeCode);
