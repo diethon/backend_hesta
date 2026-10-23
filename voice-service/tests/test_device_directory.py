@@ -28,6 +28,8 @@ SAMPLE_DEVICES = [
     {"id": "dev-003", "name": "Đèn ngủ", "type": "light", "room": "Phòng ngủ", "homeId": "home-1"},
     {"id": "dev-004", "name": "Quạt trần", "type": "fan", "room": "Phòng khách", "homeId": "home-1"},
     {"id": "dev-005", "name": "Điều hòa", "type": "air_conditioner", "room": "Phòng ngủ", "homeId": "home-1"},
+    {"id": "dev-006", "name": "Đèn LED RGB", "type": "led_rgb", "room": "Phòng ngủ", "homeId": "home-1", "settings": {"customColors": [{"id": "c1", "name": "Chơi game", "hex": "#00ff80", "rgb": [0, 255, 128]}]}},
+    {"id": "dev-007", "name": "Dây LED trang trí", "type": "light", "room": "Ban công", "homeId": "home-1"},
 ]
 
 
@@ -168,6 +170,69 @@ class TestResolve:
         assert len(devices) == 2
 
     @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_led_rgb_distinct_from_regular_light(self, directory):
+        """Phòng ngủ có cả đèn ngủ (light) và đèn LED RGB (led_rgb) -> resolve độc lập."""
+        directory.refresh()
+        rgb_devs = directory.resolve("phòng ngủ", "led_rgb", home_id="home-1")
+        assert len(rgb_devs) == 1
+        assert rgb_devs[0].device_id == "dev-006"
+
+        light_devs = directory.resolve("phòng ngủ", "light", home_id="home-1")
+        assert len(light_devs) == 1
+        assert light_devs[0].device_id == "dev-003"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_light_with_device_name_hint(self, directory):
+        """Tìm 'đèn ngủ' với hint='ngủ' trong phòng ngủ -> trả đúng dev-003."""
+        directory.refresh()
+        devs = directory.resolve("phòng ngủ", "light", home_id="home-1", device_name_hint="ngủ")
+        assert len(devs) == 1
+        assert devs[0].device_id == "dev-003"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_light_is_all(self, directory):
+        """is_all=True cho 'light' trong phòng ngủ -> trả cả đèn thường và đèn LED RGB."""
+        directory.refresh()
+        devs = directory.resolve("phòng ngủ", "light", home_id="home-1", is_all=True)
+        assert len(devs) == 2
+        dev_ids = {d.device_id for d in devs}
+        assert dev_ids == {"dev-003", "dev-006"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_light_fallback_to_led_rgb(self, directory):
+        """Phòng chỉ có đèn LED (Ban công) mà không có đèn thường -> fallback điều khiển đèn LED."""
+        directory.refresh()
+        devs = directory.resolve("ban công", "light", home_id="home-1")
+        assert len(devs) == 1
+        assert devs[0].device_id == "dev-007"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_all_devices_room(self, directory):
+        """d_type='all' cho 'phòng ngủ' -> trả tất cả thiết bị trong phòng ngủ."""
+        directory.refresh()
+        devs = directory.resolve("phòng ngủ", "all", home_id="home-1")
+        assert len(devs) == 3
+        dev_ids = {d.device_id for d in devs}
+        assert dev_ids == {"dev-003", "dev-005", "dev-006"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_all_devices_whole_house(self, directory):
+        """d_type='all' không có phòng -> trả tất cả thiết bị điều khiển được trong nhà."""
+        directory.refresh()
+        devs = directory.resolve("", "all", home_id="home-1")
+        assert len(devs) == 7
+        dev_ids = {d.device_id for d in devs}
+        assert dev_ids == {"dev-001", "dev-002", "dev-003", "dev-004", "dev-005", "dev-006", "dev-007"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_all_fans_whole_house(self, directory):
+        """d_type='fan' không có phòng -> trả tất cả quạt trong nhà."""
+        directory.refresh()
+        devs = directory.resolve("", "fan", home_id="home-1", is_all=True)
+        assert len(devs) == 1
+        assert devs[0].device_id == "dev-004"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
     def test_cache_miss_triggers_refresh(self, config):
         """Cache miss → tự động refresh rồi thử lại."""
         call_count = 0
@@ -241,3 +306,47 @@ class TestAuthHeader:
         directory.refresh()
 
         assert request_headers.get("x-internal-api-key") == "secret-key-456"
+
+
+class TestFindLightMode:
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_builtin_preset(self, directory):
+        """Tìm ngữ cảnh ánh sáng gợi ý có sẵn: Thư giãn, Đọc sách, Cyberpunk."""
+        directory.refresh()
+        mode = directory.find_light_mode("thư giãn")
+        assert mode is not None
+        assert mode["name"] == "Thư giãn"
+        assert mode["rgb"] == [255, 157, 92]
+        assert mode["is_custom"] is False
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_builtin_preset_accent_tolerance(self, directory):
+        """Khớp không dấu hoặc sai dấu: 'thu gian', 'thư giản' -> 'Thư giãn'."""
+        directory.refresh()
+        m1 = directory.find_light_mode("thu gian")
+        assert m1 is not None
+        assert m1["name"] == "Thư giãn"
+
+        m2 = directory.find_light_mode("thư giản")
+        assert m2 is not None
+        assert m2["name"] == "Thư giãn"
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_custom_color_saved_by_user(self, directory):
+        """Tìm màu tùy chỉnh 'Chơi game' do người dùng tự tạo trên web."""
+        directory.refresh()
+        # Tìm với device dev-006 hoặc home-1
+        devs = directory.resolve("phòng ngủ", "led_rgb", home_id="home-1")
+        assert len(devs) == 1
+        mode = directory.find_light_mode("chơi game", devices=devs, home_id="home-1")
+        assert mode is not None
+        assert mode["name"] == "Chơi game"
+        assert mode["rgb"] == [0, 255, 128]
+        assert mode["is_custom"] is True
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_find_light_mode_not_found(self, directory):
+        """Chế độ không tồn tại -> None."""
+        directory.refresh()
+        mode = directory.find_light_mode("chế độ siêu nhân", home_id="home-1")
+        assert mode is None
