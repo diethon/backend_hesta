@@ -3,8 +3,9 @@ package com.hesta.backend.service;
 import com.hesta.backend.dto.request.CreateAutomationRuleRequest;
 import com.hesta.backend.dto.request.ScheduleRequest;
 import com.hesta.backend.dto.response.AutomationRuleResponse;
-import com.hesta.backend.dto.response.BehaviorPatternResponse;
-import com.hesta.backend.dto.response.BehaviorPredictionResponse;
+import com.hesta.backend.dto.response.MlModelStatusResponse;
+import com.hesta.backend.dto.response.MlRecommendationProposal;
+import com.hesta.backend.dto.response.RecommendationResponse;
 import com.hesta.backend.entity.AutomationRecommendation;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
@@ -15,12 +16,14 @@ import com.hesta.backend.repository.AutomationRecommendationRepository;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.impl.RecommendationServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalTime;
@@ -37,7 +40,8 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class RecommendationServiceTest {
     @Mock HomeAuthorizationService authorization;
-    @Mock BehaviorService behavior;
+    @Mock MlServiceClient mlServiceClient;
+    @Mock BehaviorEventRecorder behaviorEventRecorder;
     @Mock AutomationRecommendationRepository recommendations;
     @Mock DeviceRepository devices;
     @Mock UserRepository users;
@@ -50,21 +54,51 @@ class RecommendationServiceTest {
     private final UUID deviceId = UUID.randomUUID();
     private final UUID recommendationId = UUID.randomUUID();
     private final Home home = Home.builder().id(homeId).build();
+    private final Room room = Room.builder().id(UUID.randomUUID()).home(home).name("Living room").build();
     private final Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-            .room(Room.builder().home(home).build()).name("Living room light").build();
+            .room(room).name("Living room light").build();
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(service, "confidenceThreshold", 0.80);
+        ReflectionTestUtils.setField(service, "cooldownHours", 24);
+    }
 
     @Test
-    void generatesOnlyReliableSupportedPatterns() {
+    void generatesOnlyHighConfidenceMlRecommendations() {
         when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+
         OffsetDateTime to = OffsetDateTime.now();
         OffsetDateTime from = to.minusDays(7);
-        when(behavior.detectPatterns(userId, homeId, from, to)).thenReturn(List.of(
-                BehaviorPatternResponse.builder().deviceId(deviceId).patternType("MORNING").action("TURN_ON")
-                        .averageTime(LocalTime.of(7, 15)).occurrences(6).confidence(0.85).build(),
-                BehaviorPatternResponse.builder().deviceId(deviceId).patternType("BEDTIME").action("TURN_OFF")
-                        .averageTime(LocalTime.of(21, 0)).occurrences(1).confidence(0.2).build()));
+
+        // One proposal with confidence 0.88 (eligible), one with 0.65 (filtered out)
+        when(mlServiceClient.generateRecommendations(eq(homeId), eq(from), eq(to), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("TURN_ON")
+                        .time("07:15:00")
+                        .confidence(0.88)
+                        .eligible(true)
+                        .reason("ML Habit detection")
+                        .engineType("ML")
+                        .modelVersion("rf-v1.0.0")
+                        .build(),
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("TURN_OFF")
+                        .time("23:00:00")
+                        .confidence(0.65)
+                        .eligible(false)
+                        .reason("Low confidence habit")
+                        .engineType("ML")
+                        .modelVersion("rf-v1.0.0")
+                        .build()
+        ));
+
         when(recommendations.save(any())).thenAnswer(invocation -> {
             AutomationRecommendation item = invocation.getArgument(0);
             item.setId(recommendationId);
@@ -74,37 +108,52 @@ class RecommendationServiceTest {
         var result = service.generate(userId, homeId, from, to);
 
         assertThat(result).hasSize(1);
-        assertThat(result.getFirst().getStatus()).isEqualTo("PENDING");
-        assertThat(result.getFirst().getTriggerCondition().get("time")).isEqualTo("07:15");
+        RecommendationResponse item = result.getFirst();
+        assertThat(item.getStatus()).isEqualTo("PENDING");
+        assertThat(item.getEngineType()).isEqualTo("ML");
+        assertThat(item.getConfidence()).isEqualTo(0.88);
+        assertThat(item.getEligible()).isTrue();
+        assertThat(item.getTriggerCondition().get("time")).isEqualTo("07:15:00");
         verify(recommendations, times(1)).save(any());
         verifyNoInteractions(rules, schedules);
     }
 
     @Test
-    void predictionProducesPendingRecommendationWithoutExecutingRule() {
+    void suppressesDuplicateAndCooldownRecommendations() {
         when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
-        when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());
+        // Existing pending recommendation
+        AutomationRecommendation existingPending = AutomationRecommendation.builder()
+                .id(UUID.randomUUID())
+                .home(home)
+                .device(device)
+                .status("PENDING")
+                .proposedAction(Map.of("action", "TURN_ON"))
+                .triggerCondition(Map.of("time", "07:15:00"))
+                .createdAt(OffsetDateTime.now().minusHours(1))
+                .build();
+        when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of(existingPending));
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
-        OffsetDateTime to = OffsetDateTime.now();
-        OffsetDateTime from = to.minusDays(7);
-        when(behavior.predict(eq(userId), eq(homeId), eq(from), eq(to), any())).thenReturn(List.of(
-                BehaviorPredictionResponse.builder().deviceId(deviceId).action("TURN_ON")
-                        .predictedTime(LocalTime.of(7, 15)).confidence(0.85).reason("Repeated").build()));
-        when(recommendations.save(any())).thenAnswer(invocation -> {
-            AutomationRecommendation item = invocation.getArgument(0);
-            item.setId(recommendationId);
-            return item;
-        });
 
-        var result = service.generate(userId, homeId, from, to);
+        when(mlServiceClient.generateRecommendations(any(), any(), any(), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("TURN_ON")
+                        .time("07:15:00")
+                        .confidence(0.92)
+                        .eligible(true)
+                        .build()
+        ));
 
-        assertThat(result).hasSize(1);
-        assertThat(result.getFirst().getTriggerCondition().get("patternType")).isEqualTo("PREDICTION");
-        verifyNoInteractions(rules, schedules);
+        var result = service.generate(userId, homeId, OffsetDateTime.now().minusDays(1), OffsetDateTime.now());
+
+        // Should be suppressed because existingPending is already PENDING
+        assertThat(result).isEmpty();
+        verify(recommendations, never()).save(any());
     }
 
     @Test
-    void approvalCreatesOneEnabledScheduledRule() {
+    void approvalCreatesScheduledRuleAndRecordsFeedback() {
         AutomationRecommendation item = pending();
         UUID ruleId = UUID.randomUUID();
         when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(item));
@@ -114,29 +163,78 @@ class RecommendationServiceTest {
 
         var result = service.approve(userId, homeId, recommendationId);
 
-        assertThat(result.getStatus()).isEqualTo("APPROVED");
-        ArgumentCaptor<CreateAutomationRuleRequest> rule = ArgumentCaptor.forClass(CreateAutomationRuleRequest.class);
-        verify(rules).create(eq(userId), eq(homeId), rule.capture());
-        assertThat(rule.getValue().getTriggerType()).isEqualTo("SCHEDULE");
-        assertThat(rule.getValue().getActions().getFirst().getDeviceId()).isEqualTo(deviceId);
-        ArgumentCaptor<ScheduleRequest> schedule = ArgumentCaptor.forClass(ScheduleRequest.class);
-        verify(schedules).saveRuleSchedule(eq(userId), eq(homeId), eq(ruleId), isNull(), schedule.capture());
-        assertThat(schedule.getValue().getScheduledTime()).isEqualTo(LocalTime.of(7, 15));
+        assertThat(result.getStatus()).isEqualTo("ACCEPTED");
+        ArgumentCaptor<CreateAutomationRuleRequest> ruleCaptor = ArgumentCaptor.forClass(CreateAutomationRuleRequest.class);
+        verify(rules).create(eq(userId), eq(homeId), ruleCaptor.capture());
+        assertThat(ruleCaptor.getValue().getTriggerType()).isEqualTo("SCHEDULE");
+        assertThat(ruleCaptor.getValue().getActions().getFirst().getDeviceId()).isEqualTo(deviceId);
+
+        ArgumentCaptor<ScheduleRequest> scheduleCaptor = ArgumentCaptor.forClass(ScheduleRequest.class);
+        verify(schedules).saveRuleSchedule(eq(userId), eq(homeId), eq(ruleId), isNull(), scheduleCaptor.capture());
+        assertThat(scheduleCaptor.getValue().getScheduledTime()).isEqualTo(LocalTime.of(7, 15));
+
+        // Verify feedback recorded
+        verify(behaviorEventRecorder).recordRecommendationFeedback(
+                eq(home), eq(userId), eq(device), eq(recommendationId), eq("ACCEPTED"), eq("ML"), eq("rf-v1.0.0")
+        );
     }
 
     @Test
-    void rejectionNeverCreatesARule() {
+    void rejectionRecordsFeedbackAndNeverCreatesRule() {
         when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(pending()));
         when(users.findById(userId)).thenReturn(Optional.of(User.builder().id(userId).build()));
         when(recommendations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
         var result = service.reject(userId, homeId, recommendationId);
+
         assertThat(result.getStatus()).isEqualTo("REJECTED");
         verifyNoInteractions(rules, schedules);
+        verify(behaviorEventRecorder).recordRecommendationFeedback(
+                eq(home), eq(userId), eq(device), eq(recommendationId), eq("REJECTED"), eq("ML"), eq("rf-v1.0.0")
+        );
+    }
+
+    @Test
+    void dismissRecordsFeedbackAndTransitionsStatus() {
+        when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(pending()));
+        when(users.findById(userId)).thenReturn(Optional.of(User.builder().id(userId).build()));
+        when(recommendations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.dismiss(userId, homeId, recommendationId);
+
+        assertThat(result.getStatus()).isEqualTo("DISMISSED");
+        verifyNoInteractions(rules, schedules);
+        verify(behaviorEventRecorder).recordRecommendationFeedback(
+                eq(home), eq(userId), eq(device), eq(recommendationId), eq("DISMISSED"), eq("ML"), eq("rf-v1.0.0")
+        );
+    }
+
+    @Test
+    void getModelStatusDelegatesToMlClient() {
+        when(mlServiceClient.getModelStatus()).thenReturn(MlModelStatusResponse.builder()
+                .status("READY")
+                .version("rf-v1.0.0")
+                .accuracy(0.85)
+                .confidenceThreshold(0.80)
+                .build());
+
+        var status = service.getModelStatus(userId, homeId);
+
+        assertThat(status.getStatus()).isEqualTo("READY");
+        assertThat(status.getVersion()).isEqualTo("rf-v1.0.0");
+        assertThat(status.getConfidenceThreshold()).isEqualTo(0.80);
+        verify(authorization).requireAccess(userId, homeId);
     }
 
     private AutomationRecommendation pending() {
-        return AutomationRecommendation.builder().id(recommendationId).home(home).device(device)
-                .status("PENDING").confidenceScore(BigDecimal.valueOf(0.8))
+        return AutomationRecommendation.builder()
+                .id(recommendationId)
+                .home(home)
+                .device(device)
+                .status("PENDING")
+                .engineType("ML")
+                .modelVersion("rf-v1.0.0")
+                .confidenceScore(BigDecimal.valueOf(0.88))
                 .triggerCondition(Map.of("type", "SCHEDULE", "time", "07:15", "repeatDays", List.of()))
                 .proposedAction(Map.of("deviceId", deviceId.toString(), "action", "TURN_ON", "parameters", Map.of()))
                 .build();

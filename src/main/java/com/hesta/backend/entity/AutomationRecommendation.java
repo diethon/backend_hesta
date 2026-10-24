@@ -48,6 +48,13 @@ public class AutomationRecommendation {
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
+    @Column(name = "engine_type", length = 30)
+    @Builder.Default
+    private String engineType = "RULE_BASED";
+
+    @Column(name = "model_version", length = 50)
+    private String modelVersion;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

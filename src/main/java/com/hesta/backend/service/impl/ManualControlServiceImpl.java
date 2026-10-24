@@ -51,7 +51,7 @@ public class ManualControlServiceImpl implements ManualControlService {
         }
         OffsetDateTime until = overrides.activate(device, userId, "OVERRIDE");
         CommandResult result = commands.sendCommand(deviceId, action, Map.of(), StateChangeSource.MANUAL).join();
-        if (result.isSuccess()) recorder.recordCommand(device, action, StateChangeSource.MANUAL, result);
+        if (result.isSuccess()) recorder.recordCommand(device, userId, action, StateChangeSource.MANUAL, result);
         return ManualCommandResponse.builder().command(result).overrideUntil(until).build();
     }
 
