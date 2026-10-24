@@ -82,6 +82,13 @@ public class Device {
     @Column(name = "icon", length = 50)
     private String icon;
 
+    @Column(name = "image_url", columnDefinition = "text")
+    private String imageUrl;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "catalog_id")
+    private DeviceCatalog catalog;
+
     @Column(name = "digital_twin_x", precision = 10, scale = 3)
     private BigDecimal digitalTwinX;
 

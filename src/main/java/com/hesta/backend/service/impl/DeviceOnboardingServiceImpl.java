@@ -41,6 +41,7 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
     private final RoomRepository roomRepository;
     private final UserRepository userRepository;
     private final HomeAuthorizationService homeAuthorizationService;
+    private final com.hesta.backend.repository.DeviceCatalogRepository catalogRepository;
 
     private static final int TOKEN_EXPIRY_DAYS = 7;
     private static final String QR_SCHEME_PREFIX = "syna://device/register?token=";
@@ -67,21 +68,34 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
         }
 
         User admin = adminId != null ? userRepository.findById(adminId).orElse(null) : null;
+        com.hesta.backend.entity.DeviceCatalog catalog = null;
+        if (request.getCatalogId() != null) {
+            catalog = catalogRepository.findById(request.getCatalogId()).orElse(null);
+        } else if (request.getModel() != null && !request.getModel().trim().isEmpty()) {
+            catalog = catalogRepository.findByModelCode(request.getModel().trim()).orElse(null);
+        }
+
+        String imageUrl = request.getImageUrl();
+        if ((imageUrl == null || imageUrl.trim().isEmpty()) && catalog != null) {
+            imageUrl = catalog.getImageUrl();
+        }
 
         Device device = Device.builder()
                 .name(request.getName().trim())
                 .deviceType(request.getDeviceType().trim().toUpperCase())
-                .model(request.getModel() != null ? request.getModel().trim() : null)
+                .model(request.getModel() != null ? request.getModel().trim() : (catalog != null ? catalog.getModelCode() : null))
                 .serialNumber(serialNumber)
                 .localId(request.getLocalId() != null && !request.getLocalId().trim().isEmpty()
                         ? request.getLocalId().trim()
                         : "dev-" + serialNumber.toLowerCase().replaceAll("[^a-z0-9_-]", ""))
                 .status(DeviceStatus.UNCLAIMED)
                 .currentState(new HashMap<>(Map.of("power", "OFF")))
-                .icon(request.getIcon() != null ? request.getIcon().trim() : null)
+                .icon(request.getIcon() != null ? request.getIcon().trim() : (catalog != null ? catalog.getIcon() : null))
+                .imageUrl(imageUrl != null ? imageUrl.trim() : null)
+                .catalog(catalog)
                 .capabilities(request.getCapabilities() != null
                         ? new DeviceCapabilities(request.getCapabilities())
-                        : new DeviceCapabilities())
+                        : (catalog != null && catalog.getDefaultCapabilities() != null ? catalog.getDefaultCapabilities() : new DeviceCapabilities()))
                 .build();
 
         Device savedDevice = deviceRepository.save(device);
