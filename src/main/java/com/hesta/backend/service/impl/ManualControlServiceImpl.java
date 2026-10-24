@@ -49,9 +49,12 @@ public class ManualControlServiceImpl implements ManualControlService {
         if (!device.supportsAction(action)) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        OffsetDateTime until = overrides.activate(device, userId, "OVERRIDE");
         CommandResult result = commands.sendCommand(deviceId, action, Map.of(), StateChangeSource.MANUAL).join();
-        if (result.isSuccess()) recorder.recordCommand(device, userId, action, StateChangeSource.MANUAL, result);
+        OffsetDateTime until = null;
+        if (result != null && result.isSuccess()) {
+            until = overrides.activate(device, userId, "OVERRIDE");
+            recorder.recordCommand(device, action, StateChangeSource.MANUAL, result);
+        }
         return ManualCommandResponse.builder().command(result).overrideUntil(until).build();
     }
 
@@ -78,7 +81,10 @@ public class ManualControlServiceImpl implements ManualControlService {
 
     private Device authorizedDevice(UUID userId, UUID deviceId) {
         Device device = devices.findById(deviceId).orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        authorization.requireAccess(userId, device.getHome().getId());
+        var home = device.getHome();
+        if (home != null && home.getId() != null) {
+            authorization.requireAccess(userId, home.getId());
+        }
         return device;
     }
 

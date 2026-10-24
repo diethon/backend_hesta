@@ -86,6 +86,9 @@ public class DeviceController {
     @PostMapping("/devices/{deviceId}/automation/cancel")
     public ResponseEntity<ApiResponse<OffsetDateTime>> cancelAutomation(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
         return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
                 .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId)).build());
     }
@@ -93,20 +96,39 @@ public class DeviceController {
     @PostMapping("/devices/{deviceId}/automation/resume")
     public ResponseEntity<ApiResponse<Void>> resumeAutomation(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
         manualControlService.resumeAutomation(userDetails.getId(), deviceId);
         return ResponseEntity.ok(ApiResponse.<Void>builder().code(1000)
                 .message("Đã khôi phục tự động hóa").build());
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/automation/extend")
     public ResponseEntity<ApiResponse<OffsetDateTime>> extendAutomation(
-            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestBody(required = false) Map<String, Object> requestBody) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
         if (manualOverrideService == null) {
             throw new RuntimeException("Manual override service not available");
         }
-        OffsetDateTime until = manualOverrideService.extendOverride(deviceId, userDetails.getId(), 60);
+        int minutes = 60;
+        if (requestBody != null && requestBody.containsKey("hours")) {
+            try {
+                minutes = (int) Math.round(Double.parseDouble(requestBody.get("hours").toString()) * 60);
+            } catch (Exception ignored) {}
+        } else if (requestBody != null && requestBody.containsKey("minutes")) {
+            try {
+                minutes = Integer.parseInt(requestBody.get("minutes").toString());
+            } catch (Exception ignored) {}
+        }
+        OffsetDateTime until = manualOverrideService.extendOverride(deviceId, userDetails.getId(), minutes);
         return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
-                .message("Đã gia hạn khóa tự động hóa thêm 60 phút")
+                .message("Đã gia hạn khóa tự động hóa thêm " + minutes + " phút")
                 .result(until).build());
     }
 
@@ -265,6 +287,7 @@ public class DeviceController {
                 .body(csv);
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/analytics/uptime")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceUptimeResponse>> getDeviceUptime(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -277,6 +300,7 @@ public class DeviceController {
                 .build());
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/health")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceHealthResponse>> getDeviceHealth(
             @AuthenticationPrincipal CustomUserDetails userDetails,

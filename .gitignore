@@ -50,6 +50,8 @@ logs/
 /agents
 .tmp/
 
+mosquitto.db
+
 ### Python ###
 __pycache__/
 *.py[cod]
@@ -59,3 +61,8 @@ __pycache__/
 venv/
 ENV/
 .pytest_cache/
+.cache/
+client_secret_*.json
+token.json
+.aider*
+hesta-backend-*

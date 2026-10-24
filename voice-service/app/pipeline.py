@@ -41,6 +41,9 @@ DEVICE_TYPE_VI = {
     "gate": "cổng",
     "water_pump": "máy bơm nước",
     "led_rgb": "đèn RGB",
+    "socket": "ổ cắm",
+    "tv": "tivi",
+    "all": "thiết bị",
 }
 
 
@@ -161,6 +164,8 @@ class VoicePipeline:
                 "action_endpoint", "/internal/devices/{device_id}/actions"
             ),
             api_key_env=backend_cfg.get("internal_api_key_env", "INTERNAL_API_KEY"),
+            request_timeout_seconds=float(backend_cfg.get("request_timeout_seconds", 3.0)),
+            max_workers=int(backend_cfg.get("max_workers", 10)),
         ))
 
         dialogue_state = DialogueState(
@@ -260,15 +265,49 @@ class VoicePipeline:
 
         # === BƯỚC 4: Device Resolution ===
         t0 = time.perf_counter()
-        devices = self.device_directory.resolve(room or "", device_type, home_id=home_id)
+        is_all = (
+            device_type == "all"
+            or "hết" in (intent.matched_pattern or "").lower()
+            or any(kw in transcript.lower() for kw in [
+                "tất cả", "tat ca", "toàn bộ", "toan bo", "cả nhà", "ca nha",
+                "hết", "het", "các", "cac", "mọi", "moi"
+            ])
+        )
+        hint = getattr(intent, "device_name_hint", "")
+        mode_query = (intent.parameters or {}).get("mode")
+
+        # Nếu có yêu cầu chế độ ánh sáng / màu sắc mà device_type đang là light, ưu tiên tìm xem phòng có đèn LED RGB không
+        if mode_query and device_type == "light":
+            rgb_test = self.device_directory.resolve(room or "", "led_rgb", home_id=home_id)
+            if rgb_test:
+                device_type = "led_rgb"
+
+        devices = self.device_directory.resolve(
+            room or "", device_type, home_id=home_id,
+            device_name_hint=hint, is_all=is_all
+        )
         if not devices and room and intent.room is None:
             # Phòng đến từ context nhưng không có loại thiết bị này -> fallback tìm toàn bộ nhà
-            devices = self.device_directory.resolve("", device_type, home_id=home_id)
+            devices = self.device_directory.resolve(
+                "", device_type, home_id=home_id,
+                device_name_hint=hint, is_all=is_all
+            )
             if devices:
                 room = None
         step_durations["device_resolve_ms"] = (time.perf_counter() - t0) * 1000
 
-        dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
+        if device_type == "led_rgb":
+            if "rgb" in (intent.matched_pattern or "").lower():
+                dev_type_vi = "đèn RGB"
+            elif "led" in (intent.matched_pattern or "").lower():
+                dev_type_vi = "đèn LED"
+            else:
+                dev_type_vi = "đèn LED RGB"
+        elif device_type == "light" and hint == "ngủ":
+            dev_type_vi = "đèn ngủ"
+        else:
+            dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
+
         if not devices:
             msg = f"Không tìm thấy {dev_type_vi} nào ở {room}." if room else f"Không tìm thấy {dev_type_vi} nào trong nhà."
             return PipelineResult(
@@ -280,8 +319,39 @@ class VoicePipeline:
                 step_durations=step_durations,
             )
 
+        # Xử lý tham số mode nếu có: tra cứu preset hoặc màu tùy chỉnh
+        if mode_query:
+            mode_info = self.device_directory.find_light_mode(mode_query, devices=devices, home_id=home_id)
+            if mode_info is None:
+                room_str = f" ở {room}" if room else ""
+                return PipelineResult(
+                    success=False,
+                    message=f"Không tìm thấy chế độ hoặc màu \"{mode_query}\"{room_str}. Bạn có thể tạo màu này trên ứng dụng trước.",
+                    transcript=transcript,
+                    intent=intent,
+                    total_duration_ms=(time.perf_counter() - t_start) * 1000,
+                    step_durations=step_durations,
+                )
+
+            if device_type == "led_rgb":
+                intent.action = "SET_COLOR"
+                intent.parameters = {
+                    "r": mode_info["r"],
+                    "g": mode_info["g"],
+                    "b": mode_info["b"],
+                    "hex": mode_info.get("hex", ""),
+                    "brightness": mode_info.get("brightness", 100),
+                    "mode": mode_info["name"],
+                }
+            elif device_type == "light":
+                intent.action = "SET_BRIGHTNESS"
+                intent.parameters = {
+                    "brightness": mode_info.get("brightness", 80),
+                    "mode": mode_info["name"],
+                }
+
         # Nếu có nhiều thiết bị thuộc loại này ở nhiều phòng khác nhau mà người dùng không chỉ rõ phòng (trừ lệnh "tắt hết/bật hết")
-        if len(devices) > 1 and not room and "hết" not in (intent.matched_pattern or ""):
+        if len(devices) > 1 and not room and not is_all and "hết" not in (intent.matched_pattern or ""):
             distinct_rooms = {d.room_name for d in devices if d.room_name}
             if len(distinct_rooms) > 1:
                 return PipelineResult(
@@ -302,7 +372,11 @@ class VoicePipeline:
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
         # Tạo thông báo
-        message = dispatch_result.summary_message(intent.action, device_type, room, intent.parameters)
+        message = dispatch_result.summary_message(
+            intent.action, device_type, room, intent.parameters,
+            pattern=intent.matched_pattern or "",
+            hint=hint,
+        )
 
         # Cập nhật dialogue state cho multi-turn
         if dispatch_result.all_success:
@@ -379,15 +453,49 @@ class VoicePipeline:
             )
 
         t0 = time.perf_counter()
-        devices = self.device_directory.resolve(room or "", device_type, home_id=home_id)
+        is_all = (
+            device_type == "all"
+            or "hết" in (intent.matched_pattern or "").lower()
+            or any(kw in text.lower() for kw in [
+                "tất cả", "tat ca", "toàn bộ", "toan bo", "cả nhà", "ca nha",
+                "hết", "het", "các", "cac", "mọi", "moi"
+            ])
+        )
+        hint = getattr(intent, "device_name_hint", "")
+        mode_query = (intent.parameters or {}).get("mode")
+
+        # Nếu có yêu cầu chế độ ánh sáng / màu sắc mà device_type đang là light, ưu tiên tìm xem phòng có đèn LED RGB không
+        if mode_query and device_type == "light":
+            rgb_test = self.device_directory.resolve(room or "", "led_rgb", home_id=home_id)
+            if rgb_test:
+                device_type = "led_rgb"
+
+        devices = self.device_directory.resolve(
+            room or "", device_type, home_id=home_id,
+            device_name_hint=hint, is_all=is_all
+        )
         if not devices and room and intent.room is None:
             # Phòng đến từ context nhưng không có loại thiết bị này -> fallback tìm toàn bộ nhà
-            devices = self.device_directory.resolve("", device_type, home_id=home_id)
+            devices = self.device_directory.resolve(
+                "", device_type, home_id=home_id,
+                device_name_hint=hint, is_all=is_all
+            )
             if devices:
                 room = None
         step_durations["device_resolve_ms"] = (time.perf_counter() - t0) * 1000
 
-        dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
+        if device_type == "led_rgb":
+            if "rgb" in (intent.matched_pattern or "").lower():
+                dev_type_vi = "đèn RGB"
+            elif "led" in (intent.matched_pattern or "").lower():
+                dev_type_vi = "đèn LED"
+            else:
+                dev_type_vi = "đèn LED RGB"
+        elif device_type == "light" and hint == "ngủ":
+            dev_type_vi = "đèn ngủ"
+        else:
+            dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
+
         if not devices:
             msg = f"Không tìm thấy {dev_type_vi} nào ở {room}." if room else f"Không tìm thấy {dev_type_vi} nào trong nhà."
             return PipelineResult(
@@ -399,8 +507,39 @@ class VoicePipeline:
                 step_durations=step_durations,
             )
 
+        # Xử lý tham số mode nếu có: tra cứu preset hoặc màu tùy chỉnh
+        if mode_query:
+            mode_info = self.device_directory.find_light_mode(mode_query, devices=devices, home_id=home_id)
+            if mode_info is None:
+                room_str = f" ở {room}" if room else ""
+                return PipelineResult(
+                    success=False,
+                    message=f"Không tìm thấy chế độ hoặc màu \"{mode_query}\"{room_str}. Bạn có thể tạo màu này trên ứng dụng trước.",
+                    transcript=text,
+                    intent=intent,
+                    total_duration_ms=(time.perf_counter() - t_start) * 1000,
+                    step_durations=step_durations,
+                )
+
+            if device_type == "led_rgb":
+                intent.action = "SET_COLOR"
+                intent.parameters = {
+                    "r": mode_info["r"],
+                    "g": mode_info["g"],
+                    "b": mode_info["b"],
+                    "hex": mode_info.get("hex", ""),
+                    "brightness": mode_info.get("brightness", 100),
+                    "mode": mode_info["name"],
+                }
+            elif device_type == "light":
+                intent.action = "SET_BRIGHTNESS"
+                intent.parameters = {
+                    "brightness": mode_info.get("brightness", 80),
+                    "mode": mode_info["name"],
+                }
+
         # Nếu có nhiều thiết bị thuộc loại này ở nhiều phòng khác nhau mà người dùng không chỉ rõ phòng (trừ lệnh "tắt hết/bật hết")
-        if len(devices) > 1 and not room and "hết" not in (intent.matched_pattern or ""):
+        if len(devices) > 1 and not room and not is_all and "hết" not in (intent.matched_pattern or ""):
             distinct_rooms = {d.room_name for d in devices if d.room_name}
             if len(distinct_rooms) > 1:
                 return PipelineResult(
@@ -419,7 +558,11 @@ class VoicePipeline:
         )
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
-        message = dispatch_result.summary_message(intent.action, device_type, room, intent.parameters)
+        message = dispatch_result.summary_message(
+            intent.action, device_type, room, intent.parameters,
+            pattern=intent.matched_pattern or "",
+            hint=hint,
+        )
 
         if dispatch_result.all_success:
             self.dialogue_state.update(

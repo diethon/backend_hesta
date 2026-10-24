@@ -9,15 +9,22 @@ Chạy: uvicorn server:app --host 0.0.0.0 --port 8001
 Hoặc: python server.py
 """
 
+import asyncio
+import base64
 import logging
 import os
+import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
+
+from app.tts_manager import clean_tts_text, tts_manager
+
 
 # Setup logging
 logging.basicConfig(
@@ -50,7 +57,39 @@ def _get_pipeline():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
-    _get_pipeline()
+    pipeline = _get_pipeline()
+    # Tự động trích xuất danh sách thiết bị để pre-warm sẵn giọng đọc thành công & báo lỗi
+    extra_phrases = []
+    try:
+        if pipeline and hasattr(pipeline, "device_directory") and pipeline.device_directory:
+            for dev in getattr(pipeline.device_directory, "_raw_devices", []):
+                name = dev.get("name")
+                if name:
+                    extra_phrases.extend([
+                        f"Đã bật {name}",
+                        f"Đã tắt {name}",
+                        f"Không thể bật {name} — tất cả thiết bị đều lỗi",
+                        f"Không thể tắt {name} — tất cả thiết bị đều lỗi",
+                    ])
+    except Exception as e:
+        logger.debug("Could not extract extra phrases from devices: %s", e)
+
+    # Khởi động pre-warming giọng nói thông dụng ngầm trong background
+    tts_manager.start_warmup(extra_phrases)
+
+    # Pre-warm kết nối HTTP Keep-Alive tới Backend & Database pool (chống khựng lệnh đầu tiên)
+    try:
+        if pipeline and hasattr(pipeline, "dispatcher") and pipeline.dispatcher:
+            client = pipeline.dispatcher._get_client()
+            client.get(
+                "/internal/devices",
+                headers={"X-Internal-Api-Key": pipeline.dispatcher._get_api_key()},
+                timeout=1.5,
+            )
+            logger.info("✅ Pre-warmed connection to Backend & Database pool")
+    except Exception as e:
+        logger.debug("Backend pre-ping warning: %s", e)
+
     yield
     global _pipeline
     if _pipeline:
@@ -102,6 +141,8 @@ class VoiceCommandResponse(BaseModel):
     deviceType: str | None = None
     totalDurationMs: float = 0.0
     stepDurations: dict[str, float] = {}
+    audioUrl: str | None = None
+    audioData: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -119,6 +160,32 @@ async def health_check():
     )
 
 
+@app.get("/api/voice/tts")
+async def get_voice_tts(
+    text: str,
+    voice: str = "vi-VN-HoaiMyNeural",
+):
+    """
+    Phát âm thanh tiếng Việt chất lượng cao (Neural TTS) có caching siêu tốc (< 5ms).
+    """
+    clean_text = clean_tts_text(text)
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Text is empty")
+
+    try:
+        mp3_data = await tts_manager.synthesize(clean_text, voice)
+        if not mp3_data:
+            raise HTTPException(status_code=500, detail="Failed to synthesize speech")
+        return Response(
+            content=mp3_data,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception as e:
+        logger.error("TTS generation error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/voice/process", response_model=VoiceCommandResponse)
 async def process_voice_command(
     request: VoiceCommandRequest,
@@ -128,7 +195,7 @@ async def process_voice_command(
     Xử lý lệnh voice dạng text.
 
     Frontend gửi text (đã chuyển từ speech qua Web Speech API)
-    + homeId → pipeline xử lý → trả kết quả.
+    + homeId → pipeline xử lý → trả kết quả kèm audio MP3 tức thì nếu có sẵn trong cache.
     """
     _verify_api_key(x_api_key)
 
@@ -150,6 +217,21 @@ async def process_voice_command(
         logger.exception("Pipeline error")
         raise HTTPException(status_code=500, detail=str(e))
 
+    # Tối ưu hóa phản hồi giọng nói
+    audio_url = None
+    audio_data = None
+    if result.message:
+        clean_msg = clean_tts_text(result.message)
+        audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
+
+        # Kiểm tra nhanh trong cache: nếu đã có, gửi kèm Base64 để Frontend phát NGAY LẬP TỨC (< 10ms)
+        cached_bytes = tts_manager.get_cached_audio(clean_msg)
+        if cached_bytes:
+            audio_data = f"data:audio/mpeg;base64,{base64.b64encode(cached_bytes).decode('ascii')}"
+        else:
+            # Nếu chưa có, kích hoạt sinh ngầm ngay để sẵn sàng khi Frontend gọi /api/voice/tts
+            asyncio.create_task(tts_manager.synthesize(clean_msg))
+
     return VoiceCommandResponse(
         success=result.success,
         message=result.message,
@@ -159,6 +241,8 @@ async def process_voice_command(
         deviceType=result.intent.device_type if result.intent else None,
         totalDurationMs=result.total_duration_ms,
         stepDurations=result.step_durations,
+        audioUrl=audio_url,
+        audioData=audio_data,
     )
 
 

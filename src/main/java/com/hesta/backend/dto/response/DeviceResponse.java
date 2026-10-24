@@ -28,6 +28,7 @@ public class DeviceResponse {
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
+    private Map<String, Object> settings;
     @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.hesta.backend.entity.DeviceCapabilitiesDeserializer.class)
     private java.util.Map<String, java.util.List<String>> capabilities;
     private String icon;
@@ -61,6 +62,7 @@ public class DeviceResponse {
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
                 .currentState(device.getCurrentState())
+                .settings(device.getSettings() != null ? device.getSettings() : java.util.Collections.emptyMap())
                 .capabilities(device.getCapabilities())
                 .icon(device.getIcon())
                 .digitalTwinX(device.getDigitalTwinX())

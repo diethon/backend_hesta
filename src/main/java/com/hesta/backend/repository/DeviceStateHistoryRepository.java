@@ -21,6 +21,9 @@ public interface DeviceStateHistoryRepository extends JpaRepository<DeviceStateH
     List<DeviceStateHistory> findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(
             UUID deviceId, OffsetDateTime from, OffsetDateTime to);
 
+    java.util.Optional<DeviceStateHistory> findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(
+            UUID deviceId, OffsetDateTime beforeTime);
+
     @Query("SELECT h FROM DeviceStateHistory h WHERE h.device.id IN :deviceIds AND h.changedAt BETWEEN :from AND :to ORDER BY h.changedAt ASC")
     List<DeviceStateHistory> findByDeviceIdsAndChangedAtBetween(
             @Param("deviceIds") List<UUID> deviceIds,

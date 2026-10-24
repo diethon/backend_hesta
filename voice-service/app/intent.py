@@ -67,12 +67,12 @@ ROOM_PHONETIC_VARIANTS = {
     "phang nhe": "phòng ngủ",
     "phong nu": "phòng ngủ",
     "phang nu": "phòng ngủ",
-    "dem phong mua": "phòng ngủ",
-    "den phang mua": "phòng ngủ",
-    "dem phong ngu": "phòng ngủ",
-    "den phong ngu": "phòng ngủ",
     # Ghép tắt đèn ngủ / đèn phòng ngủ
     "den ngu": "phòng ngủ",
+    "den led ngu": "phòng ngủ",
+    "den rgb ngu": "phòng ngủ",
+    "led ngu": "phòng ngủ",
+    "rgb ngu": "phòng ngủ",
     # Biến thể phát âm Whisper cho phòng khách
     "phong khach": "phòng khách",
     "phang khach": "phòng khách",
@@ -105,7 +105,7 @@ VI_SPOKEN_NUMBERS = [
 
 def normalize_spoken_numbers(text: str) -> str:
     """Chuyển đổi số dạng chữ tiếng Việt hoặc âm đọc lệch của whisper thành chữ số,
-    đồng thời sửa các lỗi âm học phổ biến (như 'bắt' nhầm từ 'tắt').
+    đồng thời sửa các lỗi âm học phổ biến (như 'bắt' nhầm từ 'tắt', 'r g b' -> 'rgb', 'lét' -> 'led').
     """
     res = text.lower()
     # Sửa lỗi âm học Whisper: 'tắt' bị nhận nhầm thành 'bắt', 'đắt', 'tắc', 'bắc', 'ngắt', 'cắt'
@@ -113,6 +113,9 @@ def normalize_spoken_numbers(text: str) -> str:
     res = re.sub(r'\b(bắt|đắt|tắc|bắc|ngắt|cắt)\b(?!\s+đầu\b)', 'tắt', res)
     # Sửa lỗi âm học Whisper: 'là mười' / 'mức mười' bị nghe nhầm thành 'lăm mươi'
     res = re.sub(r'\blăm\s+mươi\b', '10', res)
+    # Sửa lỗi âm học Whisper cho LED và RGB
+    res = re.sub(r'\b(r\s*g\s*b|r-g-b|r\.g\.b|éc\s*gờ\s*bê|e\s*rờ\s*gờ\s*bê|rờ\s*gờ\s*bê|a\s*pi\s*di)\b', 'rgb', res)
+    res = re.sub(r'\b(l\s*e\s*d|l-e-d|l\.e\.d|lét|lết|lép)\b', 'led', res)
     for pat, rep in VI_SPOKEN_NUMBERS:
         res = re.sub(pat, rep, res)
     return res
@@ -122,12 +125,13 @@ def normalize_spoken_numbers(text: str) -> str:
 class IntentResult:
     """Kết quả mapping intent."""
     action: str                    # VD: "TURN_ON"
-    device_type: str               # VD: "light"
+    device_type: str               # VD: "light" hoặc "led_rgb"
     room: str | None = None        # VD: "phòng khách"
     parameters: dict[str, Any] = field(default_factory=dict)  # VD: {"temperature": 25}
     confidence: float = 0.0        # Điểm fuzzy matching (0-100)
     matched_pattern: str = ""      # Pattern đã khớp
     raw_text: str = ""             # Câu gốc
+    device_name_hint: str = ""     # VD: "ngủ" (đèn ngủ), "trần" (đèn trần), "bàn" (đèn bàn)
 
 
 @dataclass
@@ -229,9 +233,24 @@ class IntentMapper:
                     best_overall_len = room_len
 
         if best_overall_score >= 60.0 and best_overall_room:
-            # Special case: nếu match qua 'den ngu' (ví dụ: 'bật đèn ngủ'), giữ lại chữ 'đèn' để intent mapper xử lý tiếp
+            # Special case: nếu match qua 'den ngu', 'den led ngu'..., giữ lại từ khóa thiết bị để intent mapper xử lý tiếp
             matched_slice = text_words_norm[best_overall_start : best_overall_start + best_overall_len]
-            if matched_slice == ["den", "ngu"]:
+            if matched_slice in [["den", "ngu"], ["dem", "ngu"]]:
+                remaining_words = (
+                    text_words_orig[:best_overall_start + 1]
+                    + text_words_orig[best_overall_start + best_overall_len:]
+                )
+            elif matched_slice in [["den", "phong", "ngu"], ["dem", "phong", "ngu"]]:
+                remaining_words = (
+                    text_words_orig[:best_overall_start + 1]
+                    + text_words_orig[best_overall_start + best_overall_len:]
+                )
+            elif matched_slice in [["den", "led", "ngu"], ["den", "rgb", "ngu"]]:
+                remaining_words = (
+                    text_words_orig[:best_overall_start + 2]
+                    + text_words_orig[best_overall_start + best_overall_len:]
+                )
+            elif matched_slice in [["led", "ngu"], ["rgb", "ngu"]]:
                 remaining_words = (
                     text_words_orig[:best_overall_start + 1]
                     + text_words_orig[best_overall_start + best_overall_len:]
@@ -250,8 +269,8 @@ class IntentMapper:
 
         return None, text_lower
 
-    def extract_parameters(self, text: str, intent_def: dict) -> tuple[str, dict[str, Any]]:
-        """Trích xuất tham số từ câu nói (VD: nhiệt độ, độ sáng).
+    def extract_parameters(self, text: str, intent_def: dict, mode_extracted: str | None = None) -> tuple[str, dict[str, Any]]:
+        """Trích xuất tham số từ câu nói (VD: nhiệt độ, độ sáng, màu sắc, chế độ).
 
         Logic phân biệt tuyệt đối vs tương đối:
         - Nhiệt độ 16-30: luôn là tuyệt đối (SET_TEMPERATURE) vì không ai "tăng thêm 26 độ"
@@ -263,6 +282,7 @@ class IntentMapper:
         Args:
             text: câu nói gốc
             intent_def: definition của intent
+            mode_extracted: tên chế độ / màu đã bóc tách từ trước (nếu có)
 
         Returns:
             (action đã chốt, Dict tham số)
@@ -272,7 +292,53 @@ class IntentMapper:
         dev_type = intent_def["device_type"]
         text_num = normalize_spoken_numbers(text.lower())
 
-        # Tìm bất kỳ con số nào trong câu
+        if mode_extracted:
+            params["mode"] = mode_extracted.strip()
+
+        # 1. Trích xuất màu sắc cho led_rgb hoặc SET_COLOR
+        if dev_type == "led_rgb" or action == "SET_COLOR" or (dev_type == "light" and mode_extracted):
+            color_map = {
+                "đỏ": (255, 0, 0),
+                "do": (255, 0, 0),
+                "xanh lá": (0, 255, 0),
+                "xanh la": (0, 255, 0),
+                "xanh lục": (0, 255, 0),
+                "xanh luc": (0, 255, 0),
+                "xanh dương": (0, 100, 255),
+                "xanh duong": (0, 100, 255),
+                "xanh lam": (0, 100, 255),
+                "xanh da trời": (0, 191, 255),
+                "xanh da troi": (0, 191, 255),
+                "xanh biển": (0, 100, 255),
+                "xanh bien": (0, 100, 255),
+                "xanh ngọc": (0, 255, 255),
+                "xanh ngoc": (0, 255, 255),
+                "xanh": (0, 100, 255),
+                "vàng": (255, 255, 0),
+                "vang": (255, 255, 0),
+                "cam": (255, 128, 0),
+                "tím": (128, 0, 128),
+                "tim": (128, 0, 128),
+                "hồng": (255, 105, 180),
+                "hong": (255, 105, 180),
+                "trắng": (255, 255, 255),
+                "trang": (255, 255, 255),
+            }
+            sorted_colors = sorted(color_map.keys(), key=lambda c: len(c), reverse=True)
+            text_lower = text.lower()
+            for c_name in sorted_colors:
+                pattern_c = r'\b' + re.escape(c_name) + r'\b'
+                if re.search(pattern_c, text_lower):
+                    r, g, b = color_map[c_name]
+                    action = "SET_COLOR"
+                    params["r"] = r
+                    params["g"] = g
+                    params["b"] = b
+                    params["color"] = c_name
+                    logger.info("Param: màu LED → SET_COLOR r=%d, g=%d, b=%d (%s)", r, g, b, c_name)
+                    break
+
+        # 2. Tìm bất kỳ con số nào trong câu (nhiệt độ, độ sáng)
         match = re.search(r"(\d+)", text_num)
         if match:
             value = int(match.group(1))
@@ -293,7 +359,7 @@ class IntentMapper:
                     params["amount"] = value
                     logger.info("Param: nhiệt độ tương đối → amount=%d", value)
 
-            elif dev_type == "light":
+            elif dev_type in {"light", "led_rgb"}:
                 if action == "SET_BRIGHTNESS" or has_absolute_keyword or (10 <= value <= 100):
                     # Số trong khoảng độ sáng hợp lý (10-100%) hoặc có từ khóa tuyệt đối hoặc intent là SET_BRIGHTNESS → tuyệt đối
                     action = "SET_BRIGHTNESS"
@@ -328,11 +394,50 @@ class IntentMapper:
         # Bước 1: Tách room
         room, remaining = self.extract_room(text_norm_nums)
 
-        # Bước 2: Fuzzy match phần còn lại với tất cả patterns
         if not remaining:
             return None
-            
-        remaining_norm = strip_vietnamese_tones(remaining)
+
+        # Bước 1.5: Trích xuất chế độ ánh sáng / màu tùy chỉnh (nếu có)
+        mode_extracted = None
+        # 1. Tìm cụm từ "chế độ <tên>" hoặc "(sang/thành/về) chế độ <tên>"
+        mode_match = re.search(
+            r"(?:(?:sang|thành|về)\s+)?chế\s+độ\s+([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+            remaining,
+            re.IGNORECASE,
+        )
+        if not mode_match:
+            # 2. Tìm cụm từ chuyển đích: "(sang|thành|về) [màu] <tên>"
+            mode_match = re.search(
+                r"(?:sang|thành|về)\s+(?:màu\s+)?([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+                remaining,
+                re.IGNORECASE,
+            )
+        if not mode_match:
+            # 3. Tìm cụm "màu <tên>" không đứng ngay sau động từ đổi/chuyển/chỉnh/đặt
+            m_color = re.search(
+                r"\bmàu\s+([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+                remaining,
+                re.IGNORECASE,
+            )
+            if m_color:
+                pre = remaining[:m_color.start()].rstrip().split()
+                last_word = pre[-1].lower() if pre else ""
+                if last_word not in {"đổi", "doi", "chuyển", "chuyen", "chỉnh", "chinh", "đặt", "dat"}:
+                    mode_match = m_color
+
+        remaining_for_match = remaining
+        if mode_match:
+            candidate_mode = mode_match.group(1).strip()
+            if candidate_mode:
+                mode_extracted = candidate_mode
+                start, end = mode_match.span()
+                remaining_for_match = (remaining[:start] + " " + remaining[end:]).strip()
+                remaining_for_match = re.sub(r"\s+", " ", remaining_for_match).strip()
+                if not remaining_for_match:
+                    remaining_for_match = "bật đèn"
+
+        # Bước 2: Fuzzy match phần còn lại với tất cả patterns
+        remaining_norm = strip_vietnamese_tones(remaining_for_match)
         
         # Tạo danh sách các pattern đã được chuẩn hóa
         all_norm_patterns = [p_norm for _, p_norm, _ in self._pattern_index]
@@ -360,7 +465,21 @@ class IntentMapper:
             return None
 
         # Bước 3: Trích xuất tham số
-        action, params = self.extract_parameters(text, intent_def)
+        action, params = self.extract_parameters(text, intent_def, mode_extracted=mode_extracted)
+
+        # Bước 4: Trích xuất gợi ý tên thiết bị cụ thể (device_name_hint)
+        # Giúp phân biệt chính xác giữa 'đèn ngủ' và 'đèn trần' hoặc 'đèn led'
+        device_name_hint = ""
+        text_lower = text.lower()
+        if intent_def["device_type"] == "light":
+            if "đèn ngủ" in text_lower or (re.search(r'\bngủ\b', text_lower) and "phòng ngủ" not in text_lower):
+                device_name_hint = "ngủ"
+            elif "đèn trần" in text_lower or (re.search(r'\btrần\b', text_lower) and "tầng trệt" not in text_lower):
+                device_name_hint = "trần"
+            elif "đèn bàn" in text_lower or re.search(r'\bbàn\b', text_lower):
+                device_name_hint = "bàn"
+            elif "đèn chùm" in text_lower or re.search(r'\bchùm\b', text_lower):
+                device_name_hint = "chùm"
 
         intent_result = IntentResult(
             action=action,
@@ -370,12 +489,14 @@ class IntentMapper:
             confidence=score,
             matched_pattern=matched_original_pattern,
             raw_text=text,
+            device_name_hint=device_name_hint,
         )
 
         logger.info(
-            "Intent mapped: '%s' → %s %s room=%s params=%s (conf=%.0f%%)",
+            "Intent mapped: '%s' → %s %s room=%s hint='%s' params=%s (conf=%.0f%%)",
             text, intent_result.action, intent_result.device_type,
-            intent_result.room, intent_result.parameters, intent_result.confidence,
+            intent_result.room, intent_result.device_name_hint,
+            intent_result.parameters, intent_result.confidence,
         )
 
         return intent_result

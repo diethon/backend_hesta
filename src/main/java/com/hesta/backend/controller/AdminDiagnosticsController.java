@@ -58,6 +58,16 @@ public class AdminDiagnosticsController {
                 .build());
     }
 
+    @PostMapping("/nodes/{nodeId}/circuit-breaker/trip")
+    public ResponseEntity<ApiResponse<NodeDiagnosticsResponse>> tripCircuitBreakerByNodeId(@PathVariable UUID nodeId) {
+        NodeDiagnosticsResponse result = diagnosticsService.tripCircuitBreaker(nodeId);
+        return ResponseEntity.ok(ApiResponse.<NodeDiagnosticsResponse>builder()
+                .code(1000)
+                .message("Đã ngắt mạch bảo vệ (TRIP CIRCUIT) cho node " + nodeId)
+                .result(result)
+                .build());
+    }
+
     @PostMapping("/circuit-breaker/{nodeCode}/trip")
     public ResponseEntity<ApiResponse<NodeDiagnosticsResponse>> tripCircuitBreaker(@PathVariable String nodeCode) {
         NodeDiagnosticsResponse result = diagnosticsService.tripCircuitBreaker(nodeCode);
