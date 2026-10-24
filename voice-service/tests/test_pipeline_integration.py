@@ -373,7 +373,8 @@ class TestPipelineMultiDevice:
         assert result.success is True
         assert result.dispatch_result is not None
         assert result.dispatch_result.total_devices == 3
-        assert "tất cả 3 thiết bị phòng ngủ" in result.message
+        assert "tất cả 3 thiết bị" in result.message
+        assert "phòng ngủ" in result.message.lower()
 
     @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
     def test_turn_off_all_fans(self, pipeline):
@@ -393,3 +394,62 @@ class TestPipelineMultiDevice:
         # 4 đèn (dev-001, dev-002, dev-003, dev-006)
         assert result.dispatch_result.total_devices == 4
         assert "tất cả 4 đèn trong nhà" in result.message
+
+
+class TestPipelineCustomRooms:
+    """Test pipeline với các phòng tùy chỉnh thực tế được nạp từ device directory."""
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_pipeline_with_dynamic_room(self, intents_file):
+        custom_devices = [
+            {"id": "dev-010", "name": "Đèn bàn", "type": "light", "room": "Phòng của Quân", "homeId": "home-custom"},
+            {"id": "dev-011", "name": "Quạt trần", "type": "fan", "room": "Phòng Gaming", "homeId": "home-custom"},
+        ]
+        transport = make_mock_backend_transport(devices=custom_devices)
+        client = httpx.Client(base_url="http://localhost:8080", transport=transport)
+
+        config = DeviceDirectoryConfig(
+            base_url="http://localhost:8080",
+            devices_endpoint="/internal/devices",
+        )
+        mock_stt = MagicMock(spec=SpeechToText)
+        mock_stt.is_loaded = True
+
+        device_directory = DeviceDirectory(config=config, http_client=client)
+        device_directory.refresh(home_id="home-custom")
+
+        intent_mapper = IntentMapper(IntentConfig(min_confidence=60.0))
+        intent_mapper.load_intents(intents_file)
+
+        dispatcher = Dispatcher(
+            DispatchConfig(base_url="http://localhost:8080"),
+            http_client=client,
+        )
+        dialogue_state = DialogueState(ttl_seconds=45)
+        audio_gate = AudioGate(AudioGateConfig())
+
+        pipeline = VoicePipeline(
+            audio_gate=audio_gate,
+            stt=mock_stt,
+            device_directory=device_directory,
+            intent_mapper=intent_mapper,
+            dispatcher=dispatcher,
+            dialogue_state=dialogue_state,
+            home_id="home-custom",
+        )
+
+        # 1. Thử lệnh với 'phòng quân' (alias của 'Phòng của Quân')
+        res1 = pipeline.process_text("bật đèn phòng quân")
+        assert res1.success is True
+        assert res1.intent is not None
+        assert res1.intent.room == "Phòng của Quân"
+        assert res1.dispatch_result is not None
+        assert "dev-010" in [r.device_id for r in res1.dispatch_result.results]
+
+        # 2. Thử lệnh với 'phòng game' (alias của 'Phòng Gaming')
+        res2 = pipeline.process_text("tắt quạt phòng game")
+        assert res2.success is True
+        assert res2.intent is not None
+        assert res2.intent.room == "Phòng Gaming"
+        assert res2.dispatch_result is not None
+        assert "dev-011" in [r.device_id for r in res2.dispatch_result.results]

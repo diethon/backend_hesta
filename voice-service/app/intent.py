@@ -89,6 +89,54 @@ ROOM_PHONETIC_VARIANTS = {
 }
 
 
+def generate_room_aliases(room_name: str) -> list[tuple[str, str]]:
+    """Tạo danh sách các biến thể gọi tên phòng (alias, canonical_name).
+
+    Hỗ trợ:
+      - 'Phòng của X' <=> 'Phòng X' (ví dụ: 'phòng của quân' <-> 'phòng quân')
+      - Phòng chức năng: 'phòng gaming' <-> 'phòng game', 'phòng karaoke' <-> 'phòng hát'
+      - Lặp từ âm học Whisper cho tên riêng Phong: 'phòng phòng' -> 'Phòng của Phong'
+    """
+    clean = room_name.strip()
+    if not clean:
+        return []
+    clean_lower = clean.lower()
+    aliases: list[tuple[str, str]] = [(clean_lower, clean)]
+
+    # 1. Tách phần tên sau 'phòng' hoặc 'phòng của'
+    rest = re.sub(r"^(phòng\s+(của\s+)?)", "", clean_lower).strip()
+
+    if clean_lower.startswith("phòng của "):
+        short = "phòng " + rest
+        aliases.append((short, clean))
+    elif clean_lower.startswith("phòng "):
+        standard_functional = {
+            "khách", "ngủ", "bếp", "tắm", "ăn", "làm việc", "học", "trẻ em",
+            "thờ", "sinh hoạt", "chờ", "vệ sinh", "gaming", "game", "karaoke",
+            "gym", "cinema"
+        }
+        if rest not in standard_functional:
+            aliases.append(("phòng của " + rest, clean))
+
+    # 2. Xử lý tên riêng Phong bị lặp âm học trong Whisper (phòng phòng / phong phong)
+    if "phong" in strip_vietnamese_tones(rest).split():
+        aliases.append(("phòng phòng", clean))
+        aliases.append(("phong phong", clean))
+        aliases.append(("phòng của phòng", clean))
+
+    # 3. Xử lý từ đồng nghĩa / tiếng Anh / phiên âm giải trí
+    if "gaming" in clean_lower:
+        aliases.append((clean_lower.replace("gaming", "game"), clean))
+    elif "game" in clean_lower:
+        aliases.append((clean_lower.replace("game", "gaming"), clean))
+    if "karaoke" in clean_lower:
+        aliases.append((clean_lower.replace("karaoke", "hát"), clean))
+    if "chiếu phim" in clean_lower or "xem phim" in clean_lower:
+        aliases.append(("phòng cinema", clean))
+
+    return list(dict.fromkeys(aliases))
+
+
 VI_SPOKEN_NUMBERS = [
     (r"\b(một trăm|trăm|1 đám|một đám)\b", "100"),
     (r"\b(chín mươi|chín chục)\b", "90"),
@@ -162,6 +210,11 @@ class IntentMapper:
         self.config = config or IntentConfig()
         self._intents: list[dict] = []
         self._pattern_index: list[tuple[str, str, dict]] = []  # (original_pattern, normalized_pattern, intent_def)
+        self._custom_rooms: list[str] = []
+
+    def set_custom_rooms(self, rooms: list[str] | set[str]) -> None:
+        """Đăng ký danh sách phòng tùy chỉnh từ Database của ngôi nhà."""
+        self._custom_rooms = list(dict.fromkeys(rooms))
 
     def load_intents(self, filepath: str | Path) -> None:
         """Load intent definitions từ JSON file."""
@@ -183,34 +236,53 @@ class IntentMapper:
                 self._pattern_index.append((pat_lower, pat_norm, intent_def))
 
 
-    def extract_room(self, text: str) -> tuple[str | None, str]:
-        """Tách tên phòng ra khỏi câu nói sử dụng sliding window fuzzy matching."""
+    def extract_room(self, text: str, custom_rooms: list[str] | None = None) -> tuple[str | None, str]:
+        """Tách tên phòng ra khỏi câu nói sử dụng mô hình nhận diện kết hợp 2 tầng (Hybrid Layered).
+
+        Tầng 1: ROOM_PATTERNS mặc định (kiến thức nền tảng: phòng khách, phòng ngủ...).
+        Tầng 2: custom_rooms nạp động từ DB (phòng của đức, phòng gaming, phòng của việt...).
+        """
         text_lower = text.lower().strip()
         text_norm = strip_vietnamese_tones(text_lower)
-        
+
         text_words_orig = text_lower.split()
         text_words_norm = text_norm.split()
 
-        norm_rooms = {strip_vietnamese_tones(r): r for r in ROOM_PATTERNS}
-        
+        # candidate_rooms: norm_alias -> (canonical_room_name, is_dynamic)
+        candidate_rooms: dict[str, tuple[str, bool]] = {}
+
+        # 1. Nạp Tầng 1: Các phòng tiêu chuẩn mặc định
+        for r in ROOM_PATTERNS:
+            candidate_rooms[strip_vietnamese_tones(r.lower())] = (r, False)
+
+        # 2. Nạp Tầng 2: Các phòng động thực tế từ Database của người dùng + sinh aliases
+        rooms_to_use = custom_rooms if custom_rooms is not None else self._custom_rooms
+        if rooms_to_use:
+            for cr in rooms_to_use:
+                for alias, canon in generate_room_aliases(cr):
+                    norm_alias = strip_vietnamese_tones(alias)
+                    # Phòng động từ DB sẽ ghi đè ưu tiên nếu trùng normalized alias
+                    candidate_rooms[norm_alias] = (canon, True)
+
         best_overall_score = 0.0
         best_overall_room = None
         best_overall_start = -1
         best_overall_len = 0
-        
-        for norm_room, original_room in norm_rooms.items():
+        best_is_dynamic = False
+
+        for norm_room, (original_room, is_dynamic) in candidate_rooms.items():
             room_words = norm_room.split()
             room_len = len(room_words)
-            
+
             if room_len > len(text_words_norm):
                 continue
-                
+
             for start in range(len(text_words_norm) - room_len + 1):
                 window_words = text_words_norm[start : start + room_len]
                 window_norm = " ".join(window_words)
 
                 matched_room = original_room
-                if window_norm in ROOM_PHONETIC_VARIANTS:
+                if window_norm in ROOM_PHONETIC_VARIANTS and not is_dynamic:
                     score = 100.0
                     matched_room = ROOM_PHONETIC_VARIANTS[window_norm]
                 elif room_len == 1:
@@ -218,6 +290,11 @@ class IntentMapper:
                     if score < 88.0:
                         continue
                 else:
+                    # Phân xử va chạm âm học: 'phòng làm việc' bắt buộc phải có từ 'lam'
+                    # để tránh nhận nhầm khi người dùng nói 'phòng của việt' / 'phòng việt'
+                    if norm_room == "phong lam viec" and "lam" not in window_words:
+                        continue
+
                     # Multi-word rooms: mỗi từ phải có độ tương đồng tối thiểu (>= 65%)
                     # và trung bình cộng phải >= 80% để tránh false positive (như 'mở cổng' khớp 'ban công')
                     word_scores = [fuzz.ratio(w, r) for w, r in zip(window_words, room_words)]
@@ -225,12 +302,25 @@ class IntentMapper:
                         continue
                     score = sum(word_scores) / len(word_scores)
 
-                # Chỉ cập nhật nếu điểm cao hơn, hoặc bằng điểm nhưng phòng dài hơn (VD: 'phòng làm việc' > 'phòng')
-                if score > best_overall_score or (score == best_overall_score and room_len > best_overall_len):
+                # Tiêu chí chọn match tốt nhất:
+                # 1. Điểm số cao hơn
+                # 2. Điểm bằng nhau: Ưu tiên phòng thực tế của ngôi nhà (Dynamic Room)
+                # 3. Cùng loại: Ưu tiên chuỗi khớp dài hơn (VD: 'phòng làm việc' > 'phòng')
+                is_better = False
+                if score > best_overall_score:
+                    is_better = True
+                elif score == best_overall_score:
+                    if is_dynamic and not best_is_dynamic:
+                        is_better = True
+                    elif is_dynamic == best_is_dynamic and room_len > best_overall_len:
+                        is_better = True
+
+                if is_better:
                     best_overall_score = score
                     best_overall_room = matched_room
                     best_overall_start = start
                     best_overall_len = room_len
+                    best_is_dynamic = is_dynamic
 
         if best_overall_score >= 60.0 and best_overall_room:
             # Special case: nếu match qua 'den ngu', 'den led ngu'..., giữ lại từ khóa thiết bị để intent mapper xử lý tiếp
@@ -264,7 +354,7 @@ class IntentMapper:
             remaining = re.sub(r"\s+", " ", remaining).strip()
             remaining = re.sub(r"^(ở|tại|trong|của)\s+", "", remaining).strip()
             remaining = re.sub(r"\s+(ở|tại|trong|của)$", "", remaining).strip()
-            
+
             return best_overall_room, remaining
 
         return None, text_lower
@@ -372,11 +462,12 @@ class IntentMapper:
 
         return action, params
 
-    def map(self, text: str) -> IntentResult | None:
+    def map(self, text: str, custom_rooms: list[str] | None = None) -> IntentResult | None:
         """Map transcript text thành intent.
 
         Args:
             text: transcript từ STT
+            custom_rooms: danh sách phòng tùy chỉnh từ DB (nếu có)
 
         Returns:
             IntentResult nếu match, None nếu không match hoặc confidence quá thấp.
@@ -391,8 +482,8 @@ class IntentMapper:
         # Chuẩn hóa số đọc bằng chữ trước (VD: tám mươi -> 80)
         text_norm_nums = normalize_spoken_numbers(text)
 
-        # Bước 1: Tách room
-        room, remaining = self.extract_room(text_norm_nums)
+        # Bước 1: Tách room (kết hợp danh mục tiêu chuẩn và custom_rooms)
+        room, remaining = self.extract_room(text_norm_nums, custom_rooms=custom_rooms)
 
         if not remaining:
             return None

@@ -145,6 +145,66 @@ class TestExtractRoom:
         room, remaining = mapper.extract_room("Bật Đèn Phòng Khách")
         assert room == "phòng khách"
 
+    def test_dynamic_custom_room_personal_name(self, mapper):
+        custom_rooms = ["Phòng của Đức", "Phòng của Quân"]
+        # Có tiền tố 'của'
+        room1, rem1 = mapper.extract_room("bật đèn phòng của đức", custom_rooms=custom_rooms)
+        assert room1 == "Phòng của Đức"
+        assert "bật đèn" in rem1
+
+        # Rút gọn không có tiền tố 'của'
+        room2, rem2 = mapper.extract_room("tắt quạt phòng đức", custom_rooms=custom_rooms)
+        assert room2 == "Phòng của Đức"
+
+        # Phòng Quân
+        room3, rem3 = mapper.extract_room("bật đèn phòng quân", custom_rooms=custom_rooms)
+        assert room3 == "Phòng của Quân"
+
+    def test_dynamic_custom_room_disambiguation_viet_vs_lam_viec(self, mapper):
+        """Phòng của Việt / Phòng Việt không được nhầm lẫn với phòng làm việc."""
+        custom_rooms = ["Phòng của Việt", "phòng làm việc"]
+        room_viet, _ = mapper.extract_room("bật đèn phòng của việt", custom_rooms=custom_rooms)
+        assert room_viet == "Phòng của Việt"
+
+        room_viet_short, _ = mapper.extract_room("bật đèn phòng việt", custom_rooms=custom_rooms)
+        assert room_viet_short == "Phòng của Việt"
+
+        room_work, _ = mapper.extract_room("bật đèn phòng làm việc", custom_rooms=custom_rooms)
+        assert room_work == "phòng làm việc"
+
+    def test_dynamic_custom_room_phong_acoustic_repetition(self, mapper):
+        """Whisper nhận nhầm 'phòng của phong' thành 'phòng phòng' hoặc 'phong phong'."""
+        custom_rooms = ["Phòng của Phong"]
+        room1, _ = mapper.extract_room("bật đèn phòng phòng", custom_rooms=custom_rooms)
+        assert room1 == "Phòng của Phong"
+
+        room2, _ = mapper.extract_room("tắt quạt phòng của phong", custom_rooms=custom_rooms)
+        assert room2 == "Phòng của Phong"
+
+    def test_dynamic_custom_room_gaming_and_karaoke(self, mapper):
+        custom_rooms = ["Phòng Gaming", "Phòng Karaoke"]
+        room_g1, _ = mapper.extract_room("bật đèn phòng gaming", custom_rooms=custom_rooms)
+        assert room_g1 == "Phòng Gaming"
+
+        room_g2, _ = mapper.extract_room("tắt quạt phòng game", custom_rooms=custom_rooms)
+        assert room_g2 == "Phòng Gaming"
+
+        room_k1, _ = mapper.extract_room("bật đèn phòng karaoke", custom_rooms=custom_rooms)
+        assert room_k1 == "Phòng Karaoke"
+
+        room_k2, _ = mapper.extract_room("tắt đèn phòng hát", custom_rooms=custom_rooms)
+        assert room_k2 == "Phòng Karaoke"
+
+    def test_empty_db_standard_room_fallback(self, mapper):
+        """Khi DB nhà mới tạo chưa có phòng hoặc danh sách rỗng, vẫn nhận diện tốt các phòng chuẩn."""
+        custom_rooms = []
+        room_living, rem = mapper.extract_room("bật đèn phòng khách", custom_rooms=custom_rooms)
+        assert room_living == "phòng khách"
+        assert "bật đèn" in rem
+
+        room_bed, _ = mapper.extract_room("tắt quạt phòng ngủ", custom_rooms=custom_rooms)
+        assert room_bed == "phòng ngủ"
+
 
 class TestIntentMapping:
     def test_turn_on_light(self, mapper):
@@ -160,6 +220,22 @@ class TestIntentMapping:
         assert result.action == "TURN_OFF"
         assert result.device_type == "light"
         assert result.room == "phòng ngủ"
+
+    def test_custom_rooms_in_map(self, mapper):
+        # 1. Truyền custom_rooms trực tiếp vào map()
+        result1 = mapper.map("bật đèn phòng của đức", custom_rooms=["Phòng của Đức"])
+        assert result1 is not None
+        assert result1.action == "TURN_ON"
+        assert result1.device_type == "light"
+        assert result1.room == "Phòng của Đức"
+
+        # 2. Cài đặt qua set_custom_rooms()
+        mapper.set_custom_rooms(["Phòng Gaming", "Phòng của Phong"])
+        result2 = mapper.map("tắt quạt phòng game")
+        assert result2 is not None
+        assert result2.action == "TURN_OFF"
+        assert result2.device_type == "fan"
+        assert result2.room == "Phòng Gaming"
 
     def test_turn_on_fan(self, mapper):
         result = mapper.map("mở quạt phòng khách")

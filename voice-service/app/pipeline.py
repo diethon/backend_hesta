@@ -236,7 +236,8 @@ class VoicePipeline:
 
         # === BƯỚC 2: Intent Mapping ===
         t0 = time.perf_counter()
-        intent = self.intent_mapper.map(transcript)
+        known_rooms = self.device_directory.get_known_rooms(self.home_id)
+        intent = self.intent_mapper.map(transcript, custom_rooms=known_rooms)
         step_durations["intent_ms"] = (time.perf_counter() - t0) * 1000
 
         if intent is None:
@@ -426,7 +427,8 @@ class VoicePipeline:
 
         # Skip STT, đi thẳng vào intent mapping
         t0 = time.perf_counter()
-        intent = self.intent_mapper.map(text)
+        known_rooms = self.device_directory.get_known_rooms(self.home_id)
+        intent = self.intent_mapper.map(text, custom_rooms=known_rooms)
         step_durations["intent_ms"] = (time.perf_counter() - t0) * 1000
 
         if intent is None:
@@ -581,3 +583,14 @@ class VoicePipeline:
             total_duration_ms=round(total_ms, 1),
             step_durations=step_durations,
         )
+
+    def start(self) -> None:
+        """Khởi động pipeline (start device directory refresh background thread)."""
+        self.device_directory.start(home_id=self.home_id)
+        known_rooms = self.device_directory.get_known_rooms(self.home_id)
+        if known_rooms:
+            self.intent_mapper.set_custom_rooms(known_rooms)
+
+    def stop(self) -> None:
+        """Dừng pipeline và giải phóng tài nguyên background."""
+        self.device_directory.stop()
