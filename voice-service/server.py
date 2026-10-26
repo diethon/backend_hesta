@@ -143,6 +143,7 @@ class VoiceCommandResponse(BaseModel):
     stepDurations: dict[str, float] = {}
     audioUrl: str | None = None
     audioData: str | None = None
+    subCommands: list[dict[str, Any]] = []
 
 
 class HealthResponse(BaseModel):
@@ -232,6 +233,16 @@ async def process_voice_command(
             # Nếu chưa có, kích hoạt sinh ngầm ngay để sẵn sàng khi Frontend gọi /api/voice/tts
             asyncio.create_task(tts_manager.synthesize(clean_msg))
 
+    sub_commands_data = []
+    for sub in getattr(result, "sub_results", []):
+        sub_commands_data.append({
+            "message": sub.message,
+            "success": sub.success,
+            "action": sub.intent.action if sub.intent else None,
+            "room": sub.intent.room if sub.intent else None,
+            "deviceType": sub.intent.device_type if sub.intent else None,
+        })
+
     return VoiceCommandResponse(
         success=result.success,
         message=result.message,
@@ -243,6 +254,7 @@ async def process_voice_command(
         stepDurations=result.step_durations,
         audioUrl=audio_url,
         audioData=audio_data,
+        subCommands=sub_commands_data,
     )
 
 

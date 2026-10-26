@@ -453,3 +453,61 @@ class TestPipelineCustomRooms:
         assert res2.intent.room == "Phòng Gaming"
         assert res2.dispatch_result is not None
         assert "dev-011" in [r.device_id for r in res2.dispatch_result.results]
+
+
+class TestPipelineCompoundCommands:
+    """Kiểm thử thực thi chuỗi câu lệnh kép trong pipeline."""
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_compound_two_independent_commands(self, pipeline):
+        """'tắt quạt phòng khách và bật đèn phòng ngủ' -> tắt quạt PK và bật đèn PN."""
+        result = pipeline.process_text("tắt quạt phòng khách và bật đèn phòng ngủ")
+        assert result.success is True
+        assert result.message.lower() == "đã tắt quạt phòng khách và bật đèn phòng ngủ."
+        assert len(result.sub_results) == 2
+        assert result.dispatch_result is not None
+        assert result.dispatch_result.total_devices == 2
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_compound_shared_action_verb(self, pipeline):
+        """'bật quạt phòng khách và đèn phòng ngủ' -> tự động kế thừa động từ 'bật'."""
+        result = pipeline.process_text("bật quạt phòng khách và đèn phòng ngủ")
+        assert result.success is True
+        assert result.message.lower() == "đã bật quạt phòng khách và bật đèn phòng ngủ."
+        assert len(result.sub_results) == 2
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_compound_shared_device_multiple_rooms(self, pipeline):
+        """'tắt đèn phòng khách và phòng ngủ' -> tắt đèn PK và tắt đèn PN."""
+        result = pipeline.process_text("tắt đèn phòng khách và phòng ngủ")
+        assert result.success is True
+        assert len(result.sub_results) == 2
+        # PK có 2 đèn (dev-001, dev-002), PN có 1 đèn (dev-003) -> tổng 3 đèn
+        assert result.dispatch_result.total_devices == 3
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_compound_partial_success(self, pipeline):
+        """'tắt quạt phòng khách và bật điều hòa phòng khách' -> PK không có điều hòa."""
+        result = pipeline.process_text("tắt quạt phòng khách và bật điều hòa phòng khách")
+        assert result.success is True  # Có ít nhất 1 lệnh thành công
+        assert "tắt quạt" in result.message and "phòng khách" in result.message.lower()
+        assert "nhưng không tìm thấy điều hòa" in result.message.lower()
+        assert len(result.sub_results) == 2
+        assert result.sub_results[0].success is True
+        assert result.sub_results[1].success is False
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_compound_command_via_audio(self, pipeline):
+        """Kiểm thử chuỗi lệnh kép truyền qua audio pipeline STT."""
+        mock_stt = pipeline.stt
+        mock_stt.transcribe.return_value = STTResult(
+            text="tắt quạt phòng khách và bật đèn phòng ngủ", duration_ms=120.0
+        )
+        audio = np.zeros(16000, dtype=np.float32)
+        result = pipeline.process_audio(audio)
+        assert result.success is True
+        assert result.message.lower() == "đã tắt quạt phòng khách và bật đèn phòng ngủ."
+        assert len(result.sub_results) == 2
+        assert "stt_ms" in result.step_durations
+        assert "intent_ms" in result.step_durations
+
