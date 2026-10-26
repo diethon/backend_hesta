@@ -179,84 +179,65 @@ class TTSManager:
 
     def start_warmup(self, extra_phrases: list[str] | None = None) -> None:
         """Khởi động pre-warming trong background task."""
-        if self._warmup_task and not self._warmup_task.done():
-            return
-        self._warmup_task = asyncio.create_task(self._warmup_worker(extra_phrases or []))
+        from app.matrix_generator import generate_matrix_phrases
 
-    async def _warmup_worker(self, extra_phrases: list[str]) -> None:
-        """Tải trước các câu trả lời thông dụng vào bộ nhớ đệm."""
-        default_phrases = [
-            # Thành công cơ bản
-            "Đã bật thiết bị",
-            "Đã tắt thiết bị",
-            "Đã bật tất cả thiết bị",
-            "Đã tắt tất cả thiết bị",
-            "Đã bật đèn",
-            "Đã tắt đèn",
-            "Đã bật tất cả đèn",
-            "Đã tắt tất cả đèn",
-            "Đã bật quạt",
-            "Đã tắt quạt",
-            "Đã mở cửa",
-            "Đã đóng cửa",
-            "Đã mở cổng",
-            "Đã đóng cổng",
-            "Đã bật điều hòa",
-            "Đã tắt điều hòa",
-            # Thành công theo phòng
-            "Đã bật quạt phòng khách",
-            "Đã tắt quạt phòng khách",
-            "Đã bật đèn phòng khách",
-            "Đã tắt đèn phòng khách",
-            "Đã bật đèn phòng ngủ",
-            "Đã tắt đèn phòng ngủ",
-            "Đã bật điều hòa phòng ngủ",
-            "Đã tắt điều hòa phòng ngủ",
-            "Đã bật đèn phòng bếp",
-            "Đã tắt đèn phòng bếp",
-            # Báo lỗi và ngoại lệ khi thiết bị chưa kết nối hoặc mất nguồn
-            "Không thể bật quạt phòng khách — tất cả thiết bị đều lỗi",
-            "Không thể tắt quạt phòng khách — tất cả thiết bị đều lỗi",
-            "Không thể bật đèn phòng khách — tất cả thiết bị đều lỗi",
-            "Không thể tắt đèn phòng khách — tất cả thiết bị đều lỗi",
-            "Không thể bật đèn phòng ngủ — tất cả thiết bị đều lỗi",
-            "Không thể tắt đèn phòng ngủ — tất cả thiết bị đều lỗi",
-            "Không thể bật điều hòa phòng ngủ — tất cả thiết bị đều lỗi",
-            "Không thể tắt điều hòa phòng ngủ — tất cả thiết bị đều lỗi",
-            "Không thể mở cổng — tất cả thiết bị đều lỗi",
-            "Không thể đóng cổng — tất cả thiết bị đều lỗi",
-            "Không thể mở cổng chính — tất cả thiết bị đều lỗi",
-            "Không thể đóng cổng chính — tất cả thiết bị đều lỗi",
-            "Không thể bật máy bơm — tất cả thiết bị đều lỗi",
-            "Không thể tắt máy bơm — tất cả thiết bị đều lỗi",
-            "Không thể bật tất cả thiết bị — tất cả thiết bị đều lỗi",
-            "Không thể tắt tất cả thiết bị — tất cả thiết bị đều lỗi",
-            "Không thể bật tất cả đèn — tất cả thiết bị đều lỗi",
-            "Không thể tắt tất cả đèn — tất cả thiết bị đều lỗi",
-            "Không thể bật quạt — tất cả thiết bị đều lỗi",
-            "Không thể tắt quạt — tất cả thiết bị đều lỗi",
-            "Không thể bật đèn — tất cả thiết bị đều lỗi",
-            "Không thể tắt đèn — tất cả thiết bị đều lỗi",
-            "Không tìm thấy thiết bị nào phù hợp.",
-            "Thiết bị chưa sẵn sàng hoặc đang ngoại tuyến.",
-            "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
-        ]
-        all_phrases = list(dict.fromkeys(default_phrases + extra_phrases))
-        logger.info("Starting TTS pre-warming for %d common phrases...", len(all_phrases))
+        # Tự động sinh ma trận phrases kết hợp với extra_phrases
+        all_phrases = generate_matrix_phrases(custom_devices=None, include_compounds=True)
+        if extra_phrases:
+            all_phrases = list(dict.fromkeys(all_phrases + extra_phrases))
+
+        self.add_warmup_phrases(all_phrases)
+
+    def add_warmup_phrases(self, phrases: list[str]) -> None:
+        """Thêm các câu thoại mới vào hàng đợi pre-warming nền."""
+        if not hasattr(self, "_pending_warmup"):
+            self._pending_warmup: set[str] = set()
+
+        for p in phrases:
+            clean = clean_tts_text(p)
+            if clean and not self.get_cached_audio(clean, self.default_voice):
+                self._pending_warmup.add(clean)
+
+        if self._pending_warmup and (self._warmup_task is None or self._warmup_task.done()):
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    self._warmup_task = loop.create_task(self._warmup_worker())
+            except RuntimeError:
+                # Chưa có running event loop (chạy trong unit test hoặc sync script)
+                pass
+
+    def warmup_room(self, room_name: str, device_types: list[str] | None = None) -> None:
+        """Nạp trước ngầm toàn bộ câu phản hồi cho một phòng mới được tạo."""
+        from app.matrix_generator import generate_phrases_for_room
+
+        phrases = generate_phrases_for_room(room_name, device_types)
+        logger.info("Scheduling TTS warmup for room '%s' (%d phrases)...", room_name, len(phrases))
+        self.add_warmup_phrases(phrases)
+
+    async def _warmup_worker(self) -> None:
+        """Tải trước các câu thoại trong hàng đợi vào bộ nhớ đệm."""
+        if not hasattr(self, "_pending_warmup"):
+            self._pending_warmup = set()
 
         count = 0
-        for phrase in all_phrases:
-            clean = clean_tts_text(phrase)
-            if not self.get_cached_audio(clean, self.default_voice):
+        total_initially = len(self._pending_warmup)
+        logger.info("Starting TTS background pre-warming for %d phrases...", total_initially)
+
+        while self._pending_warmup:
+            phrase = self._pending_warmup.pop()
+            if not self.get_cached_audio(phrase, self.default_voice):
                 try:
-                    await self.synthesize(clean, self.default_voice)
+                    await self.synthesize(phrase, self.default_voice)
                     count += 1
-                    await asyncio.sleep(0.15)  # Tránh dồn request lên server
+                    # Nghỉ 0.15s giữa các câu để hoàn toàn không chiếm dụng CPU và không dồn request
+                    await asyncio.sleep(0.15)
                 except Exception as e:
                     logger.debug("Warmup error for '%s': %s", phrase, e)
 
-        logger.info("TTS pre-warming completed. %d new phrases cached.", count)
+        logger.info("TTS pre-warming finished. %d new phrases cached.", count)
 
 
 # Singleton instance
 tts_manager = TTSManager()
+

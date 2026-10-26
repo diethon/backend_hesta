@@ -58,21 +58,30 @@ def _get_pipeline():
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     pipeline = _get_pipeline()
-    # Tự động trích xuất danh sách thiết bị để pre-warm sẵn giọng đọc thành công & báo lỗi
+    # Tự động trích xuất danh sách phòng & thiết bị thực tế từ DB để sinh ma trận câu thoại
     extra_phrases = []
     try:
-        if pipeline and hasattr(pipeline, "device_directory") and pipeline.device_directory:
-            for dev in getattr(pipeline.device_directory, "_raw_devices", []):
-                name = dev.get("name")
-                if name:
-                    extra_phrases.extend([
-                        f"Đã bật {name}",
-                        f"Đã tắt {name}",
-                        f"Không thể bật {name} — tất cả thiết bị đều lỗi",
-                        f"Không thể tắt {name} — tất cả thiết bị đều lỗi",
-                    ])
+        from app.matrix_generator import generate_matrix_phrases
+
+        custom_rooms = []
+        if pipeline and hasattr(pipeline, "_get_custom_rooms"):
+            custom_rooms = pipeline._get_custom_rooms()
+
+        raw_devs = getattr(pipeline.device_directory, "_raw_devices", []) if pipeline and pipeline.device_directory else []
+        for dev in raw_devs:
+            name = dev.get("name")
+            if name:
+                extra_phrases.extend([
+                    f"Đã bật {name}",
+                    f"Đã tắt {name}",
+                    f"Không thể bật {name} — tất cả thiết bị đều lỗi",
+                    f"Không thể tắt {name} — tất cả thiết bị đều lỗi",
+                ])
+
+        matrix_phrases = generate_matrix_phrases(rooms=custom_rooms, include_compounds=True)
+        extra_phrases.extend(matrix_phrases)
     except Exception as e:
-        logger.debug("Could not extract extra phrases from devices: %s", e)
+        logger.debug("Could not generate matrix phrases on startup: %s", e)
 
     # Khởi động pre-warming giọng nói thông dụng ngầm trong background
     tts_manager.start_warmup(extra_phrases)
@@ -146,6 +155,11 @@ class VoiceCommandResponse(BaseModel):
     subCommands: list[dict[str, Any]] = []
 
 
+class WarmupRoomRequest(BaseModel):
+    room: str
+    devices: list[str] | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
     pipelineReady: bool
@@ -159,6 +173,20 @@ async def health_check():
         status="ok",
         pipelineReady=_pipeline is not None,
     )
+
+
+@app.post("/api/voice/warmup-room")
+async def warmup_room_endpoint(request: WarmupRoomRequest):
+    """Kích hoạt pre-warm âm thanh ngầm cho phòng mới được tạo từ Web / DB."""
+    room_name = request.room.strip()
+    if not room_name:
+        raise HTTPException(status_code=400, detail="Room name is empty")
+
+    tts_manager.warmup_room(room_name, request.devices)
+    return {
+        "status": "accepted",
+        "message": f"Pre-warming scheduled for room: '{room_name}'",
+    }
 
 
 @app.get("/api/voice/tts")
