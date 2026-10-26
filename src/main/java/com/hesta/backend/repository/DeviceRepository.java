@@ -37,6 +37,17 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId")
     List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
+    @Query("""
+            SELECT d FROM Device d
+            LEFT JOIN FETCH d.room r
+            LEFT JOIN FETCH r.home
+            LEFT JOIN FETCH d.node n
+            LEFT JOIN FETCH n.home
+            WHERE (r.home.id = :homeId)
+               OR (r IS NULL AND n.home.id = :homeId)
+            """)
+    List<Device> findByHomeIdWithRoomAndNode(@Param("homeId") UUID homeId);
+
     @EntityGraph(attributePaths = "room")
     @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.id ASC")
     List<Device> findByHomeIdOrderByIdAsc(@Param("homeId") UUID homeId);
@@ -78,4 +89,20 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     Optional<Device> findBySerialNumber(String serialNumber);
 
     boolean existsBySerialNumber(String serialNumber);
+
+    long countByStatus(com.hesta.backend.enums.DeviceStatus status);
+
+    long countByCatalogId(UUID catalogId);
+
+    long countByCatalogIdAndStatus(UUID catalogId, com.hesta.backend.enums.DeviceStatus status);
+
+    long countByModel(String model);
+
+    long countByModelAndStatus(String model, com.hesta.backend.enums.DeviceStatus status);
+
+    @Query("SELECT d.serialNumber FROM Device d WHERE d.serialNumber LIKE CONCAT(:prefix, '%')")
+    List<String> findSerialNumbersStartingWith(@Param("prefix") String prefix);
+
+    @Query("SELECT d.deviceType, COUNT(d) FROM Device d GROUP BY d.deviceType")
+    List<Object[]> countGroupedByDeviceType();
 }

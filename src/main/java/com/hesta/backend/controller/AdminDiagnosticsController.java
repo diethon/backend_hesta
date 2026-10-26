@@ -1,7 +1,10 @@
 package com.hesta.backend.controller;
 
 import com.hesta.backend.diagnostics.DiagnosticsSummaryResponse;
+import com.hesta.backend.diagnostics.MqttDeadLetterDto;
 import com.hesta.backend.diagnostics.MqttDiagnosticsService;
+import com.hesta.backend.diagnostics.MqttDlqService;
+import com.hesta.backend.diagnostics.MqttPacketDto;
 import com.hesta.backend.diagnostics.NodeDiagnosticsResponse;
 import com.hesta.backend.dto.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +22,7 @@ import java.util.UUID;
 public class AdminDiagnosticsController {
 
     private final MqttDiagnosticsService diagnosticsService;
+    private final MqttDlqService dlqService;
 
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<DiagnosticsSummaryResponse>> getSummary() {
@@ -79,11 +83,51 @@ public class AdminDiagnosticsController {
     }
 
     @GetMapping("/mqtt-sniffer")
-    public ResponseEntity<ApiResponse<List<com.hesta.backend.diagnostics.MqttPacketDto>>> getMqttSniffer() {
-        List<com.hesta.backend.diagnostics.MqttPacketDto> packets = diagnosticsService.getSnifferPackets();
-        return ResponseEntity.ok(ApiResponse.<List<com.hesta.backend.diagnostics.MqttPacketDto>>builder()
+    public ResponseEntity<ApiResponse<List<MqttPacketDto>>> getMqttSniffer() {
+        List<MqttPacketDto> packets = diagnosticsService.getSnifferPackets();
+        return ResponseEntity.ok(ApiResponse.<List<MqttPacketDto>>builder()
                 .code(1000)
                 .result(packets)
+                .build());
+    }
+
+    @GetMapping("/dlq")
+    public ResponseEntity<ApiResponse<List<MqttDeadLetterDto>>> getDeadLetters(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) Boolean unhandledOnly) {
+        List<MqttDeadLetterDto> letters = dlqService.getDeadLetters(limit, unhandledOnly);
+        return ResponseEntity.ok(ApiResponse.<List<MqttDeadLetterDto>>builder()
+                .code(1000)
+                .result(letters)
+                .build());
+    }
+
+    @PostMapping("/dlq/{id}/replay")
+    public ResponseEntity<ApiResponse<MqttDeadLetterDto>> replayDeadLetter(@PathVariable String id) {
+        MqttDeadLetterDto result = dlqService.replay(id);
+        return ResponseEntity.ok(ApiResponse.<MqttDeadLetterDto>builder()
+                .code(1000)
+                .message("Replay thông điệp DLQ thành công")
+                .result(result)
+                .build());
+    }
+
+    @PostMapping("/dlq/replay-all")
+    public ResponseEntity<ApiResponse<Integer>> replayAllDeadLetters() {
+        int count = dlqService.replayAll();
+        return ResponseEntity.ok(ApiResponse.<Integer>builder()
+                .code(1000)
+                .message("Đã replay " + count + " thông điệp từ Dead-Letter Queue")
+                .result(count)
+                .build());
+    }
+
+    @DeleteMapping("/dlq")
+    public ResponseEntity<ApiResponse<Void>> clearDlq() {
+        dlqService.clearDlq();
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .code(1000)
+                .message("Đã xóa sạch Dead-Letter Queue")
                 .build());
     }
 }

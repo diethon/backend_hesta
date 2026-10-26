@@ -17,4 +17,5 @@ public interface HomeService {
     void updateMemberRole(UUID ownerId, UUID homeId, UUID memberId, HomeRole newRole);
     void removeMember(UUID ownerId, UUID homeId, UUID memberId);
     Map<String, Object> createHome(UUID userId, String homeName);
+    Map<String, Object> updateHome(UUID userId, UUID homeId, String newName);
 }

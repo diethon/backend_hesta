@@ -23,6 +23,8 @@ from typing import Any
 
 import httpx
 
+from app.text_normalize import strip_vietnamese_tones
+
 logger = logging.getLogger(__name__)
 
 
@@ -342,6 +344,14 @@ class DeviceDirectory:
         r_name = room_name.strip().lower() if room_name else ""
         d_type = device_type.strip().lower()
         key = (home_id, r_name, d_type)
+        r_norm = strip_vietnamese_tones(r_name) if r_name else ""
+
+        def _room_matches(cached_room: str) -> bool:
+            if not r_name:
+                return True
+            if cached_room == r_name:
+                return True
+            return strip_vietnamese_tones(cached_room) == r_norm
 
         def _filter_hint(devs: list[DeviceInfo]) -> list[DeviceInfo]:
             if not device_name_hint or len(devs) <= 1:
@@ -356,7 +366,7 @@ class DeviceDirectory:
                 CONTROLLABLE_TYPES = {"light", "led_rgb", "fan", "air_conditioner", "water_heater", "socket", "tv"}
                 all_devs: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and (not r_name or r == r_name) and t in CONTROLLABLE_TYPES:
+                    if (not home_id or h == home_id) and _room_matches(r) and t in CONTROLLABLE_TYPES:
                         for d in ds:
                             all_devs[d.device_id] = d
                 return list(all_devs.values())
@@ -365,7 +375,7 @@ class DeviceDirectory:
             if is_all and d_type == "light":
                 all_devs: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and (not r_name or r == r_name) and t in {"light", "led_rgb"}:
+                    if (not home_id or h == home_id) and _room_matches(r) and t in {"light", "led_rgb"}:
                         for d in ds:
                             all_devs[d.device_id] = d
                 return list(all_devs.values())
@@ -374,7 +384,7 @@ class DeviceDirectory:
             if d_type == "led_rgb":
                 matched: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and (not r_name or r == r_name) and t == "led_rgb":
+                    if (not home_id or h == home_id) and _room_matches(r) and t == "led_rgb":
                         for d in ds:
                             matched[d.device_id] = d
                 res = list(matched.values())
@@ -384,7 +394,7 @@ class DeviceDirectory:
             if d_type == "light":
                 matched: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and (not r_name or r == r_name) and t == "light":
+                    if (not home_id or h == home_id) and _room_matches(r) and t == "light":
                         for d in ds:
                             matched[d.device_id] = d
                 res = list(matched.values())
@@ -393,7 +403,7 @@ class DeviceDirectory:
                 # Fallback: nếu phòng hoặc nhà KHÔNG CÓ đèn thường nào, fallback sang led_rgb
                 fallback_led: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and (not r_name or r == r_name) and t == "led_rgb":
+                    if (not home_id or h == home_id) and _room_matches(r) and t == "led_rgb":
                         for d in ds:
                             fallback_led[d.device_id] = d
                 if fallback_led:
@@ -402,25 +412,17 @@ class DeviceDirectory:
                 return []
 
             # Các loại thiết bị khác (fan, air_conditioner, gate, v.v.)
-            if r_name:
+            if r_name and not home_id:
                 devs = self._cache.get(key, [])
                 if devs:
                     return _filter_hint(list(devs))
-                matched: dict[str, DeviceInfo] = {}
-                for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and r == r_name and t == d_type:
-                        for d in ds:
-                            matched[d.device_id] = d
-                if matched:
-                    return _filter_hint(list(matched.values()))
-            else:
-                matched: dict[str, DeviceInfo] = {}
-                for (h, r, t), ds in self._cache.items():
-                    if t == d_type and (not home_id or h == home_id):
-                        for d in ds:
-                            matched[d.device_id] = d
-                if matched:
-                    return _filter_hint(list(matched.values()))
+            matched: dict[str, DeviceInfo] = {}
+            for (h, r, t), ds in self._cache.items():
+                if (not home_id or h == home_id) and _room_matches(r) and t == d_type:
+                    for d in ds:
+                        matched[d.device_id] = d
+            if matched:
+                return _filter_hint(list(matched.values()))
             return []
 
         with self._lock:
@@ -484,6 +486,36 @@ class DeviceDirectory:
     def last_refresh_time(self) -> float:
         """Timestamp lần refresh cuối cùng."""
         return self._last_refresh_time
+
+    def get_known_rooms(self, home_id: str = "") -> list[str]:
+        """Lấy danh sách các tên phòng duy nhất hiện có trong hệ thống thiết bị.
+
+        Args:
+            home_id: ID nhà (nếu có để lọc phòng thuộc nhà đó).
+
+        Returns:
+            Danh sách tên phòng duy nhất từ DB/thiết bị thực tế.
+        """
+        with self._lock:
+            rooms: set[str] = set()
+            # 1. Trích xuất từ _raw_devices nếu có (giữ hoa/thường nguyên bản)
+            for dev in self._raw_devices:
+                if not isinstance(dev, dict):
+                    continue
+                d_home = str(dev.get("homeId", dev.get("home_id", "")))
+                if home_id and d_home and d_home != home_id:
+                    continue
+                r_name = str(dev.get("roomName", dev.get("room", ""))).strip()
+                if r_name and r_name.lower() not in {"null", "none", "unknown", ""}:
+                    rooms.add(r_name)
+
+            # 2. Bổ sung từ cache nếu _raw_devices chưa có hoặc rỗng
+            for (h, r, _), _ in self._cache.items():
+                if (not home_id or h == home_id) and r and r not in {"null", "none", "unknown", ""}:
+                    if not any(r.lower() == existing.lower() for existing in rooms):
+                        rooms.add(r)
+
+            return sorted(list(rooms))
 
     def find_light_mode(
         self,

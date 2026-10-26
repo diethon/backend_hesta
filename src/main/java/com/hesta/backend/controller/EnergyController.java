@@ -19,6 +19,8 @@ import java.util.UUID;
 public class EnergyController {
 
     private final EnergyAnalyticsService energyAnalyticsService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.energy.demandresponse.DemandResponseService demandResponseService;
 
     @GetMapping("/homes/{homeId}/energy")
     public ResponseEntity<ApiResponse<EnergyAnalyticsResponse>> getHomeEnergyAnalytics(
@@ -58,6 +60,49 @@ public class EnergyController {
 
         return ResponseEntity.ok(ApiResponse.<DeviceEnergyBreakdown>builder()
                 .code(1000)
+                .result(result)
+                .build());
+    }
+
+    @GetMapping("/homes/{homeId}/dr/settings")
+    public ResponseEntity<ApiResponse<com.hesta.backend.energy.demandresponse.DemandResponseSettings>> getDemandResponseSettings(
+            @PathVariable UUID homeId) {
+        if (demandResponseService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseSettings>builder().build());
+        }
+        com.hesta.backend.energy.demandresponse.DemandResponseSettings settings = demandResponseService.getSettings(homeId);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseSettings>builder()
+                .code(1000)
+                .result(settings)
+                .build());
+    }
+
+    @PutMapping("/homes/{homeId}/dr/settings")
+    public ResponseEntity<ApiResponse<com.hesta.backend.energy.demandresponse.DemandResponseSettings>> updateDemandResponseSettings(
+            @PathVariable UUID homeId,
+            @RequestBody com.hesta.backend.energy.demandresponse.DemandResponseSettings settings) {
+        if (demandResponseService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseSettings>builder().build());
+        }
+        com.hesta.backend.energy.demandresponse.DemandResponseSettings updated = demandResponseService.updateSettings(homeId, settings);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseSettings>builder()
+                .code(1000)
+                .message("Đã cập nhật cài đặt Demand Response & Peak Shaving")
+                .result(updated)
+                .build());
+    }
+
+    @PostMapping("/homes/{homeId}/dr/evaluate")
+    public ResponseEntity<ApiResponse<com.hesta.backend.energy.demandresponse.DemandResponseEvaluationResult>> evaluateDemandResponse(
+            @PathVariable UUID homeId,
+            @RequestParam(required = false) Double simulatedWatts) {
+        if (demandResponseService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseEvaluationResult>builder().build());
+        }
+        com.hesta.backend.energy.demandresponse.DemandResponseEvaluationResult result = demandResponseService.evaluateAndShed(homeId, simulatedWatts);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseEvaluationResult>builder()
+                .code(1000)
+                .message(result.getMessage())
                 .result(result)
                 .build());
     }

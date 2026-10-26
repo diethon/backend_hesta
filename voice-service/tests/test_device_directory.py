@@ -350,3 +350,24 @@ class TestFindLightMode:
         directory.refresh()
         mode = directory.find_light_mode("chế độ siêu nhân", home_id="home-1")
         assert mode is None
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_get_known_rooms(self, directory):
+        """Lấy danh sách các phòng thực tế từ thiết bị."""
+        directory.refresh()
+        rooms = directory.get_known_rooms(home_id="home-1")
+        assert len(rooms) >= 3
+        rooms_lower = [r.lower() for r in rooms]
+        assert "phòng khách" in rooms_lower
+        assert "phòng ngủ" in rooms_lower
+        assert "ban công" in rooms_lower
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_resolve_tone_and_case_tolerance(self, directory):
+        """Resolve phòng không phân biệt hoa/thường hay có dấu/không dấu."""
+        directory.refresh()
+        devs_no_tone = directory.resolve("phong khach", "light", home_id="home-1")
+        assert len(devs_no_tone) == 2
+
+        devs_upper = directory.resolve("PHÒNG NGỦ", "air_conditioner", home_id="home-1")
+        assert len(devs_upper) == 1

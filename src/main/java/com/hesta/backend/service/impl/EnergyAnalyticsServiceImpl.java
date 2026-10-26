@@ -52,7 +52,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = resolveStartTime(now, normPeriod);
 
-        List<Device> devices = deviceRepository.findByHomeId(homeId);
+        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
         if (devices.isEmpty()) {
             return EnergyAnalyticsResponse.builder()
                     .summary(EnergySummaryResponse.builder().period(normPeriod).build())

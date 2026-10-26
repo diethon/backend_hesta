@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
-@Transactional
 @RequiredArgsConstructor
 public class ManualControlServiceImpl implements ManualControlService {
     private final HomeAuthorizationService authorization;
@@ -70,6 +69,7 @@ public class ManualControlServiceImpl implements ManualControlService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<ManualOverrideResponse> history(UUID userId, UUID deviceId) {
         authorizedDevice(userId, deviceId);
         return behaviorEvents.findTop100ByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")
@@ -80,11 +80,14 @@ public class ManualControlServiceImpl implements ManualControlService {
     }
 
     private Device authorizedDevice(UUID userId, UUID deviceId) {
-        Device device = devices.findById(deviceId).orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
+        Device device = devices.findByIdWithNode(deviceId)
+                .or(() -> devices.findById(deviceId))
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         var home = device.getHome();
-        if (home != null && home.getId() != null) {
-            authorization.requireAccess(userId, home.getId());
+        if (home == null || home.getId() == null) {
+            throw new AppException(ErrorCode.HOME_NOT_FOUND);
         }
+        authorization.requireAccess(userId, home.getId());
         return device;
     }
 
