@@ -170,6 +170,22 @@ class AutomationEngineTest {
     }
 
     @Test
+    void booleanAndNumericCoercionMatchesConditionsFromHardwareSensors() {
+        rule.getConditions().clear();
+        rule.getConditions().add(RuleCondition.builder().rule(rule).device(device).attribute("motion")
+                .operator(ConditionOperator.EQ).expectedValue(JsonNodeFactory.instance.booleanNode(true))
+                .logicalOperator(LogicalOperator.AND).order(0).build());
+
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any()))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var event = AutomationEventRequest.builder().sourceDeviceId(deviceId).eventType("SENSOR")
+                .data(Map.of("motion", 1)).build();
+        var response = engine.process(homeId, event);
+
+        assertThat(response.getMatchedRules()).isEqualTo(1);
+        assertThat(response.getExecutions().getFirst().getStatus()).isEqualTo("SUCCESS");
     void emergencyRuleBypassesManualOverrideAndExecutesCommand() {
         when(manualOverrideService.isActive(deviceId)).thenReturn(true);
         when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), any(), eq(StateChangeSource.AUTOMATION)))
