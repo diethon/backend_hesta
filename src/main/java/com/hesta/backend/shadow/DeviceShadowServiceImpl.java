@@ -105,7 +105,7 @@ public class DeviceShadowServiceImpl implements DeviceShadowService {
         if (!delta.isEmpty() && deviceCommandService != null) {
             try {
                 String action = delta.containsKey("power") ? delta.get("power").toString().toUpperCase() : "UPDATE";
-                deviceCommandService.sendCommand(deviceId, action, delta, StateChangeSource.WEB_APP);
+                deviceCommandService.sendCommand(deviceId, action, delta, StateChangeSource.SHADOW_SYNC);
             } catch (Exception e) {
                 log.warn("Device [{}] command dispatch from shadow delayed: {}", deviceId, e.getMessage());
             }
@@ -154,7 +154,7 @@ public class DeviceShadowServiceImpl implements DeviceShadowService {
         log.info("Reconciling device [{}] shadow with delta: {}", deviceId, delta);
         if (deviceCommandService != null) {
             String action = delta.containsKey("power") ? delta.get("power").toString().toUpperCase() : "UPDATE";
-            deviceCommandService.sendCommand(deviceId, action, delta, StateChangeSource.WEB_APP);
+            deviceCommandService.sendCommand(deviceId, action, delta, StateChangeSource.SHADOW_SYNC);
         }
 
         return getShadow(deviceId);

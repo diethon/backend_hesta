@@ -1,6 +1,7 @@
 package com.hesta.backend.service;
 
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.shadow.DeviceShadowDto;
 import com.hesta.backend.shadow.DeviceShadowServiceImpl;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -44,6 +46,7 @@ class DeviceShadowServiceTest {
                 .deviceType("LIGHT")
                 .currentState(new HashMap<>(Map.of("power", "OFF", "brightness", 50)))
                 .build();
+        ReflectionTestUtils.setField(shadowService, "deviceCommandService", deviceCommandService);
     }
 
     @Test
@@ -63,6 +66,23 @@ class DeviceShadowServiceTest {
         assertEquals("ON", updated.getDeltaState().get("power"));
         assertEquals(80, updated.getDeltaState().get("brightness"));
         assertEquals(1, updated.getDesiredVersion());
+
+        verify(deviceCommandService).sendCommand(eq(deviceId), eq("ON"), anyMap(), eq(StateChangeSource.SHADOW_SYNC));
+    }
+
+    @Test
+    @DisplayName("Should reconcile unsynced shadow by dispatching command with SHADOW_SYNC")
+    void testReconcileDispatchesShadowSync() {
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(mockDevice));
+
+        // Create delta by setting desired to ON
+        shadowService.updateDesiredState(deviceId, Map.of("power", "ON"));
+        reset(deviceCommandService);
+
+        // Reconcile should re-dispatch command with SHADOW_SYNC
+        DeviceShadowDto reconciled = shadowService.reconcile(deviceId);
+        assertNotNull(reconciled);
+        verify(deviceCommandService).sendCommand(eq(deviceId), eq("ON"), anyMap(), eq(StateChangeSource.SHADOW_SYNC));
     }
 
     @Test
