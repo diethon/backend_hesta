@@ -186,6 +186,9 @@ class AutomationEngineTest {
 
         assertThat(response.getMatchedRules()).isEqualTo(1);
         assertThat(response.getExecutions().getFirst().getStatus()).isEqualTo("SUCCESS");
+    }
+
+    @Test
     void emergencyRuleBypassesManualOverrideAndExecutesCommand() {
         when(manualOverrideService.isActive(deviceId)).thenReturn(true);
         when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), any(), eq(StateChangeSource.AUTOMATION)))
