@@ -89,4 +89,20 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     Optional<Device> findBySerialNumber(String serialNumber);
 
     boolean existsBySerialNumber(String serialNumber);
+
+    long countByStatus(com.hesta.backend.enums.DeviceStatus status);
+
+    long countByCatalogId(UUID catalogId);
+
+    long countByCatalogIdAndStatus(UUID catalogId, com.hesta.backend.enums.DeviceStatus status);
+
+    long countByModel(String model);
+
+    long countByModelAndStatus(String model, com.hesta.backend.enums.DeviceStatus status);
+
+    @Query("SELECT d.serialNumber FROM Device d WHERE d.serialNumber LIKE CONCAT(:prefix, '%')")
+    List<String> findSerialNumbersStartingWith(@Param("prefix") String prefix);
+
+    @Query("SELECT d.deviceType, COUNT(d) FROM Device d GROUP BY d.deviceType")
+    List<Object[]> countGroupedByDeviceType();
 }

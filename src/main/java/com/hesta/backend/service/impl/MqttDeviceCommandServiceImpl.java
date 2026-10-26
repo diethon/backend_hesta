@@ -77,7 +77,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 || "SET_COLOR".equalsIgnoreCase(action);
         long antiSpamWindowMs = isColorOrDimmer ? 60L : 400L;
         if (lastStartTime != null && (now - lastStartTime < antiSpamWindowMs)) {
-            if (!isColorOrDimmer) {
+            if (!isColorOrDimmer && source != StateChangeSource.VOICE) {
                 log.warn("Idempotency / Anti-spam: Device {} click spam rejected ({} ms < {} ms).", deviceId, now - lastStartTime, antiSpamWindowMs);
                 return CompletableFuture.completedFuture(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
@@ -92,14 +92,14 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // 2. Pending execution: Nếu lệnh trước chưa hoàn tất (đang đợi ACK)
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         if (existing != null && !existing.isDone()) {
-            if (isColorOrDimmer) {
-                // Continuous adjustment: Lệnh mới nhất sẽ ghi đè (supersede) lệnh trước để người dùng kéo mượt
-                log.info("Idempotency: Superseding previous in-flight command for device {} with new {} command", deviceId, action);
+            if (isColorOrDimmer || source == StateChangeSource.VOICE) {
+                // Continuous adjustment or Voice direct override: Lệnh mới nhất sẽ ghi đè (supersede) lệnh trước để phản hồi tức thì
+                log.info("Idempotency: Superseding previous in-flight command for device {} with new {} command (source: {})", deviceId, action, source);
                 existing.complete(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
                         .success(true)
                         .status("SUPERSEDED")
-                        .message("Superseded by newer stream command")
+                        .message("Superseded by newer stream or voice command")
                         .build());
             } else if (source != StateChangeSource.MANUAL) {
                 // Khi chạy kịch bản Automation / Scene: nối chuỗi thực thi sau khi lệnh trước xong
@@ -121,7 +121,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // 3. Nguyên tử hóa việc chiếm giữ Lock (Atomic Lock Acquisition chống Race Condition)
         String commandId = UUID.randomUUID().toString();
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
-        if (isColorOrDimmer) {
+        if (isColorOrDimmer || source == StateChangeSource.VOICE) {
             activeDeviceCommands.put(deviceId, future);
         } else {
             CompletableFuture<CommandResult> previous = activeDeviceCommands.putIfAbsent(deviceId, future);
@@ -373,7 +373,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     || "SET_POWER".equalsIgnoreCase(action);
 
             long effectiveTimeout;
-            if (isColorOrDimmer) {
+            if (source == StateChangeSource.VOICE) {
+                effectiveTimeout = 250L;
+            } else if (isColorOrDimmer) {
                 effectiveTimeout = 75L;
             } else if (isPowerCommand) {
                 effectiveTimeout = 400L;
@@ -398,9 +400,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             boolean isTimeout = ex instanceof java.util.concurrent.TimeoutException
                                     || (ex != null && ex.getCause() instanceof java.util.concurrent.TimeoutException);
 
-                            boolean isFastReturnEligible = isColorOrDimmer || isPowerCommand;
+                            boolean isFastReturnEligible = isColorOrDimmer || isPowerCommand || (source == StateChangeSource.VOICE);
                             if (isFastReturnEligible && (isTimeout || (res != null && "SUPERSEDED".equals(res.getStatus())))) {
-                                log.info("[METRICS] Fast-return for command {} commandId {} after {} ms (dispatched to MQTT broker)", action, commandId, roundtrip);
+                                log.info("[METRICS] Fast-return for command {} commandId {} after {} ms (dispatched to MQTT broker, source: {})", action, commandId, roundtrip, source);
                                 if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
                                     diagnosticsService.recordCommandSuccess(targetNodeCode, roundtrip);
                                 }
