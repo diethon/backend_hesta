@@ -52,7 +52,7 @@ class EnergyAnalyticsServiceImplTest {
                 .currentState(Map.of("power", "ON"))
                 .build();
 
-        when(deviceRepository.findByHomeId(homeId)).thenReturn(List.of(device));
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(List.of(device));
 
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = now.minusDays(30);
@@ -109,7 +109,7 @@ class EnergyAnalyticsServiceImplTest {
                 .currentState(Map.of("power", "OFF"))
                 .build();
 
-        when(deviceRepository.findByHomeId(homeId)).thenReturn(List.of(device));
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(List.of(device));
         when(historyRepository.findByDeviceIdsAndChangedAtBetween(any(), any(), any()))
                 .thenReturn(Collections.emptyList());
 
@@ -137,7 +137,7 @@ class EnergyAnalyticsServiceImplTest {
                 .currentState(Map.of("power", "ON"))
                 .build();
 
-        when(deviceRepository.findByHomeId(homeId)).thenReturn(List.of(device));
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(List.of(device));
         when(historyRepository.findByDeviceIdsAndChangedAtBetween(any(), any(), any()))
                 .thenReturn(Collections.emptyList());
 
@@ -177,7 +177,7 @@ class EnergyAnalyticsServiceImplTest {
                 .newState(Map.of("power", "ON", "brightness", 50))
                 .build();
 
-        when(deviceRepository.findByHomeId(homeId)).thenReturn(List.of(device));
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(List.of(device));
         when(historyRepository.findByDeviceIdsAndChangedAtBetween(eq(List.of(deviceId)), any(), any()))
                 .thenReturn(List.of(history));
 

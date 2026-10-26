@@ -256,11 +256,20 @@ public class AutomationEngineImpl implements AutomationEngine {
                 details.add(detail);
                 continue;
             }
+            boolean isEmergency = isEmergencySafetyEvent(rule, event);
             if (manualOverrideService.isActive(action.getDevice().getId())) {
-                detail.put("success", false);
-                detail.put("status", "SKIPPED_OVERRIDE");
-                details.add(detail);
-                continue;
+                if (isEmergency) {
+                    log.warn("[SAFETY BYPASS] Emergency event '{}' / rule '{}' bypassed manual override on device {}",
+                            event != null ? event.getEventType() : "UNKNOWN",
+                            rule != null ? rule.getName() : "UNKNOWN",
+                            action.getDevice().getId());
+                    detail.put("emergencyBypassed", true);
+                } else {
+                    detail.put("success", false);
+                    detail.put("status", "SKIPPED_OVERRIDE");
+                    details.add(detail);
+                    continue;
+                }
             }
             attempted++;
             try {
@@ -302,5 +311,31 @@ public class AutomationEngineImpl implements AutomationEngine {
             }
         }
         return response;
+    }
+    private boolean isEmergencySafetyEvent(AutomationRule rule, AutomationEventRequest event) {
+        if (event != null) {
+            String eventType = event.getEventType() != null ? event.getEventType().toUpperCase() : "";
+            if (eventType.contains("FIRE") || eventType.contains("SMOKE") || eventType.contains("GAS")
+                    || eventType.contains("LEAK") || eventType.contains("EMERGENCY") || eventType.contains("ALARM")) {
+                return true;
+            }
+            if (event.getData() != null) {
+                Object severity = event.getData().get("severity");
+                if (severity != null && ("CRITICAL".equalsIgnoreCase(severity.toString()) || "EMERGENCY".equalsIgnoreCase(severity.toString()))) {
+                    return true;
+                }
+                if (Boolean.TRUE.equals(event.getData().get("emergency")) || Boolean.TRUE.equals(event.getData().get("isEmergency"))) {
+                    return true;
+                }
+            }
+        }
+        if (rule != null) {
+            String ruleName = rule.getName() != null ? rule.getName().toUpperCase() : "";
+            if (ruleName.contains("EMERGENCY") || ruleName.contains("FIRE") || ruleName.contains("SMOKE")
+                    || ruleName.contains("GAS") || ruleName.contains("CHÁY") || ruleName.contains("KHẨN CẤP") || ruleName.contains("BÁO ĐỘNG")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

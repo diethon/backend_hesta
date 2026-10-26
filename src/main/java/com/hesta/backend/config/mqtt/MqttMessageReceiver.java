@@ -40,6 +40,12 @@ public class MqttMessageReceiver {
     private final DeviceService deviceService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.diagnostics.MqttDlqService dlqService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.ota.OtaCampaignService otaCampaignService;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -88,6 +94,16 @@ public class MqttMessageReceiver {
 
         if (topic.isBlank()) {
             log.warn("Received MQTT message without topic");
+            if (dlqService != null) {
+                dlqService.recordDeadLetter("", payload, "MISSING_TOPIC", "UNKNOWN");
+            }
+            return;
+        }
+
+        String nodeCode = extractNodeCodeFromTopic(topic);
+        if (dlqService != null && nodeCode != null && !dlqService.checkRateLimit(nodeCode)) {
+            dlqService.recordDeadLetter(topic, payload, "RATE_LIMIT_EXCEEDED", nodeCode);
+            log.warn("Dropped message from node [{}] due to rate limit violation (>50 msg/s)", nodeCode);
             return;
         }
 
@@ -139,6 +155,16 @@ public class MqttMessageReceiver {
             }
 
             // =====================================================
+            // 7. OTA STATUS / ACK
+            // =====================================================
+
+            else if (topic.contains("/ota/")) {
+
+                handleOtaMessage(topic, payload);
+
+            }
+
+            // =====================================================
             // 7. Unknown topic
             // =====================================================
 
@@ -158,6 +184,10 @@ public class MqttMessageReceiver {
                     payload,
                     e
             );
+
+            if (dlqService != null) {
+                dlqService.recordDeadLetter(topic, payload, e.getClass().getSimpleName() + ": " + e.getMessage(), nodeCode);
+            }
         }
     }
 
@@ -391,10 +421,20 @@ public class MqttMessageReceiver {
                 try {
                     UUID deviceUuid = UUID.fromString(deviceId);
                     MqttDeviceCommandServiceImpl.completeDeviceCommand(deviceUuid, resolvedState);
+                    if (deviceShadowService != null) {
+                        Long incomingVersion = (data.get("version") instanceof Number num) ? num.longValue() : null;
+                        deviceShadowService.updateReportedState(deviceUuid, resolvedState, incomingVersion);
+                    }
                 } catch (IllegalArgumentException ignored) {
                     String nodeCode = extractNodeCodeFromTopic(topic);
                     devices.findByNodeCodeAndLocalId(nodeCode, deviceId)
-                            .ifPresent(d -> MqttDeviceCommandServiceImpl.completeDeviceCommand(d.getId(), resolvedState));
+                            .ifPresent(d -> {
+                                MqttDeviceCommandServiceImpl.completeDeviceCommand(d.getId(), resolvedState);
+                                if (deviceShadowService != null) {
+                                    Long incomingVersion = (data.get("version") instanceof Number num) ? num.longValue() : null;
+                                    deviceShadowService.updateReportedState(d.getId(), resolvedState, incomingVersion);
+                                }
+                            });
                 }
             }
         } catch (Exception e) {
@@ -450,12 +490,9 @@ public class MqttMessageReceiver {
         // Check pending command
         // =========================================================
 
-        if (MqttDeviceCommandServiceImpl.pendingCommands
-                .containsKey(commandId)) {
-
-            CompletableFuture<CommandResult> future =
-                    MqttDeviceCommandServiceImpl.pendingCommands
-                            .remove(commandId);
+        CompletableFuture<CommandResult> future =
+                MqttDeviceCommandServiceImpl.pendingCommands.remove(commandId);
+        if (future != null) {
 
             // -----------------------------------------------------
             // Determine success
@@ -733,6 +770,22 @@ public class MqttMessageReceiver {
             });
         } catch (Exception e) {
             log.error("Failed to process status from topic: {}", topic, e);
+        }
+    }
+
+    private void handleOtaMessage(String topic, String payload) {
+        if (otaCampaignService == null) return;
+        try {
+            String nodeCode = extractNodeCodeFromTopic(topic);
+            Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            String version = data.getOrDefault("version", "").toString();
+            String status = data.getOrDefault("status", "").toString();
+            boolean success = "SUCCESS".equalsIgnoreCase(status) || "OK".equalsIgnoreCase(status);
+            String error = data.getOrDefault("error", "").toString();
+            otaCampaignService.handleNodeOtaResult(nodeCode, version, success, error);
+            log.info("Processed OTA status for node [{}]: success={}, version={}", nodeCode, success, version);
+        } catch (Exception e) {
+            log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
         }
     }
 }

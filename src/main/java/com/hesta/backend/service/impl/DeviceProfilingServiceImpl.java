@@ -41,7 +41,7 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
         OffsetDateTime from = to.minusDays(effectiveDays);
 
         // Lỗ hổng 4: Nếu thiết bị mới được thêm vào hệ thống chưa đủ 'effectiveDays', chỉ tính từ createdAt
-        if (device.getCreatedAt() != null && device.getCreatedAt().isAfter(from)) {
+        if (device.getCreatedAt() != null && device.getCreatedAt().isAfter(from) && device.getCreatedAt().isBefore(to)) {
             from = device.getCreatedAt();
         }
 

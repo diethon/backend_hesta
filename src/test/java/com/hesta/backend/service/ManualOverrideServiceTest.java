@@ -158,4 +158,21 @@ class ManualOverrideServiceTest {
 
         assertThat(service.isActive(deviceId)).isFalse();
     }
+
+    @Test
+    void recordOverride_withNullUserId_resolvesHomeOwnerAndDoesNotThrow() {
+        User owner = User.builder().id(UUID.randomUUID()).build();
+        Home home = Home.builder().id(homeId).createdBy(owner).build();
+        Device device = Device.builder().id(deviceId).room(Room.builder().home(home).build()).build();
+
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+
+        OffsetDateTime expiry = service.recordOverride(deviceId, null, 30);
+
+        assertThat(expiry).isAfter(OffsetDateTime.now().plusMinutes(29));
+        ArgumentCaptor<BehaviorEvent> captor = ArgumentCaptor.forClass(BehaviorEvent.class);
+        verify(events).save(captor.capture());
+        assertThat(captor.getValue().getEventSource()).isEqualTo("PHYSICAL_SWITCH");
+        assertThat(captor.getValue().getUser()).isEqualTo(owner);
+    }
 }

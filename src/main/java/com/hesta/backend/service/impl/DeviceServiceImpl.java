@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.UUID;
@@ -72,9 +73,25 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public List<DeviceResponse> getDevicesByHome(UUID userId, UUID homeId) {
         checkHomeAccess(userId, homeId);
-        return deviceRepository.findByHomeId(homeId).stream()
-                .map(this::mapWithOverride)
-                .collect(Collectors.toList());
+        List<Device> deviceList = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
+        if (deviceList.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<UUID> deviceIds = deviceList.stream().map(Device::getId).collect(Collectors.toList());
+        Map<UUID, OffsetDateTime> overrides = (manualOverrideService != null)
+                ? manualOverrideService.getOverridesUntil(deviceIds)
+                : Collections.emptyMap();
+
+        return deviceList.stream().map(device -> {
+            DeviceResponse res = DeviceResponse.fromEntity(device);
+            if (res != null) {
+                OffsetDateTime until = overrides.get(device.getId());
+                res.setManualOverrideUntil(until);
+                res.setManualOverrideActive(until != null);
+            }
+            return res;
+        }).collect(Collectors.toList());
     }
 
     @Override
@@ -94,6 +111,14 @@ public class DeviceServiceImpl implements DeviceService {
             return device.getHome().getId();
         }
         throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
+    }
+
+    private boolean isPowerOn(Object val) {
+        if (val == null) return false;
+        if (val instanceof Boolean b) return b;
+        if (val instanceof Number n) return n.intValue() == 1;
+        String s = val.toString().trim().toUpperCase();
+        return "ON".equals(s) || "TRUE".equals(s) || "1".equals(s);
     }
 
     @Override
@@ -160,12 +185,14 @@ public class DeviceServiceImpl implements DeviceService {
                 }
             }
             device.setLastSeen(OffsetDateTime.now());
+            boolean statusChanged = false;
             if (device.getStatus() != com.hesta.backend.enums.DeviceStatus.ONLINE) {
                 device.setStatus(com.hesta.backend.enums.DeviceStatus.ONLINE);
+                statusChanged = true;
             }
 
-            // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau, không làm gì thêm)
-            if (prevState.equals(newState)) {
+            // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau và không đổi status, không làm gì thêm)
+            if (prevState.equals(newState) && !statusChanged) {
                 deviceRepository.save(device); // Lưu lastSeen và status ONLINE
                 return; // Ngắt mạch, không lưu History, không bắn Websocket
             }
@@ -187,24 +214,41 @@ public class DeviceServiceImpl implements DeviceService {
 
             // Ghi Lịch sử nếu được phép
             if (shouldSaveHistory) {
+                StateChangeSource source = StateChangeSource.MANUAL;
+                if (payload.containsKey("source") && payload.get("source") != null) {
+                    try {
+                        source = StateChangeSource.valueOf(payload.get("source").toString().trim().toUpperCase());
+                    } catch (IllegalArgumentException ignored) {
+                        source = StateChangeSource.MANUAL;
+                    }
+                }
                 DeviceStateHistory history = DeviceStateHistory.builder()
                     .device(device)
                     .previousState(prevState)
                     .newState(newState)
-                    .source(payload.containsKey("source") ? StateChangeSource.valueOf(payload.get("source").toString().toUpperCase()) : StateChangeSource.MANUAL)
+                    .source(source)
                     .changedAt(OffsetDateTime.now())
                     .build();
                 deviceStateHistoryRepository.save(history);
                 boolean isSensor = device.getDeviceType() != null && device.getDeviceType().endsWith("SENSOR");
-                if (deviceHealthService != null && !isSensor) {
+                boolean hasPowerField = (prevState != null && prevState.containsKey("power")) || (newState != null && newState.containsKey("power"));
+                boolean powerToggled = hasPowerField && (isPowerOn(prevState != null ? prevState.get("power") : null) != isPowerOn(newState != null ? newState.get("power") : null));
+                if (deviceHealthService != null && !isSensor && powerToggled) {
                     try {
                         deviceHealthService.recordSwitch(device.getId());
                     } catch (Exception ignored) {}
                 }
+                if (manualOverrideService != null && !isSensor && powerToggled && source == StateChangeSource.MANUAL) {
+                    try {
+                        manualOverrideService.recordOverride(device.getId(), null, 30);
+                    } catch (Exception ignored) {}
+                }
             }
 
-            applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
-                    device.getHome().getId(), twinSnapshotMapper.device(device)));
+            if (device.getHome() != null && device.getHome().getId() != null) {
+                applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
+                        device.getHome().getId(), twinSnapshotMapper.device(device)));
+            }
 
         } catch (IllegalArgumentException e) {
             System.err.println("Invalid payload or UUID format: " + e.getMessage());

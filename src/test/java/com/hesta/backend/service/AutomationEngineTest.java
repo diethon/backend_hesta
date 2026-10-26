@@ -168,4 +168,24 @@ class AutomationEngineTest {
         return AutomationEventRequest.builder().sourceDeviceId(deviceId).eventType("SENSOR_READING")
                 .data(Map.of("temperature", temperature)).build();
     }
+
+    @Test
+    void emergencyRuleBypassesManualOverrideAndExecutesCommand() {
+        when(manualOverrideService.isActive(deviceId)).thenReturn(true);
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), any(), eq(StateChangeSource.AUTOMATION)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build()));
+        when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AutomationEventRequest emergencyEvent = AutomationEventRequest.builder()
+                .eventType("GAS_LEAK_DETECTED")
+                .sourceDeviceId(deviceId)
+                .data(Map.of("temperature", 35, "severity", "CRITICAL", "emergency", true))
+                .occurredAt(java.time.OffsetDateTime.now())
+                .build();
+
+        var response = engine.process(homeId, emergencyEvent);
+        assertThat(response.getExecutions().getFirst().getStatus()).isEqualTo("SUCCESS");
+        assertThat(response.getExecutions().getFirst().getResultDetail().get(0).get("emergencyBypassed").asBoolean()).isTrue();
+        verify(commandService).sendCommand(eq(deviceId), eq("TURN_ON"), any(), eq(StateChangeSource.AUTOMATION));
+    }
 }
