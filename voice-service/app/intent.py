@@ -490,9 +490,9 @@ class IntentMapper:
 
         # Bước 1.5: Trích xuất chế độ ánh sáng / màu tùy chỉnh (nếu có)
         mode_extracted = None
-        # 1. Tìm cụm từ "chế độ <tên>" hoặc "(sang/thành/về) chế độ <tên>"
+        # 1. Tìm cụm từ "chế độ / chế đồ <tên>" hoặc "(sang/thành/về) chế độ <tên>"
         mode_match = re.search(
-            r"(?:(?:sang|thành|về)\s+)?chế\s+độ\s+([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+            r"(?:(?:sang|thành|về)\s+)?(?:chế\s+(?:độ|đồ|đọ|do))\s+([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
             remaining,
             re.IGNORECASE,
         )
