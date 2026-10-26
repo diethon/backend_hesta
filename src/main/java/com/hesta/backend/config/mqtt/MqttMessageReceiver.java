@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -186,6 +187,7 @@ public class MqttMessageReceiver {
                     topic,
                     telemetryPayload
             );
+            processTelemetryAutomation(topic, telemetryPayload);
         } else {
             // Full device state telemetry (e.g., Air Conditioner telemetry or composite state)
             handleDeviceState(topic, payload);
@@ -214,7 +216,9 @@ public class MqttMessageReceiver {
         }
 
         if (topic.endsWith("/sensor")) {
-            processSensorAutomation(topic, payload);
+            if (telemetryPayload == null || telemetryPayload.getMetricType() == null || telemetryPayload.getValue() == null) {
+                processSensorAutomation(topic, payload);
+            }
         }
 
         log.debug(
@@ -223,35 +227,130 @@ public class MqttMessageReceiver {
         );
     }
 
-    private void processSensorAutomation(String topic, String payload) throws Exception {
-        String[] parts = topic.split("/");
-        if (parts.length != 6 || !"hesta".equals(parts[0]) || !"nodes".equals(parts[1])
-                || !"devices".equals(parts[3])) {
+    private void processTelemetryAutomation(String topic, TelemetryPayload payload) {
+        if (payload == null) return;
+        String topicNodeCode = extractNodeCodeFromTopic(topic);
+        String nodeCode = payload.getNodeId() != null && !payload.getNodeId().isBlank() ? payload.getNodeId() : topicNodeCode;
+        String deviceIdStr = payload.getDeviceId() != null && !payload.getDeviceId().isBlank() ? payload.getDeviceId() : extractDeviceIdFromTopic(topic);
+
+        java.util.Optional<com.hesta.backend.entity.Device> deviceOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+        deviceOpt.ifPresent(device -> {
+            Map<String, Object> data = new HashMap<>();
+            if (device.getCurrentState() != null) {
+                data.putAll(device.getCurrentState());
+            }
+            if (payload.getMetricType() != null && payload.getValue() != null) {
+                applyMetricAliases(data, payload.getMetricType(), payload.getValue());
+            }
+            triggerAutomation(device, data, "SENSOR");
+        });
+    }
+
+    private void processSensorAutomation(String topic, String payload) {
+        try {
+            String[] parts = topic.split("/");
+            if (parts.length != 6 || !"hesta".equals(parts[0]) || !"nodes".equals(parts[1])
+                    || !"devices".equals(parts[3])) {
+                return;
+            }
+
+            String nodeCode = parts[2];
+            String deviceIdStr = parts[4];
+
+            Map<String, Object> parsedData = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> rawData = parsedData;
+            if (parsedData.containsKey("state") && parsedData.get("state") instanceof Map<?, ?> stateMap) {
+                rawData = (Map<String, Object>) stateMap;
+            }
+
+            java.util.Optional<com.hesta.backend.entity.Device> deviceOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+            if (deviceOpt.isEmpty() && parsedData.get("deviceId") != null) {
+                deviceOpt = resolveDevice(topic, parsedData.get("deviceId").toString(), nodeCode);
+            }
+
+            final Map<String, Object> finalData = rawData;
+            deviceOpt.ifPresent(device -> {
+                Map<String, Object> data = new HashMap<>();
+                if (device.getCurrentState() != null) {
+                    data.putAll(device.getCurrentState());
+                }
+                data.putAll(finalData);
+
+                if (finalData.containsKey("metricType") && finalData.get("metricType") != null && finalData.get("value") != null) {
+                    applyMetricAliases(data, finalData.get("metricType").toString(), finalData.get("value"));
+                }
+
+                String deviceType = device.getDeviceType() != null ? device.getDeviceType().toUpperCase() : "";
+                boolean isSensor = deviceType.endsWith("SENSOR") || deviceType.contains("SENSOR") || "CAMERA_AI".equals(deviceType);
+                String eventType = isSensor ? "SENSOR" : "EVENT";
+
+                triggerAutomation(device, data, eventType);
+            });
+        } catch (Exception e) {
+            log.warn("Could not process automation from MQTT message: {}", e.getMessage());
+        }
+    }
+
+    private void triggerAutomation(com.hesta.backend.entity.Device device, Map<String, Object> data, String eventType) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null) {
             return;
         }
-
-        String nodeCode = parts[2];
-        String deviceIdStr = parts[4];
-
-        Map<String, Object> parsedData = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
-        if (parsedData.containsKey("state") && parsedData.get("state") instanceof Map<?, ?>) {
-            parsedData = (Map<String, Object>) parsedData.get("state");
-        }
-        final Map<String, Object> finalData = parsedData;
-
-        java.util.Optional<com.hesta.backend.entity.Device> deviceOpt;
         try {
-            deviceOpt = devices.findById(java.util.UUID.fromString(deviceIdStr));
-        } catch (IllegalArgumentException e) {
-            deviceOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            automationEngine.process(
+                    device.getRoom().getHome().getId(),
+                    AutomationEventRequest.builder()
+                            .sourceDeviceId(device.getId())
+                            .eventType(eventType)
+                            .data(data)
+                            .build()
+            );
+        } catch (Exception ex) {
+            log.warn("AutomationEngine execution error for device {}: {}", device.getId(), ex.getMessage());
         }
+    }
 
-        deviceOpt
-                .filter(device -> device.getDeviceType() != null && (device.getDeviceType().endsWith("SENSOR") || device.getDeviceType().equals("CAMERA_AI")))
-                .filter(device -> device.getRoom() != null && device.getRoom().getHome() != null)
-                .ifPresent(device -> automationEngine.process(device.getRoom().getHome().getId(),
-                        AutomationEventRequest.builder().sourceDeviceId(device.getId())
-                                .eventType("SENSOR").data(finalData).build()));
+    private void applyMetricAliases(Map<String, Object> data, String metricType, Object value) {
+        data.put(metricType, value);
+        data.put(metricType.toLowerCase(), value);
+        data.put(metricType.toUpperCase(), value);
+        data.put("value", value);
+
+        if ("temperature".equalsIgnoreCase(metricType) || "temp".equalsIgnoreCase(metricType)) {
+            data.put("temperature", value);
+            data.put("temp", value);
+        } else if ("humidity".equalsIgnoreCase(metricType) || "hum".equalsIgnoreCase(metricType)) {
+            data.put("humidity", value);
+            data.put("hum", value);
+        } else if ("light_sensor".equalsIgnoreCase(metricType) || "light".equalsIgnoreCase(metricType)) {
+            data.put("LIGHT_SENSOR", value);
+            data.put("light", value);
+            data.put("lux", value);
+        } else if ("motion_sensor".equalsIgnoreCase(metricType) || "motion".equalsIgnoreCase(metricType)) {
+            data.put("MOTION_SENSOR", value);
+            data.put("motion", value);
+            data.put("motionDetected", value);
+        }
+    }
+
+    private java.util.Optional<com.hesta.backend.entity.Device> resolveDevice(String topic, String deviceIdStr, String nodeCode) {
+        if (deviceIdStr != null && !deviceIdStr.isBlank()) {
+            try {
+                UUID uuid = UUID.fromString(deviceIdStr);
+                java.util.Optional<com.hesta.backend.entity.Device> byId = devices.findById(uuid);
+                if (byId.isPresent()) return byId;
+            } catch (IllegalArgumentException ignored) {}
+        }
+        if (nodeCode != null && deviceIdStr != null) {
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndLocal = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            if (byNodeAndLocal.isPresent()) return byNodeAndLocal;
+
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndName = devices.findByNodeCodeAndName(nodeCode, deviceIdStr);
+            if (byNodeAndName.isPresent()) return byNodeAndName;
+        }
+        if (topic != null && !topic.isBlank()) {
+            return devices.findByMqttTopic(topic);
+        }
+        return java.util.Optional.empty();
     }
 
 

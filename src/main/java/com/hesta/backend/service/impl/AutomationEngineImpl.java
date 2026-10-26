@@ -218,7 +218,28 @@ public class AutomationEngineImpl implements AutomationEngine {
             return new BigDecimal(left.toString()).compareTo(new BigDecimal(right.toString()));
         }
         if (actual instanceof Boolean left && expected instanceof Boolean right) return left.compareTo(right);
+        Boolean actualBool = toBoolean(actual);
+        Boolean expectedBool = toBoolean(expected);
+        if (actualBool != null && expectedBool != null) {
+            return actualBool.compareTo(expectedBool);
+        }
         return String.valueOf(actual).compareToIgnoreCase(String.valueOf(expected));
+    }
+
+    private Boolean toBoolean(Object val) {
+        if (val instanceof Boolean b) return b;
+        if (val instanceof Number n) {
+            return n.doubleValue() != 0.0;
+        }
+        if (val instanceof String s) {
+            if ("true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s) || "on".equalsIgnoreCase(s) || "detected".equalsIgnoreCase(s) || "active".equalsIgnoreCase(s)) {
+                return true;
+            }
+            if ("false".equalsIgnoreCase(s) || "0".equals(s) || "no".equalsIgnoreCase(s) || "off".equalsIgnoreCase(s) || "none".equalsIgnoreCase(s) || "inactive".equalsIgnoreCase(s)) {
+                return false;
+            }
+        }
+        return null;
     }
 
     private AutomationExecutionResponse execute(AutomationRule rule, AutomationEventRequest event) {

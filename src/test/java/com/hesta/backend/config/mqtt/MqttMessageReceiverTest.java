@@ -86,4 +86,29 @@ class MqttMessageReceiverTest {
 
         verify(devices).save(argThat(d -> d.getStatus() == com.hesta.backend.enums.DeviceStatus.ONLINE));
     }
+
+    @Test
+    void sensorTelemetryMessageWithMetricTypeTriggersAutomationWithMappedMetric() {
+        UUID homeId = UUID.randomUUID();
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        Home home = Home.builder().id(homeId).build();
+        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+                .node(EdgeNode.builder().id(nodeId).home(home).build())
+                .room(Room.builder().home(home).build())
+                .deviceType("TEMPERATURE_SENSOR").build()));
+
+        String payload = "{\"nodeId\":\"" + nodeId + "\",\"deviceId\":\"" + deviceId + "\",\"metricType\":\"temperature\",\"value\":32.5,\"unit\":\"C\"}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/telemetry")
+                .build());
+
+        verify(telemetryService).processTelemetry(anyString(), any());
+        verify(engine).process(eq(homeId), argThat((AutomationEventRequest event) ->
+                event.getSourceDeviceId().equals(deviceId)
+                        && "SENSOR".equals(event.getEventType())
+                        && new java.math.BigDecimal("32.5").equals(event.getData().get("temperature"))
+                        && new java.math.BigDecimal("32.5").equals(event.getData().get("temp"))
+                        && new java.math.BigDecimal("32.5").equals(event.getData().get("value"))));
+    }
 }
