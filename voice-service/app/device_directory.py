@@ -81,7 +81,7 @@ BUILTIN_MOOD_PRESETS: list[dict[str, Any]] = [
     },
     {
         "name": "Cyberpunk",
-        "aliases": ["cyberpunk", "cyber", "neon", "hồng neon", "hong neon", "hồng tím"],
+        "aliases": ["cyberpunk", "cyber", "neon", "hồng neon", "hong neon", "hồng tím", "chơi game", "choi game", "gaming", "game"],
         "hex": "#f72585",
         "rgb": [247, 37, 133],
         "brightness": 70,
@@ -540,8 +540,8 @@ class DeviceDirectory:
             return None
 
         q_clean = mode_query.strip().lower()
-        # Loại bỏ các tiền tố như "màu", "chế độ" nếu người dùng nói lặp lại
-        q_clean = re.sub(r"^(chế độ|che do|màu|mau)\s+", "", q_clean).strip()
+        # Loại bỏ các tiền tố như "màu", "chế độ", "chế đồ" nếu người dùng nói lặp lại
+        q_clean = re.sub(r"^(chế độ|che do|chế đồ|che do|màu|mau)\s+", "", q_clean).strip()
         q_norm = strip_vietnamese_tones(q_clean)
 
         # 1. Tìm trong customColors của các thiết bị được chỉ định

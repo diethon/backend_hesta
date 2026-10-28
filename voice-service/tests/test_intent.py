@@ -427,6 +427,12 @@ class TestIntentMapping:
         assert r3.room == "phòng khách"
         assert r3.parameters.get("mode") == "đọc sách"
 
+        # Biến thể phát âm: "chế đồ" thay vì "chế độ"
+        r4 = mapper.map("bật đèn phòng của quân chế đồ chơi game", custom_rooms=["phòng của quân"])
+        assert r4 is not None
+        assert r4.room == "phòng của quân"
+        assert r4.parameters.get("mode") == "chơi game"
+
     def test_multi_device_intents(self, mapper):
         """Các lệnh điều khiển nhiều thiết bị cùng lúc (all devices, cả nhà, toàn bộ phòng, tất cả đèn/quạt)."""
         # Tắt tất cả thiết bị cả nhà
