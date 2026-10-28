@@ -29,8 +29,8 @@ public class MqttDlqServiceImpl implements MqttDlqService {
     private ApplicationContext applicationContext;
 
     private static class RateLimitTracker {
-        final AtomicLong currentSecond = new AtomicLong(0);
-        final AtomicInteger counter = new AtomicInteger(0);
+        // Atomic bit-packed state: (second << 32) | (counter & 0xFFFFFFFFL)
+        final AtomicLong state = new AtomicLong(0);
     }
 
     @Override
@@ -42,20 +42,31 @@ public class MqttDlqServiceImpl implements MqttDlqService {
         long sec = System.currentTimeMillis() / 1000;
         RateLimitTracker tracker = rateLimitMap.computeIfAbsent(nodeId, k -> new RateLimitTracker());
 
-        long prevSec = tracker.currentSecond.get();
-        if (prevSec != sec) {
-            tracker.currentSecond.set(sec);
-            tracker.counter.set(1);
-            return true;
-        }
+        while (true) {
+            long current = tracker.state.get();
+            long currentSec = current >>> 32;
+            int count = (int) current;
 
-        int currentCount = tracker.counter.incrementAndGet();
-        if (currentCount > MAX_RATE_PER_SECOND) {
-            log.warn("Rate limit exceeded for node [{}] with {} msg/s (limit: {})", nodeId, currentCount, MAX_RATE_PER_SECOND);
-            return false;
-        }
+            long newSec;
+            int newCount;
+            if (currentSec != sec) {
+                newSec = sec;
+                newCount = 1;
+            } else {
+                newSec = sec;
+                newCount = count + 1;
+            }
 
-        return true;
+            if (newCount > MAX_RATE_PER_SECOND) {
+                log.warn("Rate limit exceeded for node [{}] with {} msg/s (limit: {})", nodeId, newCount, MAX_RATE_PER_SECOND);
+                return false;
+            }
+
+            long next = (newSec << 32) | (newCount & 0xFFFFFFFFL);
+            if (tracker.state.compareAndSet(current, next)) {
+                return true;
+            }
+        }
     }
 
     @Override
@@ -72,11 +83,12 @@ public class MqttDlqServiceImpl implements MqttDlqService {
                 .replayedAt(null)
                 .build();
 
-        while (dlqBuffer.size() >= MAX_DLQ_CAPACITY) {
-            dlqBuffer.pollFirst();
+        synchronized (dlqBuffer) {
+            while (dlqBuffer.size() >= MAX_DLQ_CAPACITY) {
+                dlqBuffer.pollFirst();
+            }
+            dlqBuffer.addLast(dl);
         }
-
-        dlqBuffer.addLast(dl);
         log.warn("Recorded MQTT Dead-Letter [{}]. Topic: [{}], Reason: [{}]", id, topic, reason);
         return dl;
     }
@@ -99,19 +111,26 @@ public class MqttDlqServiceImpl implements MqttDlqService {
 
         for (MqttDeadLetterDto dl : dlqBuffer) {
             if (dl.getId().equals(id)) {
-                dl.setReplayed(true);
-                dl.setReplayedAt(OffsetDateTime.now());
-
                 try {
                     // Try to re-dispatch to mqttInputChannel
-                    org.springframework.messaging.MessageChannel inputChannel = 
-                            applicationContext.getBean("mqttInputChannel", org.springframework.messaging.MessageChannel.class);
-                    Message<String> message = MessageBuilder.withPayload(dl.getPayload())
-                            .setHeader(org.springframework.integration.mqtt.support.MqttHeaders.RECEIVED_TOPIC, dl.getTopic())
-                            .setHeader("X-Replayed-From-DLQ", dl.getId())
-                            .build();
-                    inputChannel.send(message);
-                    log.info("Replayed DLQ message [{}] to topic [{}]", id, dl.getTopic());
+                    if (applicationContext != null) {
+                        org.springframework.messaging.MessageChannel inputChannel = 
+                                applicationContext.getBean("mqttInputChannel", org.springframework.messaging.MessageChannel.class);
+                        if (inputChannel != null) {
+                            Message<String> message = MessageBuilder.withPayload(dl.getPayload())
+                                    .setHeader(org.springframework.integration.mqtt.support.MqttHeaders.RECEIVED_TOPIC, dl.getTopic())
+                                    .setHeader("X-Replayed-From-DLQ", dl.getId())
+                                    .build();
+                            boolean sent = inputChannel.send(message);
+                            if (sent) {
+                                dl.setReplayed(true);
+                                dl.setReplayedAt(OffsetDateTime.now());
+                                log.info("Replayed DLQ message [{}] to topic [{}]", id, dl.getTopic());
+                            } else {
+                                log.warn("Failed to send DLQ message [{}] to channel", id);
+                            }
+                        }
+                    }
                 } catch (Exception e) {
                     log.error("Failed to replay DLQ message [{}]: {}", id, e.getMessage());
                 }
@@ -127,8 +146,10 @@ public class MqttDlqServiceImpl implements MqttDlqService {
         int count = 0;
         for (MqttDeadLetterDto dl : dlqBuffer) {
             if (!dl.isReplayed()) {
-                replay(dl.getId());
-                count++;
+                MqttDeadLetterDto res = replay(dl.getId());
+                if (res != null && res.isReplayed()) {
+                    count++;
+                }
             }
         }
         return count;

@@ -108,6 +108,6 @@ class DemandResponseServiceTest {
         verify(deviceCommandService, never()).sendCommand(eq(fridge.getId()), any(), any(), any());
 
         // Verify that decorativeLight (LUXURY) was shed
-        verify(deviceCommandService, atLeastOnce()).sendCommand(eq(decorativeLight.getId()), eq("OFF"), any(), any());
+        verify(deviceCommandService, atLeastOnce()).sendCommand(eq(decorativeLight.getId()), eq("TURN_OFF"), any(), any());
     }
 }

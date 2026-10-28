@@ -137,7 +137,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 .totalDeviceCount(devices.size())
                 .build();
 
-        List<EnergyTimeSeriesPoint> timeSeries = buildTimeSeries(normPeriod, from, now, allHomeSegments);
+        List<EnergyTimeSeriesPoint> timeSeries = buildTimeSeries(normPeriod, from, now, allHomeSegments, totalHomeKwh, estimatedCost);
 
         return EnergyAnalyticsResponse.builder()
                 .summary(summary)
@@ -433,12 +433,18 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     }
 
     private List<EnergyTimeSeriesPoint> buildTimeSeries(
-            String period, OffsetDateTime from, OffsetDateTime to, List<ActiveEnergySegment> allSegments) {
+            String period, OffsetDateTime from, OffsetDateTime to, List<ActiveEnergySegment> allSegments,
+            double totalHomeKwh, long estimatedCost) {
         List<EnergyTimeSeriesPoint> points = new ArrayList<>();
         int count = "24H".equalsIgnoreCase(period) ? 24 : "7D".equalsIgnoreCase(period) ? 7 : 30;
 
         DateTimeFormatter hourFmt = DateTimeFormatter.ofPattern("HH:00");
         DateTimeFormatter dayFmt = DateTimeFormatter.ofPattern("dd/MM");
+
+        // Calculate progressive effective rate (VNĐ/kWh) so chart costs are consistent with progressive monthly summary
+        double effectiveRate = (totalHomeKwh > 0.001)
+                ? ((double) estimatedCost / totalHomeKwh)
+                : (PRICE_TIER_1 * 1.08);
 
         for (int i = 0; i < count; i++) {
             OffsetDateTime bucketStart;
@@ -467,7 +473,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             }
 
             double ptKwh = Math.round(bucketKwh * 100.0) / 100.0;
-            long ptCost = calculateEvnTariffCost(ptKwh);
+            long ptCost = Math.round(ptKwh * effectiveRate);
 
             points.add(EnergyTimeSeriesPoint.builder()
                     .timestamp(bucketStart)

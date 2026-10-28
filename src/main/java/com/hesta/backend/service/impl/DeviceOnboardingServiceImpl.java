@@ -69,10 +69,12 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
 
         User admin = adminId != null ? userRepository.findById(adminId).orElse(null) : null;
         com.hesta.backend.entity.DeviceCatalog catalog = null;
-        if (request.getCatalogId() != null) {
-            catalog = catalogRepository.findById(request.getCatalogId()).orElse(null);
-        } else if (request.getModel() != null && !request.getModel().trim().isEmpty()) {
-            catalog = catalogRepository.findByModelCode(request.getModel().trim()).orElse(null);
+        if (catalogRepository != null) {
+            if (request.getCatalogId() != null) {
+                catalog = catalogRepository.findById(request.getCatalogId()).orElse(null);
+            } else if (request.getModel() != null && !request.getModel().trim().isEmpty()) {
+                catalog = catalogRepository.findByModelCode(request.getModel().trim()).orElse(null);
+            }
         }
 
         String imageUrl = request.getImageUrl();
