@@ -156,11 +156,8 @@ public class DeviceServiceImpl implements DeviceService {
                     }
                 }
             }
-            device.setLastSeen(OffsetDateTime.now());
-
-            // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau, không làm gì thêm)
+            // 2. Unchanged heartbeats need no state/history write or WebSocket event.
             if (prevState.equals(newState)) {
-                deviceRepository.save(device); // Chỉ lưu lastSeen
                 return; // Ngắt mạch, không lưu History, không bắn Websocket
             }
 

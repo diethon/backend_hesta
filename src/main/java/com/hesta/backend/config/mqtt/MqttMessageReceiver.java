@@ -10,6 +10,9 @@ import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
 import com.hesta.backend.repository.EdgeNodeRepository;
 import com.hesta.backend.entity.EdgeNode;
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import java.util.List;
 import com.hesta.backend.service.TelemetryService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
@@ -38,6 +41,8 @@ public class MqttMessageReceiver {
     private final TelemetryService telemetryService;
     private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
+    private final ApplicationEventPublisher applicationEvents;
+    private final TwinSnapshotMapper twinSnapshotMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
 
@@ -718,9 +723,13 @@ public class MqttMessageReceiver {
             }
 
             devOpt.ifPresent(device -> {
+                boolean statusChanged = device.getStatus() != devStatus;
                 device.setStatus(devStatus);
-                device.setLastSeen(java.time.OffsetDateTime.now());
                 devices.save(device);
+                if (statusChanged && device.getHome() != null) {
+                    applicationEvents.publishEvent(new DeviceStateChangedEvent(
+                            device.getHome().getId(), twinSnapshotMapper.device(device)));
+                }
                 log.info("Updated device {} status to {}", device.getId(), devStatus);
 
                 if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {

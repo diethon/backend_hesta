@@ -40,19 +40,28 @@ class TwinSnapshotMapperTest {
         fixture.light.setStatus(com.hesta.backend.enums.DeviceStatus.ERROR);
         assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
         assertThat(mapper.device(fixture.light).status()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
-        fixture.light.setLastSeen(null);
         assertThat(mapper.device(fixture.light).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
         assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.ACTIVE);
         clock.advance(java.time.Duration.ofSeconds(30));
         assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.STALE);
         clock.advance(java.time.Duration.ofSeconds(270));
         assertThat(mapper.sensor(fixture.readings.getFirst()).healthStatus()).isEqualTo(com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
-        assertThat(fixture.light.getLastSeen()).isNull();
         assertThat(fixture.light.getStatus()).isEqualTo(com.hesta.backend.enums.DeviceStatus.ERROR);
     }
 
     private final TwinFixtures fixture = new TwinFixtures();
     private final TwinSnapshotMapper mapper = TwinHealthTestSupport.mapper(new ObjectMapper());
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.hesta.backend.enums.DeviceStatus.class)
+    void device_healthFollowsStatusWithoutAnObservationTime(com.hesta.backend.enums.DeviceStatus status) {
+        fixture.light.setStatus(status);
+        var result = mapper.device(fixture.light);
+        assertThat(result.status()).isEqualTo(status);
+        assertThat(result.lastSeen()).isNull();
+        assertThat(result.healthStatus()).isEqualTo(status == com.hesta.backend.enums.DeviceStatus.ONLINE
+                ? com.hesta.backend.enums.TwinHealthStatus.ACTIVE : com.hesta.backend.enums.TwinHealthStatus.OFFLINE);
+    }
 
     @Test
     void home_withRoomsDevicesAndMetrics_mapsCompleteSnapshot() {
@@ -91,7 +100,6 @@ class TwinSnapshotMapperTest {
     @Test
     void home_withUnassignedDeviceAndEmptyRooms_preservesAllNodesAndUnknownTimes() {
         var device = fixture.device(99, null, "Unassigned", "SENSOR", Map.of());
-        device.setLastSeen(null);
         var reading = TwinFixtures.reading(200, device, "CUSTOM", "0", null, TwinFixtures.TIME);
         var result = mapper.home(fixture.home, fixture.rooms, List.of(device), List.of(reading));
 

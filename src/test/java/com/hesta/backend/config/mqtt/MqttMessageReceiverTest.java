@@ -6,6 +6,11 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
+import com.hesta.backend.support.TwinHealthTestSupport;
+import org.springframework.context.ApplicationEventPublisher;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
@@ -32,6 +37,8 @@ class MqttMessageReceiverTest {
     @Mock TelemetryService telemetryService;
     @Mock DeviceService deviceService;
     @Spy ObjectMapper mapper = new ObjectMapper();
+    @Mock ApplicationEventPublisher applicationEvents;
+    @Spy TwinSnapshotMapper twinSnapshotMapper = TwinHealthTestSupport.mapper(new ObjectMapper());
     @InjectMocks MqttMessageReceiver receiver;
 
     @Test
@@ -85,5 +92,19 @@ class MqttMessageReceiverTest {
                 .build());
 
         verify(devices).save(argThat(d -> d.getStatus() == com.hesta.backend.enums.DeviceStatus.ONLINE));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = DeviceStatus.class, names = {"ONLINE", "OFFLINE"})
+    void connectionStatusMessagePublishesStatusWithoutLastSeen(DeviceStatus status) {
+        UUID nodeId = UUID.randomUUID(), deviceId = UUID.randomUUID(), homeId = UUID.randomUUID();
+        var home = Home.builder().id(homeId).build();
+        var device = Device.builder().id(deviceId).room(Room.builder().home(home).build())
+                .status(status == DeviceStatus.ONLINE ? DeviceStatus.OFFLINE : DeviceStatus.ONLINE).build();
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        receiver.handleMessage(MessageBuilder.withPayload(status.name())
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/status").build());
+        verify(applicationEvents).publishEvent(argThat((DeviceStateChangedEvent event) ->
+                event.homeId().equals(homeId) && event.payload().status() == status && event.payload().lastSeen() == null));
     }
 }

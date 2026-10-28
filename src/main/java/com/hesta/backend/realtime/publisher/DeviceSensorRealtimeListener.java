@@ -5,6 +5,7 @@ import com.hesta.backend.dto.command.SensorReadingUpdatedEvent;
 import com.hesta.backend.realtime.model.RealtimeEvent;
 import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.service.TwinHealthStatusResolver;
+import com.hesta.backend.enums.TwinHealthStatus;
 import org.springframework.core.annotation.Order;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -22,7 +23,7 @@ public class DeviceSensorRealtimeListener {
     public void onDeviceStateChanged(DeviceStateChangedEvent event) {
         realtimeEventPublisher.publish(RealtimeEvent.create(RealtimeEventType.DEVICE_STATE_CHANGED,
                 event.homeId(), event.payload().deviceId(),
-                event.payload().withHealthStatus(healthResolver.resolve(event.payload().lastSeen()))));
+                event.payload().withHealthStatus(TwinHealthStatus.forDevice(event.payload().status()))));
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)

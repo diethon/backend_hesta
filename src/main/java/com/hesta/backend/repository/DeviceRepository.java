@@ -18,14 +18,14 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("""
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, null as referenceTime
+                   null as metricType, null as referenceTime, device.status as deviceStatus
             from Device device where device.isDeleted = false
             """)
     List<TwinHealthReference> findHealthReferences();
 
     @Query("""
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, null as referenceTime
+                   null as metricType, null as referenceTime, device.status as deviceStatus
             from Device device where device.id = :id and device.isDeleted = false
             """)
     Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);

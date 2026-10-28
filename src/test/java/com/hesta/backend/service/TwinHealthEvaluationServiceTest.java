@@ -3,6 +3,7 @@ package com.hesta.backend.service;
 import com.hesta.backend.dto.response.TwinHealthStatusChangedPayload;
 import com.hesta.backend.enums.TwinHealthStatus;
 import com.hesta.backend.enums.TwinNodeType;
+import com.hesta.backend.enums.DeviceStatus;
 import com.hesta.backend.realtime.model.RealtimeEvent;
 import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
@@ -26,7 +27,6 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -89,15 +89,14 @@ class TwinHealthEvaluationServiceTest {
 
     @Test
     void evaluate_metricsAndDevice_haveIndependentHealthAndKeepAuthoritativeRouting() {
-        deviceRows.add(row(null, null));
+        deviceRows.add(deviceRow(DeviceStatus.OFFLINE));
         sensorRows.add(row("TEMPERATURE", TwinFixtures.TIME));
         sensorRows.add(row("HUMIDITY", TwinFixtures.TIME.minusMinutes(5)));
         service.evaluateAll();
         clock.advance(Duration.ofSeconds(30));
         service.evaluateAll();
         assertTransition(capture(1).getFirst(), TwinHealthStatus.ACTIVE, TwinHealthStatus.STALE, "TEMPERATURE");
-        when(devices.findHealthReference(TwinFixtures.id(22))).thenReturn(Optional.of(row(null,
-                OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))));
+        when(devices.findHealthReference(TwinFixtures.id(22))).thenReturn(Optional.of(deviceRow(DeviceStatus.ONLINE)));
         service.evaluateDevice(TwinFixtures.id(22));
         var deviceEvent = capture(2).get(1);
         var payload = (TwinHealthStatusChangedPayload) deviceEvent.data();
@@ -150,14 +149,34 @@ class TwinHealthEvaluationServiceTest {
     }
 
     private TwinHealthReference row(String metric, OffsetDateTime time) {
-        return new Reference(TwinFixtures.id(1), TwinFixtures.id(22), TwinFixtures.id(12), metric, time);
+        return new Reference(TwinFixtures.id(1), TwinFixtures.id(22), TwinFixtures.id(12), metric, time, DeviceStatus.UNKNOWN);
     }
 
-    record Reference(UUID home, UUID device, UUID room, String metric, OffsetDateTime time) implements TwinHealthReference {
+    private TwinHealthReference deviceRow(DeviceStatus status) {
+        return new Reference(TwinFixtures.id(1), TwinFixtures.id(22), TwinFixtures.id(12), null, null, status);
+    }
+
+    @Test
+    void onlineDevice_doesNotExpireAsTimePasses() {
+        deviceRows.add(deviceRow(DeviceStatus.ONLINE));
+        service.evaluateAll();
+        clock.advance(Duration.ofDays(30));
+        service.evaluateAll();
+        verifyNoInteractions(publisher);
+        when(devices.findHealthReference(TwinFixtures.id(22))).thenReturn(Optional.of(deviceRow(DeviceStatus.OFFLINE)));
+        service.evaluateDevice(TwinFixtures.id(22));
+        var payload = (TwinHealthStatusChangedPayload) capture(1).getFirst().data();
+        assertThat(payload.previousStatus()).isEqualTo(TwinHealthStatus.ACTIVE);
+        assertThat(payload.healthStatus()).isEqualTo(TwinHealthStatus.OFFLINE);
+        assertThat(payload.referenceTime()).isNull();
+    }
+
+    record Reference(UUID home, UUID device, UUID room, String metric, OffsetDateTime time, DeviceStatus status) implements TwinHealthReference {
         @Override public UUID getHomeId() { return home; }
         @Override public UUID getDeviceId() { return device; }
         @Override public UUID getRoomId() { return room; }
         @Override public String getMetricType() { return metric; }
         @Override public OffsetDateTime getReferenceTime() { return time; }
+        @Override public DeviceStatus getDeviceStatus() { return status; }
     }
 }
