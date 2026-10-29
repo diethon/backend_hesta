@@ -1,6 +1,7 @@
 package com.hesta.backend.controller;
 
 import com.hesta.backend.dto.response.ApiResponse;
+import com.hesta.backend.dto.response.MlModelStatusResponse;
 import com.hesta.backend.dto.response.RecommendationResponse;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.RecommendationService;
@@ -46,6 +47,25 @@ public class RecommendationController {
             @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
             @PathVariable UUID recommendationId) {
         return ok(recommendations.reject(user.getId(), homeId, recommendationId));
+    }
+
+    @PostMapping("/{recommendationId}/dismiss")
+    public ResponseEntity<ApiResponse<RecommendationResponse>> dismiss(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
+            @PathVariable UUID recommendationId) {
+        return ok(recommendations.dismiss(user.getId(), homeId, recommendationId));
+    }
+
+    @GetMapping("/model-status")
+    public ResponseEntity<ApiResponse<MlModelStatusResponse>> getModelStatus(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId) {
+        return ok(recommendations.getModelStatus(user.getId(), homeId));
+    }
+
+    @PostMapping("/retrain")
+    public ResponseEntity<ApiResponse<MlModelStatusResponse>> retrain(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId) {
+        return ok(recommendations.triggerRetraining(user.getId(), homeId));
     }
 
     private <T> ResponseEntity<ApiResponse<T>> ok(T result) {

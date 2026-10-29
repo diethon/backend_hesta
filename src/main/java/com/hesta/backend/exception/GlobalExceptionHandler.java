@@ -4,6 +4,8 @@ import com.hesta.backend.dto.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -60,6 +62,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
     }
 
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Object>> handleMaxUploadSizeExceededException(
+            MaxUploadSizeExceededException exception) {
+        return errorResponse(ErrorCode.AVATAR_FILE_TOO_LARGE);
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Object>> handleMissingServletRequestPartException(
+            MissingServletRequestPartException exception) {
+        return errorResponse(ErrorCode.AVATAR_FILE_REQUIRED);
+    }
+
     /**
      * 3. Bắt mọi lỗi Exception khác chưa được xử lý ở trên (Fall back)
      */
@@ -73,5 +87,13 @@ public class GlobalExceptionHandler {
                 .build();
                 
         return ResponseEntity.status(ErrorCode.UNCATEGORIZED_EXCEPTION.getStatusCode()).body(apiResponse);
+    }
+
+    private ResponseEntity<ApiResponse<Object>> errorResponse(ErrorCode errorCode) {
+        ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
+                .code(errorCode.getCode())
+                .message(errorCode.getMessage())
+                .build();
+        return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
     }
 }

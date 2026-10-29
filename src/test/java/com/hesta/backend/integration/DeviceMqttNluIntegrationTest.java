@@ -2,11 +2,10 @@ package com.hesta.backend.integration;
 
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
-import com.hesta.backend.service.MqttService;
 import com.hesta.backend.service.NluService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,9 +38,7 @@ public class DeviceMqttNluIntegrationTest {
     @MockitoBean
     private MqttGateway mqttGateway;
 
-    @MockitoBean
-    private MqttService mqttService;
-
+    
     @Autowired
     private NluService nluService;
 
@@ -83,7 +80,7 @@ public class DeviceMqttNluIntegrationTest {
         // Setup mock device for test
         testLight = new Device();
         testLight.setName("Đèn phòng khách");
-        testLight.setDeviceType(DeviceType.LIGHT);
+        testLight.setDeviceType("LIGHT");
         testLight.setStatus(DeviceStatus.ONLINE);
         testLight.setRoom(room);
         Map<String, Object> state = new HashMap<>();

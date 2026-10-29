@@ -77,6 +77,8 @@ WHERE email IN (
     'member@hesta.local',
     'guest@hesta.local',
     'second.owner@hesta.local',
+    'multifloor.owner@hesta.local',
+    'fresh@hesta.local',
     'admin@hesta.local'
 );
 "@
@@ -103,6 +105,8 @@ WHERE email IN (
     Write-Host '  member@hesta.local        - USER / MEMBER of Nhà HESTA Demo'
     Write-Host '  guest@hesta.local         - USER / MEMBER with limited room access'
     Write-Host '  second.owner@hesta.local  - USER / OWNER of Căn hộ Gia Huy'
+    Write-Host '  multifloor.owner@hesta.local - USER / OWNER of Nhà thông minh 3 tầng'
+    Write-Host '  fresh@hesta.local         - USER / chưa có nhà, bắt đầu từ đầu'
     Write-Host '  admin@hesta.local         - platform ADMIN'
     Write-Host ''
     Write-Host 'Supabase Studio: http://127.0.0.1:54323'

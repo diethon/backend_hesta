@@ -7,7 +7,6 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.SceneExecution;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.repository.SceneExecutionRepository;
@@ -58,9 +57,9 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(commands.sendCommand(device.getId(), DeviceAction.TURN_ON, Map.of(), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
-        when(commands.sendCommand(device.getId(), DeviceAction.SET_SPEED, Map.of("speed", 60), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "SET_SPEED", Map.of("speed", 60), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(false).status("FAILED").build()));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -74,8 +73,8 @@ class SceneExecutionServiceTest {
         verify(executions).save(saved.capture());
         assertThat(saved.getValue().getTriggerSource()).isEqualTo("MANUAL");
         var order = inOrder(commands);
-        order.verify(commands).sendCommand(eq(device.getId()), eq(DeviceAction.TURN_ON), any(), eq(StateChangeSource.SCENE));
-        order.verify(commands).sendCommand(eq(device.getId()), eq(DeviceAction.SET_SPEED), any(), eq(StateChangeSource.SCENE));
+        order.verify(commands).sendCommand(eq(device.getId()), eq("TURN_ON"), any(), eq(StateChangeSource.SCENE));
+        order.verify(commands).sendCommand(eq(device.getId()), eq("SET_SPEED"), any(), eq(StateChangeSource.SCENE));
     }
 
     @Test
@@ -109,7 +108,7 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(commands.sendCommand(device.getId(), DeviceAction.TURN_ON, Map.of(), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 

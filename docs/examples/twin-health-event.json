@@ -1,0 +1,17 @@
+{
+  "eventId": "example-health-event",
+  "type": "TWIN_HEALTH_STATUS_CHANGED",
+  "homeId": "00000000-0000-4000-8000-000000000001",
+  "deviceId": "00000000-0000-4000-8000-000000000022",
+  "data": {
+    "nodeType": "SENSOR",
+    "nodeId": "00000000-0000-4000-8000-000000000022:TEMPERATURE",
+    "deviceId": "00000000-0000-4000-8000-000000000022",
+    "roomId": "00000000-0000-4000-8000-000000000012",
+    "previousStatus": "ACTIVE",
+    "healthStatus": "STALE",
+    "referenceTime": "2026-09-17T09:00:00Z",
+    "evaluatedAt": "2026-09-17T09:00:30Z"
+  },
+  "timestamp": "2026-09-17T09:00:30Z"
+}

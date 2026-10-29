@@ -92,17 +92,17 @@ public class AutomationEngineImpl implements AutomationEngine {
     private List<RuleAction> targetActions(RuleAction action) {
         if (action.getScene() == null) return List.of(action);
         return action.getScene().getActions().stream().map(item -> RuleAction.builder()
-                .device(item.getTargetDevice()).action("TURN_ON".equals(item.getAction()) ? DeviceAction.TURN_ON
-                        : "TURN_OFF".equals(item.getAction()) ? DeviceAction.TURN_OFF : DeviceAction.SET_STATE)
+                .device(item.getTargetDevice()).action("TURN_ON".equals(item.getAction()) ? "TURN_ON"
+                        : "TURN_OFF".equals(item.getAction()) ? "TURN_OFF" : "SET_STATE")
                 .build()).toList();
     }
 
     private boolean conflicts(RuleAction left, RuleAction right) {
-        if (left.getAction() == DeviceAction.SET_STATE || right.getAction() == DeviceAction.SET_STATE) return true;
-        boolean leftPower = List.of(DeviceAction.TURN_ON, DeviceAction.TURN_OFF, DeviceAction.TOGGLE).contains(left.getAction());
-        boolean rightPower = List.of(DeviceAction.TURN_ON, DeviceAction.TURN_OFF, DeviceAction.TOGGLE).contains(right.getAction());
+        if ("SET_STATE".equals(left.getAction()) || "SET_STATE".equals(right.getAction())) return true;
+        boolean leftPower = List.of("TURN_ON", "TURN_OFF", "TOGGLE").contains(left.getAction());
+        boolean rightPower = List.of("TURN_ON", "TURN_OFF", "TOGGLE").contains(right.getAction());
         if (leftPower && rightPower) return left.getAction() != right.getAction()
-                || left.getAction() == DeviceAction.TOGGLE;
+                || "TOGGLE".equals(left.getAction());
         return left.getAction() == right.getAction() && !Objects.equals(left.getParameters(), right.getParameters());
     }
 
@@ -113,7 +113,7 @@ public class AutomationEngineImpl implements AutomationEngine {
             ObjectNode detail = objectMapper.createObjectNode();
             if (action.getDevice() != null) detail.put("deviceId", action.getDevice().getId().toString());
             if (action.getScene() != null) detail.put("sceneId", action.getScene().getId().toString());
-            detail.put("action", action.getAction().name());
+            detail.put("action", action.getAction());
             detail.put("success", false);
             detail.put("status", "SKIPPED_CONFLICT");
             details.add(detail);
@@ -142,7 +142,7 @@ public class AutomationEngineImpl implements AutomationEngine {
                         .deviceName(action.getDevice() == null ? null : action.getDevice().getName())
                         .sceneId(action.getScene() == null ? null : action.getScene().getId())
                         .sceneName(action.getScene() == null ? null : action.getScene().getName())
-                        .action(action.getAction().name())
+                        .action(action.getAction())
                         .parameters(action.getParameters()).order(action.getOrder()).build())
                 .toList();
         return AutomationTestResponse.builder().ruleId(ruleId)
@@ -170,7 +170,8 @@ public class AutomationEngineImpl implements AutomationEngine {
         if (event.getSourceDeviceId() == null) return;
         Device device = deviceRepository.findById(event.getSourceDeviceId())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        if (!homeId.equals(device.getNode().getHome().getId())) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null
+                || !homeId.equals(device.getRoom().getHome().getId())) {
             throw new AppException(ErrorCode.AUTOMATION_DEVICE_HOME_MISMATCH);
         }
     }
@@ -203,6 +204,7 @@ public class AutomationEngineImpl implements AutomationEngine {
             case GTE -> comparison >= 0;
             case LT -> comparison < 0;
             case LTE -> comparison <= 0;
+            default -> false;
         };
     }
 
@@ -216,7 +218,28 @@ public class AutomationEngineImpl implements AutomationEngine {
             return new BigDecimal(left.toString()).compareTo(new BigDecimal(right.toString()));
         }
         if (actual instanceof Boolean left && expected instanceof Boolean right) return left.compareTo(right);
+        Boolean actualBool = toBoolean(actual);
+        Boolean expectedBool = toBoolean(expected);
+        if (actualBool != null && expectedBool != null) {
+            return actualBool.compareTo(expectedBool);
+        }
         return String.valueOf(actual).compareToIgnoreCase(String.valueOf(expected));
+    }
+
+    private Boolean toBoolean(Object val) {
+        if (val instanceof Boolean b) return b;
+        if (val instanceof Number n) {
+            return n.doubleValue() != 0.0;
+        }
+        if (val instanceof String s) {
+            if ("true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s) || "on".equalsIgnoreCase(s) || "detected".equalsIgnoreCase(s) || "active".equalsIgnoreCase(s)) {
+                return true;
+            }
+            if ("false".equalsIgnoreCase(s) || "0".equals(s) || "no".equalsIgnoreCase(s) || "off".equalsIgnoreCase(s) || "none".equalsIgnoreCase(s) || "inactive".equalsIgnoreCase(s)) {
+                return false;
+            }
+        }
+        return null;
     }
 
     private AutomationExecutionResponse execute(AutomationRule rule, AutomationEventRequest event) {
@@ -229,7 +252,7 @@ public class AutomationEngineImpl implements AutomationEngine {
             ObjectNode detail = objectMapper.createObjectNode();
             if (action.getDevice() != null) detail.put("deviceId", action.getDevice().getId().toString());
             if (action.getScene() != null) detail.put("sceneId", action.getScene().getId().toString());
-            detail.put("action", action.getAction().name());
+            detail.put("action", action.getAction());
             if (event.isTest()) {
                 detail.put("success", false);
                 detail.put("status", "PREVIEW");
@@ -254,11 +277,20 @@ public class AutomationEngineImpl implements AutomationEngine {
                 details.add(detail);
                 continue;
             }
+            boolean isEmergency = isEmergencySafetyEvent(rule, event);
             if (manualOverrideService.isActive(action.getDevice().getId())) {
-                detail.put("success", false);
-                detail.put("status", "SKIPPED_OVERRIDE");
-                details.add(detail);
-                continue;
+                if (isEmergency) {
+                    log.warn("[SAFETY BYPASS] Emergency event '{}' / rule '{}' bypassed manual override on device {}",
+                            event != null ? event.getEventType() : "UNKNOWN",
+                            rule != null ? rule.getName() : "UNKNOWN",
+                            action.getDevice().getId());
+                    detail.put("emergencyBypassed", true);
+                } else {
+                    detail.put("success", false);
+                    detail.put("status", "SKIPPED_OVERRIDE");
+                    details.add(detail);
+                    continue;
+                }
             }
             attempted++;
             try {
@@ -300,5 +332,31 @@ public class AutomationEngineImpl implements AutomationEngine {
             }
         }
         return response;
+    }
+    private boolean isEmergencySafetyEvent(AutomationRule rule, AutomationEventRequest event) {
+        if (event != null) {
+            String eventType = event.getEventType() != null ? event.getEventType().toUpperCase() : "";
+            if (eventType.contains("FIRE") || eventType.contains("SMOKE") || eventType.contains("GAS")
+                    || eventType.contains("LEAK") || eventType.contains("EMERGENCY") || eventType.contains("ALARM")) {
+                return true;
+            }
+            if (event.getData() != null) {
+                Object severity = event.getData().get("severity");
+                if (severity != null && ("CRITICAL".equalsIgnoreCase(severity.toString()) || "EMERGENCY".equalsIgnoreCase(severity.toString()))) {
+                    return true;
+                }
+                if (Boolean.TRUE.equals(event.getData().get("emergency")) || Boolean.TRUE.equals(event.getData().get("isEmergency"))) {
+                    return true;
+                }
+            }
+        }
+        if (rule != null) {
+            String ruleName = rule.getName() != null ? rule.getName().toUpperCase() : "";
+            if (ruleName.contains("EMERGENCY") || ruleName.contains("FIRE") || ruleName.contains("SMOKE")
+                    || ruleName.contains("GAS") || ruleName.contains("CHÁY") || ruleName.contains("KHẨN CẤP") || ruleName.contains("BÁO ĐỘNG")) {
+                return true;
+            }
+        }
+        return false;
     }
 }
