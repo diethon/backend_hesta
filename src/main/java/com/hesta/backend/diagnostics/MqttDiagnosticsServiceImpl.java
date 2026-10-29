@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -397,8 +398,12 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<NodeDiagnosticsResponse> getNodeDiagnostics() {
-        List<EdgeNode> allNodes = edgeNodeRepository.findAll();
+        List<EdgeNode> allNodes = edgeNodeRepository.findAllWithHome();
+        if (allNodes == null || allNodes.isEmpty()) {
+            allNodes = edgeNodeRepository.findAll();
+        }
         return allNodes.stream().map(node -> {
             NodeHealthTracker t = getTracker(node.getNodeCode());
             int total = t.totalCommands.get();
@@ -427,8 +432,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    @Transactional
     public NodeDiagnosticsResponse resetCircuitBreaker(UUID nodeId) {
-        EdgeNode node = edgeNodeRepository.findById(nodeId)
+        EdgeNode node = edgeNodeRepository.findByIdWithHome(nodeId)
+                .or(() -> edgeNodeRepository.findById(nodeId))
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
         NodeHealthTracker t = getTracker(node.getNodeCode());
@@ -461,8 +468,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public NodeDiagnosticsResponse pingNode(UUID nodeId) {
-        EdgeNode node = edgeNodeRepository.findById(nodeId)
+        EdgeNode node = edgeNodeRepository.findByIdWithHome(nodeId)
+                .or(() -> edgeNodeRepository.findById(nodeId))
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
         NodeHealthTracker t = getTracker(node.getNodeCode());
