@@ -89,9 +89,9 @@ public class DemandResponseServiceImpl implements DemandResponseService {
         }
 
         // 3. COMFORT: Điều hòa không khí, bình nước nóng, máy sưởi, quạt
-        if (type.contains("AIR_CONDITIONER") || type.contains("AC") || type.contains("HEATER") ||
-            type.contains("WATER_HEATER") || type.contains("FAN") || name.contains("ĐIỀU HÒA") ||
-            name.contains("BÌNH NÓNG LẠNH") || name.contains("QUẠT")) {
+        if (type.contains("AIR_CONDITIONER") || type.equals("AC") || type.startsWith("AC_") || type.endsWith("_AC") ||
+            type.contains("HEATER") || type.contains("WATER_HEATER") || type.contains("FAN") ||
+            name.contains("ĐIỀU HÒA") || name.contains("BÌNH NÓNG LẠNH") || name.contains("QUẠT")) {
             return DevicePriorityCategory.COMFORT;
         }
 
@@ -163,20 +163,22 @@ public class DemandResponseServiceImpl implements DemandResponseService {
         // Step 1: Shed LUXURY devices
         for (Device dev : luxuryCandidates) {
             if (savedWatts >= excess) break;
-            shedDevice(dev);
-            double w = resolveDeviceWattage(dev);
-            savedWatts += w;
-            shedded.add(dev.getName() + " [LUXURY: -" + (int) w + "W]");
+            if (shedDevice(dev)) {
+                double w = resolveDeviceWattage(dev);
+                savedWatts += w;
+                shedded.add(dev.getName() + " [LUXURY: -" + (int) w + "W]");
+            }
         }
 
         // Step 2: If still exceeding, shed COMFORT devices (e.g. water heater, AC)
         if (savedWatts < excess) {
             for (Device dev : comfortCandidates) {
                 if (savedWatts >= excess) break;
-                shedDevice(dev);
-                double w = resolveDeviceWattage(dev);
-                savedWatts += w;
-                shedded.add(dev.getName() + " [COMFORT: -" + (int) w + "W]");
+                if (shedDevice(dev)) {
+                    double w = resolveDeviceWattage(dev);
+                    savedWatts += w;
+                    shedded.add(dev.getName() + " [COMFORT: -" + (int) w + "W]");
+                }
             }
         }
 
@@ -196,16 +198,18 @@ public class DemandResponseServiceImpl implements DemandResponseService {
                 .build();
     }
 
-    private void shedDevice(Device dev) {
-        if (deviceCommandService == null || dev == null) return;
+    private boolean shedDevice(Device dev) {
+        if (deviceCommandService == null || dev == null) return false;
         try {
             Map<String, Object> params = new HashMap<>();
             params.put("power", "OFF");
             params.put("reason", "DEMAND_RESPONSE_LOAD_SHEDDING");
-            deviceCommandService.sendCommand(dev.getId(), "OFF", params, StateChangeSource.AUTOMATION);
-            log.info("Dispatched Demand Response SHED (OFF) to device [{}] ({})", dev.getId(), dev.getName());
+            deviceCommandService.sendCommand(dev.getId(), "TURN_OFF", params, StateChangeSource.AUTOMATION);
+            log.info("Dispatched Demand Response SHED (TURN_OFF) to device [{}] ({})", dev.getId(), dev.getName());
+            return true;
         } catch (Exception e) {
             log.warn("Failed to shed device [{}]: {}", dev.getId(), e.getMessage());
+            return false;
         }
     }
 

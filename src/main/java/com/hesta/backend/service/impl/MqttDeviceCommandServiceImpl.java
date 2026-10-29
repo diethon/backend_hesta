@@ -366,19 +366,17 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             
             long metricStartTime = System.currentTimeMillis();
             final String targetNodeCode = nodeCode;
-            boolean isPowerCommand = "TURN_ON".equalsIgnoreCase(action)
-                    || "TURN_OFF".equalsIgnoreCase(action)
-                    || "POWER_ON".equalsIgnoreCase(action)
-                    || "POWER_OFF".equalsIgnoreCase(action)
-                    || "SET_POWER".equalsIgnoreCase(action);
+            boolean isPowerCommand = "TURN_ON".equalsIgnoreCase(normalizedAction)
+                    || "TURN_OFF".equalsIgnoreCase(normalizedAction)
+                    || "POWER_ON".equalsIgnoreCase(normalizedAction)
+                    || "POWER_OFF".equalsIgnoreCase(normalizedAction)
+                    || "SET_POWER".equalsIgnoreCase(normalizedAction);
 
             long effectiveTimeout;
             if (source == StateChangeSource.VOICE) {
                 effectiveTimeout = 250L;
             } else if (isColorOrDimmer) {
                 effectiveTimeout = 75L;
-            } else if (isPowerCommand) {
-                effectiveTimeout = 400L;
             } else {
                 effectiveTimeout = commandTimeoutMs;
             }
@@ -400,12 +398,10 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             boolean isTimeout = ex instanceof java.util.concurrent.TimeoutException
                                     || (ex != null && ex.getCause() instanceof java.util.concurrent.TimeoutException);
 
-                            boolean isFastReturnEligible = isColorOrDimmer || isPowerCommand || (source == StateChangeSource.VOICE);
+                            // Only fast continuous streaming (sliders) or Voice pipeline can return optimistic early completion
+                            boolean isFastReturnEligible = isColorOrDimmer || (source == StateChangeSource.VOICE);
                             if (isFastReturnEligible && (isTimeout || (res != null && "SUPERSEDED".equals(res.getStatus())))) {
                                 log.info("[METRICS] Fast-return for command {} commandId {} after {} ms (dispatched to MQTT broker, source: {})", action, commandId, roundtrip, source);
-                                if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
-                                    diagnosticsService.recordCommandSuccess(targetNodeCode, roundtrip);
-                                }
                                 return CommandResult.builder()
                                         .commandId(commandId)
                                         .success(true)
@@ -552,11 +548,19 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // Default: LED, RGB Light, Relay, Switch and other generic IoT devices
         switch (act) {
             case "TURN_ON":
+            case "ON":
+            case "TRUE":
+            case "BAT":
+            case "MO":
                 return "TURN_ON";
-            case "TURN_OFF":
-                return "TURN_OFF";
             case "POWER_ON":
                 return "POWER_ON";
+            case "TURN_OFF":
+            case "OFF":
+            case "FALSE":
+            case "TAT":
+            case "DONG":
+                return "TURN_OFF";
             case "POWER_OFF":
                 return "POWER_OFF";
             case "SET_POWER":

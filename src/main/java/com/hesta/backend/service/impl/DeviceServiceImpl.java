@@ -238,11 +238,6 @@ public class DeviceServiceImpl implements DeviceService {
                         deviceHealthService.recordSwitch(device.getId());
                     } catch (Exception ignored) {}
                 }
-                if (manualOverrideService != null && !isSensor && powerToggled && source == StateChangeSource.MANUAL) {
-                    try {
-                        manualOverrideService.recordOverride(device.getId(), null, 30);
-                    } catch (Exception ignored) {}
-                }
             }
 
             if (device.getHome() != null && device.getHome().getId() != null) {
