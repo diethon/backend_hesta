@@ -87,9 +87,26 @@ public class DeviceController {
 
     @PostMapping("/devices/{deviceId}/automation/cancel")
     public ResponseEntity<ApiResponse<OffsetDateTime>> cancelAutomation(
-            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestBody(required = false) Map<String, Object> requestBody) {
         if (userDetails == null) {
             throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
+        int minutes = 30;
+        if (requestBody != null && requestBody.containsKey("minutes")) {
+            try {
+                minutes = Integer.parseInt(requestBody.get("minutes").toString());
+            } catch (Exception ignored) {}
+        } else if (requestBody != null && requestBody.containsKey("hours")) {
+            try {
+                minutes = (int) Math.round(Double.parseDouble(requestBody.get("hours").toString()) * 60);
+            } catch (Exception ignored) {}
+        }
+        if (minutes <= 0) minutes = 30;
+        if (minutes != 30 && manualOverrideService != null) {
+            return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
+                    .result(manualOverrideService.recordOverride(deviceId, userDetails.getId(), minutes)).build());
         }
         return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
                 .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId)).build());
@@ -331,16 +348,7 @@ public class DeviceController {
             params.remove("action");
         }
         return deviceCommandService.sendCommand(deviceId, actionStr, params, StateChangeSource.MANUAL)
-                .thenApply(result -> {
-                    if (result.isSuccess() && manualOverrideService != null && userDetails != null) {
-                        try {
-                            manualOverrideService.recordOverride(deviceId, userDetails.getId(), 30);
-                        } catch (Exception ex) {
-                            // Do not fail command result on override failure
-                        }
-                    }
-                    return ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build());
-                });
+                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
     }
 
 @PreAuthorize("@deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
