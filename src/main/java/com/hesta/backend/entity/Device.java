@@ -1,185 +1,249 @@
-package com.hesta.backend.entity;
-
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.hesta.backend.enums.DeviceStatus;
-import jakarta.persistence.*;
-import lombok.*;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.UpdateTimestamp;
-import org.hibernate.type.SqlTypes;
-
-import java.math.BigDecimal;
-import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-
-@Entity
-@Table(name = "devices", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"node_id", "local_id"})
-})
-@org.hibernate.annotations.SQLRestriction("is_deleted = false")
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class Device {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "room_id")
-    private Room room;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "node_id")
-    private EdgeNode node;
-
-    @Column(name = "local_id", length = 50)
-    private String localId;
-
-    @Column(name = "name", nullable = false, length = 150)
-    private String name;
-
-    @Column(name = "device_type", nullable = false, length = 50)
-    private String deviceType;
-
-    @Column(name = "model", length = 100)
-    private String model;
-
-    @Column(name = "serial_number", length = 100)
-    private String serialNumber;
-
-    @Column(name = "mqtt_topic", length = 255)
-    private String mqttTopic;
-
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 20)
-    private DeviceStatus status;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "current_state", nullable = false, columnDefinition = "jsonb")
-    private Map<String, Object> currentState;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "settings", columnDefinition = "jsonb")
-    @Builder.Default
-    private Map<String, Object> settings = new java.util.HashMap<>();
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "capabilities", columnDefinition = "jsonb")
-    @Builder.Default
-    private DeviceCapabilities capabilities = new DeviceCapabilities();
-
-    @Column(name = "icon", length = 50)
-    private String icon;
-
-    @Column(name = "image_url", columnDefinition = "text")
-    private String imageUrl;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "catalog_id")
-    private DeviceCatalog catalog;
-
-    @Column(name = "digital_twin_x", precision = 10, scale = 3)
-    private BigDecimal digitalTwinX;
-
-    @Column(name = "digital_twin_y", precision = 10, scale = 3)
-    private BigDecimal digitalTwinY;
-
-    @Column(name = "digital_twin_z", precision = 10, scale = 3)
-    private BigDecimal digitalTwinZ;
-
-    @CreationTimestamp
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private OffsetDateTime createdAt;
-
-    @UpdateTimestamp
-    @Column(name = "updated_at", nullable = false)
-    private OffsetDateTime updatedAt;
-
-    @Column(name = "is_deleted", nullable = false)
-    @Builder.Default
-    private boolean isDeleted = false;
-
-    public Home getHome() { return room != null ? room.getHome() : (node != null ? node.getHome() : null); }
-
-    // DUMMY METHODS FOR COMPATIBILITY WITH TWIN HEALTH
-    public OffsetDateTime getLastSeen() { return null; }
-
-    public void setLastSeen(OffsetDateTime lastSeen) {}
-
-    public boolean supportsAction(String action) {
-        if (this.capabilities == null || this.capabilities.isEmpty()) return true;
-        if ("SET_STATE".equalsIgnoreCase(action)) return true;
-        boolean directMatch = this.capabilities.values().stream()
-                .flatMap(java.util.List::stream)
-                .anyMatch(act -> act.equalsIgnoreCase(action));
-        if (directMatch) return true;
-        if ("TOGGLE".equalsIgnoreCase(action)) {
-            return this.capabilities.values().stream()
-                    .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
-        }
-        if ("SET_COLOR".equalsIgnoreCase(action) || "SET_RGB".equalsIgnoreCase(action)) {
-            return this.capabilities.values().stream()
-                    .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("SET_COLOR") || act.equalsIgnoreCase("SET_RGB"));
-        }
-        if ("SET_SPEED".equalsIgnoreCase(action) || "SET_FAN".equalsIgnoreCase(action)) {
-            return this.capabilities.values().stream()
-                    .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("SET_SPEED") || act.equalsIgnoreCase("SET_FAN"));
-        }
-        if ("TURN_ON".equalsIgnoreCase(action) || "POWER_ON".equalsIgnoreCase(action)) {
-            return this.capabilities.values().stream()
-                    .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
-        }
-        if ("TURN_OFF".equalsIgnoreCase(action) || "POWER_OFF".equalsIgnoreCase(action)) {
-            return this.capabilities.values().stream()
-                    .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("TURN_OFF") || act.equalsIgnoreCase("POWER_OFF") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
-        }
-        return false;
-    }
-
-    @JsonProperty("capabilities")
-    @JsonDeserialize(using = DeviceCapabilitiesDeserializer.class)
-    public void setCapabilities(DeviceCapabilities capabilities) {
-        this.capabilities = capabilities != null ? capabilities : new DeviceCapabilities();
-    }
-
-    @JsonIgnore
-    public void setCapabilities(Map<String, List<String>> capabilities) {
-        if (capabilities instanceof DeviceCapabilities dc) {
-            this.capabilities = dc;
-        } else if (capabilities != null) {
-            this.capabilities = new DeviceCapabilities(capabilities);
-        } else {
-            this.capabilities = new DeviceCapabilities();
-        }
-    }
-
-    public static class DeviceBuilder {
-        public DeviceBuilder capabilities(Map<String, List<String>> capabilities) {
-            if (capabilities instanceof DeviceCapabilities dc) {
-                this.capabilities$value = dc;
-            } else if (capabilities != null) {
-                this.capabilities$value = new DeviceCapabilities(capabilities);
-            } else {
-                this.capabilities$value = new DeviceCapabilities();
-            }
-            this.capabilities$set = true;
-            return this;
-        }
-    }
-}
+package com.hesta.backend.entity;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.hesta.backend.enums.DeviceStatus;
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+@Entity
+@Table(name = "devices", uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"node_id", "local_id"})
+})
+@org.hibernate.annotations.SQLRestriction("is_deleted = false")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Device {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "room_id")
+    private Room room;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "node_id")
+    private EdgeNode node;
+
+    @Column(name = "local_id", length = 50)
+    private String localId;
+
+    @Column(name = "name", nullable = false, length = 150)
+    private String name;
+
+    @Column(name = "device_type", nullable = false, length = 50)
+    private String deviceType;
+
+    @Column(name = "model", length = 100)
+    private String model;
+
+    @Column(name = "serial_number", length = 100)
+    private String serialNumber;
+
+    @Column(name = "mqtt_topic", length = 255)
+    private String mqttTopic;
+
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private DeviceStatus status;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "current_state", nullable = false, columnDefinition = "jsonb")
+    private Map<String, Object> currentState;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "settings", columnDefinition = "jsonb")
+    @Builder.Default
+    private Map<String, Object> settings = new java.util.HashMap<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "capabilities", columnDefinition = "jsonb")
+    @Builder.Default
+    private DeviceCapabilities capabilities = new DeviceCapabilities();
+
+    @Column(name = "icon", length = 50)
+    private String icon;
+
+    @Column(name = "image_url", columnDefinition = "text")
+    private String imageUrl;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "catalog_id")
+    private DeviceCatalog catalog;
+
+    @Column(name = "digital_twin_x", precision = 10, scale = 3)
+    private BigDecimal digitalTwinX;
+
+    @Column(name = "digital_twin_y", precision = 10, scale = 3)
+    private BigDecimal digitalTwinY;
+
+    @Column(name = "digital_twin_z", precision = 10, scale = 3)
+    private BigDecimal digitalTwinZ;
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private OffsetDateTime createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    @Column(name = "is_deleted", nullable = false)
+    @Builder.Default
+    private boolean isDeleted = false;
+
+    public Home getHome() { return room != null ? room.getHome() : (node != null ? node.getHome() : null); }
+
+    // DUMMY METHODS FOR COMPATIBILITY WITH TWIN HEALTH
+    public OffsetDateTime getLastSeen() { return null; }
+
+    public void setLastSeen(OffsetDateTime lastSeen) {}
+
+    public boolean supportsAction(String action) {
+        if (this.capabilities == null || this.capabilities.isEmpty()) return true;
+        if ("SET_STATE".equalsIgnoreCase(action) || "GET_STATE".equalsIgnoreCase(action)) return true;
+        boolean directMatch = this.capabilities.values().stream()
+                .flatMap(java.util.List::stream)
+                .anyMatch(act -> act.equalsIgnoreCase(action));
+        if (directMatch) return true;
+        if ("TOGGLE".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+        }
+        if ("SET_POWER".equalsIgnoreCase(action) || "POWER".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("TURN_OFF") || act.equalsIgnoreCase("POWER_OFF") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+        }
+        if ("SET_COLOR".equalsIgnoreCase(action) || "SET_RGB".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_COLOR") || act.equalsIgnoreCase("SET_RGB") || act.equalsIgnoreCase("COLOR") || act.equalsIgnoreCase("RGB"));
+        }
+        if ("SET_SPEED".equalsIgnoreCase(action) || "SET_FAN".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_SPEED") || act.equalsIgnoreCase("SET_FAN") || act.equalsIgnoreCase("SPEED") || act.equalsIgnoreCase("FAN"));
+        }
+        if ("SET_BRIGHTNESS".equalsIgnoreCase(action) || "INCREASE_BRIGHTNESS".equalsIgnoreCase(action) || "DECREASE_BRIGHTNESS".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_BRIGHTNESS") || act.equalsIgnoreCase("BRIGHTNESS"));
+        }
+        if ("OPEN".equalsIgnoreCase(action) || "GATE_OPEN".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
+        }
+        if ("CLOSE".equalsIgnoreCase(action) || "GATE_CLOSE".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
+        }
+        if ("STOP".equalsIgnoreCase(action) || "GATE_STOP".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("STOP") || act.equalsIgnoreCase("GATE_STOP") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
+        }
+        if ("TURN_ON".equalsIgnoreCase(action) || "POWER_ON".equalsIgnoreCase(action)) {
+            boolean powerMatch = this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+            if (powerMatch) return true;
+            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType)))
+                    || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR");
+            if (isGate) {
+                return this.capabilities.values().stream().flatMap(java.util.List::stream)
+                        .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE"));
+            }
+            return false;
+        }
+        if ("TURN_OFF".equalsIgnoreCase(action) || "POWER_OFF".equalsIgnoreCase(action)) {
+            boolean powerMatch = this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("TURN_OFF") || act.equalsIgnoreCase("POWER_OFF") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
+            if (powerMatch) return true;
+            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType)))
+                    || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR");
+            if (isGate) {
+                return this.capabilities.values().stream().flatMap(java.util.List::stream)
+                        .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE"));
+            }
+            return false;
+        }
+        if ("SET_TEMPERATURE".equalsIgnoreCase(action)
+                || "TEMPERATURE_PLUS".equalsIgnoreCase(action) || "TEMP_UP".equalsIgnoreCase(action)
+                || "TEMPERATURE_MINUS".equalsIgnoreCase(action) || "TEMP_DOWN".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_TEMPERATURE") || act.equalsIgnoreCase("TEMPERATURE_PLUS")
+                            || act.equalsIgnoreCase("TEMPERATURE_MINUS") || act.equalsIgnoreCase("TEMPERATURE") || act.equalsIgnoreCase("TEMP"));
+        }
+        if ("SET_MODE".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_MODE") || act.equalsIgnoreCase("MODE"));
+        }
+        if ("SET_SWING".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_SWING") || act.equalsIgnoreCase("SWING"));
+        }
+        if ("SET_TIMER".equalsIgnoreCase(action) || "CANCEL_TIMER".equalsIgnoreCase(action)) {
+            return this.capabilities.values().stream()
+                    .flatMap(java.util.List::stream)
+                    .anyMatch(act -> act.equalsIgnoreCase("SET_TIMER") || act.equalsIgnoreCase("CANCEL_TIMER") || act.equalsIgnoreCase("TIMER"));
+        }
+        return false;
+    }
+
+    @JsonProperty("capabilities")
+    @JsonDeserialize(using = DeviceCapabilitiesDeserializer.class)
+    public void setCapabilities(DeviceCapabilities capabilities) {
+        this.capabilities = capabilities != null ? capabilities : new DeviceCapabilities();
+    }
+
+    @JsonIgnore
+    public void setCapabilities(Map<String, List<String>> capabilities) {
+        if (capabilities instanceof DeviceCapabilities dc) {
+            this.capabilities = dc;
+        } else if (capabilities != null) {
+            this.capabilities = new DeviceCapabilities(capabilities);
+        } else {
+            this.capabilities = new DeviceCapabilities();
+        }
+    }
+
+    public static class DeviceBuilder {
+        public DeviceBuilder capabilities(Map<String, List<String>> capabilities) {
+            if (capabilities instanceof DeviceCapabilities dc) {
+                this.capabilities$value = dc;
+            } else if (capabilities != null) {
+                this.capabilities$value = new DeviceCapabilities(capabilities);
+            } else {
+                this.capabilities$value = new DeviceCapabilities();
+            }
+            this.capabilities$set = true;
+            return this;
+        }
+    }
+}
