@@ -1,15 +1,19 @@
 package com.hesta.backend.falldetection.service;
 
+import com.hesta.backend.entity.FallIncident;
 import com.hesta.backend.falldetection.dto.FallIncidentEventDTO;
 import com.hesta.backend.falldetection.dto.FallIncidentResponseDTO;
 import com.hesta.backend.falldetection.enums.FallIncidentState;
 import com.hesta.backend.falldetection.enums.FallIncidentType;
+import com.hesta.backend.repository.FallIncidentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -20,7 +24,10 @@ public class FallIncidentServiceImpl implements FallIncidentService {
 
     private final Optional<SimpMessagingTemplate> messagingTemplate;
 
-    // Concurrent in-memory store for active incidents and countdown timers
+    @Autowired(required = false)
+    private FallIncidentRepository fallIncidentRepository;
+
+    // In-memory active incidents store & countdown scheduler
     private final Map<UUID, FallIncidentResponseDTO> activeIncidents = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -57,7 +64,10 @@ public class FallIncidentServiceImpl implements FallIncidentService {
 
         activeIncidents.put(incidentId, response);
 
-        // Phát WebSocket thông báo khẩn cấp tới Web Dashboard & Mobile
+        // Lưu vào cơ sở dữ liệu PostgreSQL (nếu có Repository)
+        saveToDatabase(response, null);
+
+        // Broadcast WebSocket khẩn cấp tới Web Dashboard & Mobile
         broadcastRealtime(response);
 
         // Khởi động đếm ngược 30 giây (Escalation Pipeline)
@@ -72,6 +82,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             log.error("[SOS ESCALATION] Hết 30 giây đếm ngược mà nạn nhân không phản hồi! KÍCH HOẠT SOS CẤP TỐC: {}", incidentId);
             incident.setState(FallIncidentState.ESCALATED_SOS);
             incident.setCountdownRemainingSec(0);
+            saveToDatabase(incident, null);
             broadcastRealtime(incident);
         }
     }
@@ -84,6 +95,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             incident.setState(FallIncidentState.FALSE_ALARM);
             incident.setResolvedAt(Instant.now());
             incident.setResolutionNote(note != null ? note : "Người dùng bấm xác nhận an toàn (Tôi ổn)");
+            saveToDatabase(incident, incident.getResolutionNote());
             broadcastRealtime(incident);
             activeIncidents.remove(incidentId);
             return incident;
@@ -98,6 +110,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
         if (incident != null) {
             incident.setState(FallIncidentState.ACKNOWLEDGED);
             incident.setResolutionNote("Người thân đang trực tiếp kiểm tra tại hiện trường");
+            saveToDatabase(incident, incident.getResolutionNote());
             broadcastRealtime(incident);
             return incident;
         }
@@ -112,6 +125,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             incident.setState(FallIncidentState.RESOLVED);
             incident.setResolvedAt(Instant.now());
             incident.setResolutionNote(note != null ? note : "Đã xử lý an toàn");
+            saveToDatabase(incident, incident.getResolutionNote());
             broadcastRealtime(incident);
             activeIncidents.remove(incidentId);
             return incident;
@@ -124,6 +138,28 @@ public class FallIncidentServiceImpl implements FallIncidentService {
         return activeIncidents.values().stream()
                 .filter(i -> homeId == null || i.getHomeId().equals(homeId))
                 .toList();
+    }
+
+    private void saveToDatabase(FallIncidentResponseDTO dto, String note) {
+        if (fallIncidentRepository == null) return;
+        try {
+            FallIncident entity = FallIncident.builder()
+                    .id(dto.getId())
+                    .homeId(dto.getHomeId())
+                    .deviceId(dto.getDeviceId())
+                    .roomName(dto.getRoomName())
+                    .incidentType(dto.getIncidentType())
+                    .state(dto.getState())
+                    .confidenceScore(dto.getConfidenceScore())
+                    .detectedAt(OffsetDateTime.now())
+                    .resolvedAt(dto.getResolvedAt() != null ? OffsetDateTime.now() : null)
+                    .resolutionNote(note)
+                    .build();
+            fallIncidentRepository.save(entity);
+            log.debug("[FALL DB] Đã lưu sự cố té ngã vào PostgreSQL: {}", dto.getId());
+        } catch (Exception e) {
+            log.warn("[FALL DB] Không thể lưu vào database (chạy fallback in-memory): {}", e.getMessage());
+        }
     }
 
     private void broadcastRealtime(FallIncidentResponseDTO incident) {

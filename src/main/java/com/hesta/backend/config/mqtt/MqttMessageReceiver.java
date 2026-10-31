@@ -47,6 +47,8 @@ public class MqttMessageReceiver {
     private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.ota.OtaCampaignService otaCampaignService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.falldetection.service.FallIncidentService fallIncidentService;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -162,6 +164,16 @@ public class MqttMessageReceiver {
             else if (topic.contains("/ota/")) {
 
                 handleOtaMessage(topic, payload);
+
+            }
+
+            // =====================================================
+            // 8. FALL DETECTION / EMERGENCY SOS
+            // =====================================================
+
+            else if (topic.contains("fall-detection") || topic.contains("emergency/fall")) {
+
+                handleFallDetectionEvent(topic, payload);
 
             }
 
@@ -887,6 +899,20 @@ public class MqttMessageReceiver {
             log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
         }
     }
+
+    private void handleFallDetectionEvent(String topic, String payload) {
+        log.info("Processing Fall Detection MQTT event from topic: {}", topic);
+        if (fallIncidentService != null) {
+            try {
+                com.hesta.backend.falldetection.dto.FallIncidentEventDTO event =
+                        objectMapper.readValue(payload, com.hesta.backend.falldetection.dto.FallIncidentEventDTO.class);
+                fallIncidentService.processIncomingFallEvent(event);
+            } catch (Exception e) {
+                log.error("Failed to parse or process fall incident payload: {}", payload, e);
+            }
+        } else {
+            log.warn("FallIncidentService is not available to process fall event");
+        }
+    }
+
 }
-
-
