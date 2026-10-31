@@ -27,6 +27,9 @@ public class FallIncidentServiceImpl implements FallIncidentService {
     @Autowired(required = false)
     private FallIncidentRepository fallIncidentRepository;
 
+    @Autowired(required = false)
+    private com.hesta.backend.config.mqtt.MqttGateway mqttGateway;
+
     // In-memory active incidents store & countdown scheduler
     private final Map<UUID, FallIncidentResponseDTO> activeIncidents = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -84,6 +87,14 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             incident.setCountdownRemainingSec(0);
             saveToDatabase(incident, null);
             broadcastRealtime(incident);
+            if (mqttGateway != null) {
+                try {
+                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"START\",\"durationSec\":60}");
+                    log.info("[MQTT SIREN] Kích hoạt còi hú 12V trên ESP32");
+                } catch (Exception e) {
+                    log.warn("[MQTT SIREN] Không thể gửi lệnh tới MQTT còi: {}", e.getMessage());
+                }
+            }
         }
     }
 
@@ -98,6 +109,14 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             saveToDatabase(incident, incident.getResolutionNote());
             broadcastRealtime(incident);
             activeIncidents.remove(incidentId);
+            if (mqttGateway != null) {
+                try {
+                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"STOP\"}");
+                    log.info("[MQTT SIREN] Tắt còi hú trên ESP32");
+                } catch (Exception e) {
+                    log.warn("[MQTT SIREN] Không thể gửi lệnh tắt còi: {}", e.getMessage());
+                }
+            }
             return incident;
         }
         return null;

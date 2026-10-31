@@ -26,8 +26,13 @@ public class FallIncidentController {
     @PostMapping("/{id}/dismiss")
     public ResponseEntity<FallIncidentResponseDTO> dismissIncident(
             @PathVariable UUID id,
-            @RequestParam(required = false) String note) {
-        FallIncidentResponseDTO response = fallIncidentService.dismissIncident(id, note);
+            @RequestParam(required = false) String note,
+            @RequestBody(required = false) java.util.Map<String, Object> body) {
+        String resolvedNote = note;
+        if (resolvedNote == null && body != null && body.get("note") != null) {
+            resolvedNote = body.get("note").toString();
+        }
+        FallIncidentResponseDTO response = fallIncidentService.dismissIncident(id, resolvedNote);
         if (response != null) {
             return ResponseEntity.ok(response);
         }
