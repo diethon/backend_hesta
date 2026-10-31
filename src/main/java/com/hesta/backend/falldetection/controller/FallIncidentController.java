@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/emergency/fall")
+@RequestMapping({"/api/v1/emergency/fall", "/api/emergency/fall"})
 @RequiredArgsConstructor
 public class FallIncidentController {
 
