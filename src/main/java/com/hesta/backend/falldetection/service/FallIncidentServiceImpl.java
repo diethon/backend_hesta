@@ -6,6 +6,7 @@ import com.hesta.backend.falldetection.dto.FallIncidentResponseDTO;
 import com.hesta.backend.falldetection.enums.FallIncidentState;
 import com.hesta.backend.falldetection.enums.FallIncidentType;
 import com.hesta.backend.repository.FallIncidentRepository;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,12 +33,44 @@ public class FallIncidentServiceImpl implements FallIncidentService {
 
     // In-memory active incidents store & countdown scheduler
     private final Map<UUID, FallIncidentResponseDTO> activeIncidents = new ConcurrentHashMap<>();
+    private final Map<String, Long> dedupCache = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     @Override
     public FallIncidentResponseDTO processIncomingFallEvent(FallIncidentEventDTO eventDTO) {
         log.warn("[FALL DETECTION] Nhận sự kiện té ngã khẩn cấp từ Device: {} | Type: {} | Conf: {}",
                 eventDTO.getDeviceId(), eventDTO.getIncidentClassification(), eventDTO.getConfidence());
+
+        // 1. Dedup by eventId to avoid multi-packet repeats
+        if (eventDTO.getEventId() != null && !eventDTO.getEventId().isBlank()) {
+            Long lastSeen = dedupCache.putIfAbsent(eventDTO.getEventId(), System.currentTimeMillis());
+            if (lastSeen != null) {
+                log.info("[FALL DEDUP] Bỏ qua sự kiện trùng lặp eventId: {}", eventDTO.getEventId());
+                return activeIncidents.values().stream()
+                        .filter(i -> eventDTO.getDeviceId() != null && eventDTO.getDeviceId().equals(i.getDeviceId()))
+                        .findFirst()
+                        .orElse(null);
+            }
+        }
+
+        // 2. Cooldown deduplication per deviceId (prevent overlapping countdown timers)
+        for (FallIncidentResponseDTO active : activeIncidents.values()) {
+            if (eventDTO.getDeviceId() != null && eventDTO.getDeviceId().equals(active.getDeviceId())
+                    && (active.getState() == FallIncidentState.SUSPECTED_COUNTDOWN || active.getState() == FallIncidentState.ESCALATED_SOS)) {
+                log.info("[FALL DEDUP] Thiết bị {} đang có sự cố đếm ngược dở dang {}. Cập nhật telemetry.",
+                        eventDTO.getDeviceId(), active.getId());
+                active.setMetrics(eventDTO.getMetrics());
+                if (eventDTO.getConfidence() != null && eventDTO.getConfidence() > active.getConfidenceScore()) {
+                    active.setConfidenceScore(eventDTO.getConfidence());
+                }
+                broadcastRealtime(active);
+                return active;
+            }
+        }
+
+        // Cleanup old dedup cache entries (> 60s)
+        long nowMs = System.currentTimeMillis();
+        dedupCache.entrySet().removeIf(e -> nowMs - e.getValue() > 60000);
 
         UUID incidentId = UUID.randomUUID();
         UUID homeId = (eventDTO.getHomeId() != null && !eventDTO.getHomeId().isBlank())
@@ -191,5 +224,11 @@ public class FallIncidentServiceImpl implements FallIncidentService {
                 log.warn("[STOMP WS] Không thể broadcast sự kiện: {}", e.getMessage());
             }
         });
+    }
+
+    @PreDestroy
+    public void onDestroy() {
+        log.info("[FALL DETECTION] Đang tắt ScheduledExecutorService an toàn...");
+        scheduler.shutdownNow();
     }
 }

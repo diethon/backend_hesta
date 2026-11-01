@@ -14,19 +14,19 @@ import lombok.NoArgsConstructor;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class FallMetricsDTO {
 
-    @JsonAlias({"v_norm", "vNorm"})
+    @JsonAlias({"vNorm"})
     private Double normalizedVerticalVelocity;
 
-    @JsonAlias({"accel_g", "accelG", "accel"})
+    @JsonAlias({"accelG", "accel"})
     private Double peakImpactAccelG;
 
-    @JsonAlias({"jerk_g_per_sec", "jerkGPerSec", "jerk"})
+    @JsonAlias({"jerkGPerSec", "jerk"})
     private Double peakJerkGPerSec;
 
-    @JsonAlias({"ptt_sec", "pttSec", "ptt"})
+    @JsonAlias({"pttSec", "ptt"})
     private Double postureTransitionDurationSec;
 
-    @JsonAlias({"spine_angle", "spineAngle"})
+    @JsonAlias({"spineAngle"})
     private Double bodyTiltAngleDegrees;
 
     @JsonAlias({"elevation_z", "elevationZ"})
@@ -35,31 +35,57 @@ public class FallMetricsDTO {
     @JsonAlias({"landing_zone", "landingZone", "zone"})
     private String landingZone;
 
-    @JsonAlias({"inactivity_seconds", "inactivitySec", "motion_energy"})
+    @JsonAlias({"inactivity_seconds", "inactivitySec"})
     private Double inactivitySeconds;
 
-    // Direct accessors matching Python dict keys
-    @JsonAlias("v_norm")
+    // Direct accessors matching Python Edge AI & React Frontend keys
     private Double v_norm;
-
-    @JsonAlias("accel_g")
     private Double accel_g;
-
-    @JsonAlias("jerk_g_per_sec")
     private Double jerk_g_per_sec;
-
-    @JsonAlias("spine_angle")
     private Double spine_angle;
-
-    @JsonAlias("ptt_sec")
     private Double ptt_sec;
-
-    @JsonAlias("has_freefall")
     private Boolean has_freefall;
-
-    @JsonAlias("has_impact")
     private Boolean has_impact;
-
-    @JsonAlias("motion_energy")
     private Double motion_energy;
+
+    // Bidirectional fallback getters so both Backend (camelCase) and Frontend (snake_case) stay 100% synchronized
+    public Double getNormalizedVerticalVelocity() {
+        return normalizedVerticalVelocity != null ? normalizedVerticalVelocity : v_norm;
+    }
+
+    public Double getV_norm() {
+        return v_norm != null ? v_norm : normalizedVerticalVelocity;
+    }
+
+    public Double getPeakImpactAccelG() {
+        return peakImpactAccelG != null ? peakImpactAccelG : accel_g;
+    }
+
+    public Double getAccel_g() {
+        return accel_g != null ? accel_g : peakImpactAccelG;
+    }
+
+    public Double getPeakJerkGPerSec() {
+        return peakJerkGPerSec != null ? peakJerkGPerSec : jerk_g_per_sec;
+    }
+
+    public Double getJerk_g_per_sec() {
+        return jerk_g_per_sec != null ? jerk_g_per_sec : peakJerkGPerSec;
+    }
+
+    public Double getPostureTransitionDurationSec() {
+        return postureTransitionDurationSec != null ? postureTransitionDurationSec : ptt_sec;
+    }
+
+    public Double getPtt_sec() {
+        return ptt_sec != null ? ptt_sec : postureTransitionDurationSec;
+    }
+
+    public Double getBodyTiltAngleDegrees() {
+        return bodyTiltAngleDegrees != null ? bodyTiltAngleDegrees : spine_angle;
+    }
+
+    public Double getSpine_angle() {
+        return spine_angle != null ? spine_angle : bodyTiltAngleDegrees;
+    }
 }

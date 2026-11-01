@@ -103,6 +103,7 @@ public class MqttConfig {
                 "hesta/device/+/ack",
                 "hesta/device/+/state",
                 "hesta/sensor/fall-detection/#",
+                "hesta/sensor/camera/#",
                 "hesta/sensor/radar/+/event",
                 "hesta/emergency/#"
         };
