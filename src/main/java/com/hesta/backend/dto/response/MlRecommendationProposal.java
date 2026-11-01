@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
 import java.util.UUID;
 
 @Data
@@ -17,6 +18,7 @@ public class MlRecommendationProposal {
     private UUID roomId;
     private String roomName;
     private String action;
+    private Map<String, Object> parameters;
     private String triggerType;
     private String time;
     private Double confidence;

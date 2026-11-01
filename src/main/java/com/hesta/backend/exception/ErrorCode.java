@@ -116,7 +116,9 @@ public enum ErrorCode {
     DEVICE_TYPE_REQUIRED(1050, "Loại thiết bị không được để trống", HttpStatus.BAD_REQUEST),
     OTA_PACKAGE_NOT_FOUND(1600, "Firmware package not found", HttpStatus.NOT_FOUND),
     OTA_CAMPAIGN_CONFLICT(1601, "Active OTA campaign already exists for this device type", HttpStatus.CONFLICT),
-    OTA_CAMPAIGN_NOT_FOUND(1602, "OTA campaign not found", HttpStatus.NOT_FOUND);
+    OTA_CAMPAIGN_NOT_FOUND(1602, "OTA campaign not found", HttpStatus.NOT_FOUND),
+    GUARDIAN_RULE_NOT_FOUND(1500, "Parental guardian rule not found", HttpStatus.NOT_FOUND),
+    GUARDIAN_RULE_INVALID(1501, "Parental guardian rule parameters are invalid", HttpStatus.BAD_REQUEST);
 
 
     private final int code;
