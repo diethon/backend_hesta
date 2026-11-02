@@ -1,0 +1,356 @@
+### ====================================================================
+### HESTA Smart Home - Ti vi Thông Minh TCL (Smart TV) Test Suite
+### ====================================================================
+### Cấu hình thiết bị theo ESP32 Daikin64_BLE_MQTT.ino (Combo IR Hub):
+### - Node ID:      32442d7f-dfcf-4b2f-a380-adba32876cec
+### - TV Device ID: 7a9e5b3c-6d2f-4e8a-b1c4-9f8e7d6c5b4a
+### - AC Device ID: 05d8a4fd-d7f1-4c62-a70e-a4213552b054
+### - MQTT Topics:
+###   + Lệnh TV (Subscribe):     hesta/nodes/{{nodeId}}/devices/{{deviceId}}/command
+###   + Trạng thái TV (Publish): hesta/nodes/{{nodeId}}/devices/{{deviceId}}/state
+###   + Xác nhận TV (ACK):       hesta/nodes/{{nodeId}}/devices/{{deviceId}}/ack
+###   + Telemetry TV (Publish):  hesta/nodes/{{nodeId}}/devices/{{deviceId}}/telemetry
+### ====================================================================
+
+@baseUrl = http://localhost:8080
+@deviceId = a756e94a-f3e5-49a9-80fe-b517b9749a9c
+@acDeviceId = 05d8a4fd-d7f1-4c62-a70e-a4213552b054
+@nodeId = 32442d7f-dfcf-4b2f-a380-adba32876cec
+@token = 
+
+### ====================================================================
+### 0. (Tùy chọn) Đăng nhập để lấy JWT Bearer Token nếu bật Security
+### ====================================================================
+#POST {{baseUrl}}/api/v1/auth/login
+#Content-Type: application/json
+#
+#{
+#  "email": "test_user@hesta.com",
+#  "password": "Password123!"
+#}
+#
+#> {%
+#    if (response.body && response.body.result && response.body.result.accessToken) {
+#        client.global.set("token", response.body.result.accessToken);
+#    }
+#%}
+
+### ====================================================================
+### 0.1 Xem thông tin & trạng thái hiện tại của TV trong Database
+### ====================================================================
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}
+#Authorization: Bearer {{token}}
+
+### ====================================================================
+### 1. BẬT NGUỒN TV (Action: POWER_ON)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "POWER_ON",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 2. TẮT NGUỒN TV (Action: POWER_OFF)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "POWER_OFF",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 3. ĐẢO NGUỒN TV (Action: TOGGLE hoặc POWER)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "TOGGLE",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 4. CÀI ĐẶT NGUỒN TV (SET_POWER: power = true)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "SET_POWER",
+  "power": true,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 5. CÀI ĐẶT NGUỒN TV (SET_POWER: power = false)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "SET_POWER",
+  "power": false,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 6. TĂNG ÂM LƯỢNG (Action: VOL_UP)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "VOL_UP",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 7. GIẢM ÂM LƯỢNG (Action: VOL_DOWN)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "VOL_DOWN",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 8. TẮT / BẬT TIẾNG (Action: MUTE)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "MUTE",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 9. TĂNG KÊNH (Action: CH_UP)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "CH_UP",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 10. GIẢM KÊNH (Action: CH_DOWN)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "CH_DOWN",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 11. CHỌN KÊNH TRỰC TIẾP (Action: SET_CHANNEL -> channel: 5)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "SET_CHANNEL",
+  "channel": 5,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 12. PHÍM ĐIỀU HƯỚNG D-PAD (Action: UP, DOWN, LEFT, RIGHT, OK)
+### ====================================================================
+### 12.1 D-Pad UP
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "UP",
+  "nodeId": "{{nodeId}}"
+}
+
+### 12.2 D-Pad DOWN
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "DOWN",
+  "nodeId": "{{nodeId}}"
+}
+
+### 12.3 D-Pad LEFT
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "LEFT",
+  "nodeId": "{{nodeId}}"
+}
+
+### 12.4 D-Pad RIGHT
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "RIGHT",
+  "nodeId": "{{nodeId}}"
+}
+
+### 12.5 Phím OK (Xác nhận)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "OK",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 13. CÁC PHÍM CHỨC NĂNG HỆ THỐNG (HOME, BACK, MENU, INPUT)
+### ====================================================================
+### 13.1 Phím HOME
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "HOME",
+  "nodeId": "{{nodeId}}"
+}
+
+### 13.2 Phím BACK (Quay lại)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "BACK",
+  "nodeId": "{{nodeId}}"
+}
+
+### 13.3 Phím MENU
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "MENU",
+  "nodeId": "{{nodeId}}"
+}
+
+### 13.4 Phím INPUT (Nguồn phát tín hiệu / HDMI)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "INPUT",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 14. BẤM PHÍM SỐ TRỰC TIẾP (0 - 9)
+### ====================================================================
+### Bấm số 1
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "1",
+  "nodeId": "{{nodeId}}"
+}
+
+### Bấm số 8
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+
+{
+  "action": "8",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 15. GỬI NÚT TÙY Ý QUA ACTION SEND_BUTTON (Kèm button: "VOL_UP", "POWER"...)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "SEND_BUTTON",
+  "button": "VOL_UP",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 16. PHÁT MÃ HỒNG NGOẠI THÔ (Action: SEND_IR_CODE, code: "0x0D5F2A")
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "SEND_IR_CODE",
+  "protocol": "NIKAI",
+  "code": "0x0D5F2A",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 17. YÊU CẦU THIẾT BỊ GỬI TRẠNG THÁI TV MỚI NHẤT (Action: GET_STATE)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "GET_STATE",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 18. ĐIỀU KHIỂN TV QUA AC DEVICE ID VỚI CỜ TARGET: "tv"
+### (Hữu ích khi gọi vào endpoint của AC nhưng muốn phát lệnh sang TV)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{acDeviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "target": "tv",
+  "action": "VOL_UP",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 19. ĐIỀU KHIỂN TV QUA TIỀN TỐ ACTION TV_* TRÊN AC DEVICE ID
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{acDeviceId}}/command
+Content-Type: application/json
+#Authorization: Bearer {{token}}
+
+{
+  "action": "TV_POWER",
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 20. LỊCH SỬ THAY ĐỔI TRẠNG THÁI CỦA TV
+### ====================================================================
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}/history
+#Authorization: Bearer {{token}}
