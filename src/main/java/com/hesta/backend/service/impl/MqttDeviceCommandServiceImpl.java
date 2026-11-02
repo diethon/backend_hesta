@@ -47,18 +47,31 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
 
 
-    @Transactional(readOnly = true)
+    @Transactional
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
-        CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
-        if (existing != null && !existing.isDone()) {
-            log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
-            return existing;
+        boolean isRealtime = "SET_RGB".equalsIgnoreCase(action)
+                || "SET_BRIGHTNESS".equalsIgnoreCase(action)
+                || (parameters != null && (
+                        Boolean.TRUE.equals(parameters.get("realtime"))
+                        || "true".equalsIgnoreCase(String.valueOf(parameters.get("realtime")))
+                        || Boolean.FALSE.equals(parameters.get("waitForAck"))
+                        || "false".equalsIgnoreCase(String.valueOf(parameters.get("waitForAck")))
+                   ));
+
+        if (!isRealtime) {
+            CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
+            if (existing != null && !existing.isDone()) {
+                log.warn("Idempotency / Anti-spam: Device {} already has a pending command. Ignoring.", deviceId);
+                return existing;
+            }
         }
         
         String commandId = UUID.randomUUID().toString();
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
-        activeDeviceCommands.put(deviceId, future);
+        if (!isRealtime) {
+            activeDeviceCommands.put(deviceId, future);
+        }
         
         try {
             Device device = deviceRepository.findByIdWithNode(deviceId)
@@ -177,11 +190,24 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
             
             String jsonPayload = objectMapper.writeValueAsString(payload);
-            pendingCommands.put(commandId, future);
+            if (!isRealtime) {
+                pendingCommands.put(commandId, future);
+            }
             
             for (String targetTopic : targetTopics) {
                 log.info("Publishing MQTT Command to {}: {}", targetTopic, jsonPayload);
                 mqttGateway.sendToMqtt(targetTopic, 1, jsonPayload);
+            }
+
+            if (isRealtime) {
+                log.info("Realtime streaming command {} dispatched immediately for device {}", action, deviceId);
+                future.complete(CommandResult.builder()
+                        .commandId(commandId)
+                        .success(true)
+                        .status("SUCCESS")
+                        .message("Realtime command dispatched successfully")
+                        .build());
+                return future;
             }
             
             long metricStartTime = System.currentTimeMillis();
@@ -207,7 +233,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     });
 
         } catch (Exception e) {
-            activeDeviceCommands.remove(deviceId);
+            if (!isRealtime) {
+                activeDeviceCommands.remove(deviceId);
+            }
             log.error("Failed to send command to device {}", deviceId, e);
             future.complete(CommandResult.builder()
                     .commandId(commandId)
@@ -256,12 +284,21 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             switch (act) {
                 case "GATE_OPEN":
                 case "OPEN":
+                case "UNLOCK":
+                case "OPEN_GATE":
+                case "POWER_OFF":
+                case "TURN_OFF":
                     return "OPEN";
                 case "GATE_CLOSE":
                 case "CLOSE":
+                case "LOCK":
+                case "CLOSE_GATE":
+                case "POWER_ON":
+                case "TURN_ON":
                     return "CLOSE";
                 case "GATE_STOP":
                 case "STOP":
+                case "STOP_GATE":
                     return "STOP";
                 default:
                     return act;
@@ -295,9 +332,13 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         switch (act) {
             case "TURN_ON":
             case "POWER_ON":
+            case "MOTOR_ON":
+            case "FAN_ON":
                 return "POWER_ON";
             case "TURN_OFF":
             case "POWER_OFF":
+            case "MOTOR_OFF":
+            case "FAN_OFF":
                 return "POWER_OFF";
             case "SET_POWER":
                 if (parameters != null && parameters.containsKey("power")) {
@@ -456,6 +497,41 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     break;
                 case "STOP":
                     currentState.put("state", "STOPPED");
+                    break;
+                case "VOL_UP":
+                case "VOLUME_UP":
+                    currentState.put("lastButton", "VOL_UP");
+                    currentState.put("mute", false);
+                    break;
+                case "VOL_DOWN":
+                case "VOLUME_DOWN":
+                    currentState.put("lastButton", "VOL_DOWN");
+                    break;
+                case "MUTE":
+                    currentState.put("lastButton", "MUTE");
+                    Object curMute = currentState.get("mute");
+                    boolean muteBool = Boolean.TRUE.equals(curMute) || "true".equalsIgnoreCase(String.valueOf(curMute));
+                    currentState.put("mute", !muteBool);
+                    break;
+                case "CH_UP":
+                case "CHANNEL_UP":
+                    currentState.put("lastButton", "CH_UP");
+                    break;
+                case "CH_DOWN":
+                case "CHANNEL_DOWN":
+                    currentState.put("lastButton", "CH_DOWN");
+                    break;
+                case "SET_CHANNEL":
+                    currentState.put("lastButton", "SET_CHANNEL");
+                    if (parameters != null && parameters.containsKey("channel")) {
+                        currentState.put("channel", parameters.get("channel"));
+                    }
+                    break;
+                case "SEND_BUTTON":
+                case "PRESS_BUTTON":
+                    if (parameters != null && parameters.containsKey("button")) {
+                        currentState.put("lastButton", parameters.get("button"));
+                    }
                     break;
                 default:
                     if (parameters != null && !parameters.isEmpty()) {

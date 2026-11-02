@@ -16,9 +16,11 @@ import java.util.Map;
 @AllArgsConstructor
 public class AdminCreateDeviceRequest {
 
-    @NotBlank(message = "Tên thiết bị không được để trống")
     @Size(max = 150, message = "Tên thiết bị tối đa 150 ký tự")
     private String name;
+
+    @Size(max = 100, message = "Mã node tối đa 100 ký tự")
+    private String nodeCode;
 
     @NotBlank(message = "Loại thiết bị không được để trống")
     @Size(max = 50, message = "Loại thiết bị tối đa 50 ký tự")

@@ -74,6 +74,7 @@ class DeviceOnboardingServiceTest {
 
         when(deviceRepository.existsBySerialNumber("SYNA-RGB-001-0001")).thenReturn(false);
         when(userRepository.findById(adminId)).thenReturn(Optional.of(User.builder().id(adminId).build()));
+        when(edgeNodeRepository.save(any(EdgeNode.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(deviceRepository.save(any(Device.class))).thenAnswer(invocation -> {
             Device d = invocation.getArgument(0);
             d.setId(deviceId);

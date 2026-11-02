@@ -123,12 +123,28 @@ public class HomeServiceImpl implements HomeService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public Object getHomeRooms(UUID userId, UUID homeId) {
         homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
 
         List<Room> rooms = roomRepository.findByHomeId(homeId);
+        if (rooms.isEmpty()) {
+            Home home = homeRepository.findById(homeId).orElse(null);
+            if (home != null) {
+                List<String> defaultRoomNames = List.of("Phòng khách", "Phòng ngủ", "Nhà bếp", "Phòng tắm");
+                List<Room> createdRooms = new ArrayList<>();
+                for (String rName : defaultRoomNames) {
+                    createdRooms.add(roomRepository.save(Room.builder()
+                            .home(home)
+                            .name(rName)
+                            .icon("default")
+                            .build()));
+                }
+                rooms = createdRooms;
+            }
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (Room r : rooms) {
             result.add(Map.of(
@@ -231,6 +247,15 @@ public class HomeServiceImpl implements HomeService {
                 .allowRemoteControl(true)
                 .build();
         homeMemberRepository.save(owner);
+
+        List<String> defaultRoomNames = List.of("Phòng khách", "Phòng ngủ", "Nhà bếp", "Phòng tắm");
+        for (String rName : defaultRoomNames) {
+            roomRepository.save(Room.builder()
+                    .home(savedHome)
+                    .name(rName)
+                    .icon("default")
+                    .build());
+        }
 
         return Map.of(
                 "homeId", savedHome.getId(),

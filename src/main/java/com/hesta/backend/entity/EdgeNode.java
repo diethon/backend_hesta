@@ -25,7 +25,7 @@ public class EdgeNode {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "home_id", nullable = false)
+    @JoinColumn(name = "home_id", nullable = true)
     private Home home;
 
 

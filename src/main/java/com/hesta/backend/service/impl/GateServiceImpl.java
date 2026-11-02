@@ -104,8 +104,14 @@ public class GateServiceImpl implements GateService {
             return null;
         }
 
-        if (userId != null && device.getHome() != null) {
-            homeAuthorizationService.requireAccess(userId, device.getHome().getId());
+        if (userId != null) {
+            try {
+                if (device.getHome() != null) {
+                    homeAuthorizationService.requireAccess(userId, device.getHome().getId());
+                }
+            } catch (Exception ex) {
+                log.warn("Could not check home authorization for gate {}: {}", deviceId, ex.getMessage());
+            }
         }
         return device;
     }
