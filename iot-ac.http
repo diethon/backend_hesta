@@ -2,12 +2,12 @@
 ### HESTA AIR CONDITIONER (CASPER / ELECTRA) MQTT CONTROL API
 ### =========================================================================
 @baseUrl = http://localhost:8080/api/v1
-@deviceId = 05d8a4fd-d7f1-4c62-a70e-a4213552b054
-@authToken = YOUR_JWT_TOKEN_HERE
+@deviceId = 30e3c9ee-4856-431a-a9a3-ce8c3ad3e96d
+#@token = YOUR_JWT_TOKEN_HERE
 
 ### 1. Bật điều hòa (SET_POWER ON)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -17,7 +17,7 @@ Content-Type: application/json
 
 ### 2. Tắt điều hòa (SET_POWER OFF)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -27,7 +27,7 @@ Content-Type: application/json
 
 ### 3. Cài đặt nhiệt độ 24°C (SET_TEMPERATURE)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -37,7 +37,7 @@ Content-Type: application/json
 
 ### 4. Tăng nhiệt độ (+1 độ)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -46,7 +46,7 @@ Content-Type: application/json
 
 ### 5. Giảm nhiệt độ (-1 độ)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -55,7 +55,7 @@ Content-Type: application/json
 
 ### 6. Cài đặt tốc độ quạt (AUTO / LOW / MID / HIGH)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -65,7 +65,7 @@ Content-Type: application/json
 
 ### 7. Cài đặt chế độ (AUTO / COOL / DRY / HEAT)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -75,7 +75,7 @@ Content-Type: application/json
 
 ### 8. Bật đảo gió (SWING)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -85,7 +85,7 @@ Content-Type: application/json
 
 ### 9. Hẹn giờ tắt (SET_TIMER: 2 tiếng 30 phút)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -96,7 +96,7 @@ Content-Type: application/json
 
 ### 10. Hủy hẹn giờ (CANCEL_TIMER)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -105,7 +105,7 @@ Content-Type: application/json
 
 ### 11. Yêu cầu thiết bị gửi trạng thái mới nhất (GET_STATE)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -114,4 +114,4 @@ Content-Type: application/json
 
 ### 12. Điều khiển nhanh qua Query Param endpoint
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/temperature?temperature=26
-#Authorization: Bearer {{authToken}}
+Authorization: Bearer {{token}}

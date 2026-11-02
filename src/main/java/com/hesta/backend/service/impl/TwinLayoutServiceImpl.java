@@ -25,6 +25,7 @@ import com.hesta.backend.repository.TwinNodeLayoutRepository;
 import com.hesta.backend.repository.TwinRoomLayoutRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
 import com.hesta.backend.service.TwinLayoutService;
+import com.hesta.backend.service.TwinArchitectureValidation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -78,12 +79,18 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
 
         Map<UUID, Room> rooms = validateRooms(homeId, request.rooms(), request.nodes());
         validateNodes(homeId, request.nodes(), rooms);
+        TwinArchitectureValidation.validate(request.architecture(), request.rooms(), request.nodes());
 
         if (layout == null) {
             layout = TwinLayout.builder().homeId(home.getId()).revision(1L).build();
         } else {
             layout.setRevision(currentRevision + 1L);
         }
+        var architecture = request.architecture() != null ? request.architecture() : layout.getArchitecture();
+        layout.setArchitecture(TwinArchitectureValidation.prune(architecture,
+                request.rooms().stream().map(TwinRoomLayoutRequest::roomId).collect(java.util.stream.Collectors.toSet()),
+                request.nodes().stream().map(n -> n.nodeType() + ":" + n.nodeId()).collect(java.util.stream.Collectors.toSet()),
+                request.rooms().stream().map(TwinRoomLayoutRequest::floor).collect(java.util.stream.Collectors.toSet())));
         layout = layoutRepository.saveAndFlush(layout);
 
         roomLayoutRepository.deleteByLayoutId(layout.getId());
@@ -221,7 +228,11 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
                         row.getRoomId() == null || liveRooms.containsKey(row.getRoomId()) ? row.getRoomId() : null,
                         row.getX(), row.getY()))
                 .toList();
-        return new TwinLayoutResponse(layout.getHomeId(), layout.getRevision(), rooms, nodes);
+        return new TwinLayoutResponse(layout.getHomeId(), layout.getRevision(), rooms, nodes,
+                TwinArchitectureValidation.prune(layout.getArchitecture(),
+                        rooms.stream().map(TwinRoomLayoutResponse::roomId).collect(java.util.stream.Collectors.toSet()),
+                        nodes.stream().map(n -> n.nodeType() + ":" + n.nodeId()).collect(java.util.stream.Collectors.toSet()),
+                        rooms.stream().map(r -> (int) r.floor()).collect(java.util.stream.Collectors.toSet())));
     }
 
     private boolean isLiveNode(UUID homeId, TwinNodeLayout row) {

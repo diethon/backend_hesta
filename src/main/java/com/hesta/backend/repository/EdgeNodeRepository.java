@@ -16,4 +16,10 @@ public interface EdgeNodeRepository extends JpaRepository<EdgeNode, UUID> {
 
     Optional<EdgeNode> findByNodeCode(String nodeCode);
     java.util.List<EdgeNode> findByHome_Id(UUID homeId);
+
+    @Query("SELECT n FROM EdgeNode n LEFT JOIN FETCH n.home")
+    java.util.List<EdgeNode> findAllWithHome();
+
+    @Query("SELECT n FROM EdgeNode n LEFT JOIN FETCH n.home WHERE n.id = :id")
+    Optional<EdgeNode> findByIdWithHome(@Param("id") UUID id);
 }

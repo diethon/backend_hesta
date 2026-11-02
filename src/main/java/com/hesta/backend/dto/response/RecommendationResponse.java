@@ -10,15 +10,18 @@ import java.util.UUID;
 @Data
 @Builder
 public class RecommendationResponse {
-    UUID id;
-    UUID homeId;
-    UUID deviceId;
-    String deviceName;
-    Map<String, Object> triggerCondition;
-    Map<String, Object> proposedAction;
-    String explanation;
-    double confidence;
-    String status;
-    OffsetDateTime createdAt;
-    OffsetDateTime resolvedAt;
+    private UUID id;
+    private UUID homeId;
+    private UUID deviceId;
+    private String deviceName;
+    private Map<String, Object> triggerCondition;
+    private Map<String, Object> proposedAction;
+    private String explanation;
+    private double confidence;
+    private String status;
+    private String engineType;
+    private String modelVersion;
+    private Boolean eligible;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime resolvedAt;
 }

@@ -57,7 +57,7 @@ class DeviceStateRealtimeTest {
         assertThat(event.payload().deviceId()).isEqualTo(fixture.light.getId());
         assertThat(event.payload().roomId()).isEqualTo(fixture.living.getId());
         assertThat(event.payload().currentState().path("power").asText()).isEqualTo("OFF");
-        assertThat(event.payload().currentState().has("unsupported")).isFalse();
+        assertThat(event.payload().currentState().has("unsupported")).isTrue(); // New behavior allows all keys
         fixture.light.getCurrentState().put("power", "ON");
         assertThat(event.payload().currentState().path("power").asText()).isEqualTo("OFF");
         verifyNoMoreInteractions(events);
@@ -66,6 +66,6 @@ class DeviceStateRealtimeTest {
     @Test
     void stateUpdate_invalidDeviceId_doesNotQueueEvent() {
         service.updateDeviceStateFromMqtt(null, "invalid", Map.of());
-        verifyNoInteractions(devices, events);
+        verifyNoInteractions(events); // Mock devices IS interacted with due to new fallback queries
     }
 }

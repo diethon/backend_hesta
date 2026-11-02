@@ -17,6 +17,7 @@ import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.security.CustomUserDetailsService;
 import com.hesta.backend.security.CustomAccessDeniedHandler;
 import com.hesta.backend.security.CustomAuthenticationEntryPoint;
+import com.hesta.backend.security.InternalApiKeyFilter;
 import com.hesta.backend.security.JwtAuthenticationFilter;
 import com.hesta.backend.security.JwtTokenProvider;
 import com.hesta.backend.service.RealtimeSubscriptionService;
@@ -223,6 +224,7 @@ class RealtimeWebSocketIntegrationTest {
             WebSocketRealtimeTransport.class,
             RealtimeEventPublisherImpl.class,
             SecurityConfig.class,
+            InternalApiKeyFilter.class,
             JwtAuthenticationFilter.class,
             CustomAuthenticationEntryPoint.class,
             CustomAccessDeniedHandler.class

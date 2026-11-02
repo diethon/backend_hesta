@@ -123,7 +123,7 @@ public class HomeServiceImpl implements HomeService {
     }
 
     @Override
-    @Transactional
+    @Transactional(readOnly = true)
     public Object getHomeRooms(UUID userId, UUID homeId) {
         homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
@@ -262,5 +262,49 @@ public class HomeServiceImpl implements HomeService {
                 "homeName", savedHome.getName(),
                 "role", "OWNER"
         );
+    }
+
+
+
+    @Override
+
+    @Transactional
+
+    public Map<String, Object> updateHome(UUID userId, UUID homeId, String newName) {
+
+        HomeMember member = homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
+
+                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+
+        if (member.getRole() != HomeRole.OWNER) {
+
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+
+        }
+
+
+
+        Home home = homeRepository.findById(homeId)
+
+                .orElseThrow(() -> new AppException(ErrorCode.HOME_NOT_FOUND));
+
+
+
+        home.setName(newName.trim());
+
+        Home savedHome = homeRepository.save(home);
+
+
+
+        return Map.of(
+
+                "homeId", savedHome.getId(),
+
+                "homeName", savedHome.getName(),
+
+                "role", member.getRole().name()
+
+        );
+
     }
 }

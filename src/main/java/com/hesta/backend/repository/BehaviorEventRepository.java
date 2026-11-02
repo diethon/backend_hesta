@@ -11,6 +11,20 @@ import java.util.UUID;
 
 public interface BehaviorEventRepository extends JpaRepository<BehaviorEvent, UUID> {
     java.util.Optional<BehaviorEvent> findTopByDeviceIdAndEventTypeOrderByOccurredAtDesc(UUID deviceId, String eventType);
+
+    @Query("""
+            SELECT be FROM BehaviorEvent be
+            WHERE be.device.id IN :deviceIds
+              AND be.eventType = :eventType
+              AND be.occurredAt = (
+                  SELECT MAX(be2.occurredAt) FROM BehaviorEvent be2
+                  WHERE be2.device.id = be.device.id AND be2.eventType = :eventType
+              )
+            """)
+    List<BehaviorEvent> findLatestEventsByDeviceIdsAndEventType(
+            @org.springframework.data.repository.query.Param("deviceIds") java.util.Collection<UUID> deviceIds,
+            @org.springframework.data.repository.query.Param("eventType") String eventType);
+
     List<BehaviorEvent> findTop100ByDeviceIdAndEventTypeOrderByOccurredAtDesc(UUID deviceId, String eventType);
     List<BehaviorEvent> findAllByHomeIdAndOccurredAtBetweenOrderByOccurredAtAsc(
             UUID homeId, OffsetDateTime from, OffsetDateTime to);

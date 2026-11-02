@@ -34,17 +34,32 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordCommand(Device device, String action, StateChangeSource source, CommandResult result) {
+        recordCommand(device, null, action, source, result);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordCommand(Device device, UUID userId, String action, StateChangeSource source, CommandResult result) {
         if (result == null || !result.isSuccess()) return;
         Device recordedDevice = devices.findById(device.getId()).orElse(device);
+        User user = userId == null ? null : users.findById(userId).orElse(null);
         Map<String, Object> previous = recordedDevice.getCurrentState() == null
                 ? Map.of() : new HashMap<>(recordedDevice.getCurrentState());
         Map<String, Object> current = new HashMap<>(previous);
         if (result.getAcknowledgedState() != null) current.putAll(result.getAcknowledgedState());
         deviceHistory.save(DeviceStateHistory.builder().device(recordedDevice).previousState(previous)
                 .newState(current).source(source).isTest(false).build());
-        behaviorEvents.save(BehaviorEvent.builder().home(recordedDevice.getRoom().getHome()).device(recordedDevice).room(recordedDevice.getRoom())
-                .eventType("DEVICE_ACTION").action(action).eventSource(source.name())
-                .previousState(previous).currentState(current).occurredAt(OffsetDateTime.now()).build());
+        behaviorEvents.save(BehaviorEvent.builder()
+                .home(recordedDevice.getRoom() != null ? recordedDevice.getRoom().getHome() : recordedDevice.getHome())
+                .device(recordedDevice)
+                .room(recordedDevice.getRoom())
+                .user(user)
+                .eventType("DEVICE_ACTION")
+                .action(action)
+                .eventSource(source != null ? source.name() : "UNKNOWN")
+                .previousState(previous)
+                .currentState(current)
+                .occurredAt(OffsetDateTime.now()).build());
         recordedDevice.setCurrentState(current);
         devices.save(recordedDevice);
     }
@@ -53,8 +68,12 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordSensor(Device device, AutomationEventRequest event) {
         if (event.isTest()) return;
-        behaviorEvents.save(BehaviorEvent.builder().home(device.getRoom().getHome()).device(device).room(device.getRoom())
-                .eventType(event.getEventType()).eventSource("SENSOR")
+        behaviorEvents.save(BehaviorEvent.builder()
+                .home(device.getRoom() != null ? device.getRoom().getHome() : device.getHome())
+                .device(device)
+                .room(device.getRoom())
+                .eventType(event.getEventType())
+                .eventSource("SENSOR")
                 .currentState(new HashMap<>(event.getData()))
                 .occurredAt(event.getOccurredAt() == null ? OffsetDateTime.now() : event.getOccurredAt()).build());
     }
@@ -72,5 +91,29 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
                     .eventType("USER_INTERACTION").action("EXECUTE_SCENE")
                     .eventSource("WEB").currentState(state).occurredAt(OffsetDateTime.now()).build());
         }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordRecommendationFeedback(Home home, UUID userId, Device device, UUID recommendationId,
+                                              String feedbackAction, String engineType, String modelVersion) {
+        User user = userId == null ? null : users.findById(userId).orElse(null);
+        Map<String, Object> feedbackState = new HashMap<>();
+        feedbackState.put("recommendationId", recommendationId != null ? recommendationId.toString() : null);
+        feedbackState.put("engineType", engineType != null ? engineType : "ML");
+        feedbackState.put("modelVersion", modelVersion);
+        feedbackState.put("feedback", feedbackAction);
+
+        behaviorEvents.save(BehaviorEvent.builder()
+                .home(home)
+                .user(user)
+                .device(device)
+                .room(device != null ? device.getRoom() : null)
+                .eventType("RECOMMENDATION_FEEDBACK")
+                .action(feedbackAction)
+                .eventSource("USER_FEEDBACK")
+                .currentState(feedbackState)
+                .occurredAt(OffsetDateTime.now())
+                .build());
     }
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.hesta.backend.config.SecurityConfig;
+import com.hesta.backend.security.InternalApiKeyFilter;
 import com.hesta.backend.config.TwinHealthConfig;
 import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.controller.MockSensorController;
@@ -511,7 +512,7 @@ class MockSensorPipelineIntegrationTest {
             HomeAuthorizationService.class, TwinSnapshotServiceImpl.class, DeviceSensorRealtimeListener.class,
             RealtimeEventPublisherImpl.class, WebSocketRealtimeTransport.class, RealtimeConfig.class,
             RealtimeWebSocketConfig.class, RealtimeWebSocketChannelInterceptor.class, RealtimeSubscriptionServiceImpl.class,
-            SecurityConfig.class, JwtAuthenticationFilter.class, JwtTokenProvider.class, CustomUserDetailsService.class,
+            SecurityConfig.class, InternalApiKeyFilter.class, JwtAuthenticationFilter.class, JwtTokenProvider.class, CustomUserDetailsService.class,
             CustomAuthenticationEntryPoint.class, CustomAccessDeniedHandler.class})
     static class TestApplication {
         @Bean

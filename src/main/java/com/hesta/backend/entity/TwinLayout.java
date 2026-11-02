@@ -36,6 +36,10 @@ public class TwinLayout {
     @Builder.Default
     private Long revision = 0L;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "architecture", columnDefinition = "jsonb")
+    private com.hesta.backend.dto.request.TwinArchitectureRequest architecture;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

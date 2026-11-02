@@ -4,6 +4,7 @@ import com.hesta.backend.entity.AutomationRecommendation;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,4 +17,7 @@ public interface AutomationRecommendationRepository extends JpaRepository<Automa
     Optional<AutomationRecommendation> findByIdAndHomeId(UUID id, UUID homeId);
 
     boolean existsByHomeIdAndDeviceIdAndStatus(UUID homeId, UUID deviceId, String status);
+
+    @EntityGraph(attributePaths = {"device"})
+    List<AutomationRecommendation> findAllByHomeIdAndDeviceIdAndCreatedAtAfter(UUID homeId, UUID deviceId, OffsetDateTime after);
 }
