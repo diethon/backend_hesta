@@ -27,6 +27,12 @@ public class RecommendationController {
         return ok(recommendations.list(user.getId(), homeId));
     }
 
+    @GetMapping("/top")
+    public ResponseEntity<ApiResponse<RecommendationResponse>> getTopRecommendation(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId) {
+        return ok(recommendations.getTopRecommendation(user.getId(), homeId));
+    }
+
     @PostMapping("/generate")
     public ResponseEntity<ApiResponse<List<RecommendationResponse>>> generate(
             @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
