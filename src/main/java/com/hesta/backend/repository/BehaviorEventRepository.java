@@ -29,6 +29,10 @@ public interface BehaviorEventRepository extends JpaRepository<BehaviorEvent, UU
     List<BehaviorEvent> findAllByHomeIdAndOccurredAtBetweenOrderByOccurredAtAsc(
             UUID homeId, OffsetDateTime from, OffsetDateTime to);
 
+    long countByOccurredAtAfter(OffsetDateTime after);
+
+    long countByHomeIdAndOccurredAtAfter(UUID homeId, OffsetDateTime after);
+
     @Modifying
     @Query("delete from BehaviorEvent event where event.home.id = :homeId and event.datasetKey = :datasetKey")
     void deleteGeneratedDataset(UUID homeId, String datasetKey);

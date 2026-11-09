@@ -10,7 +10,11 @@ import java.util.UUID;
 public interface RecommendationService {
     List<RecommendationResponse> generate(UUID userId, UUID homeId, OffsetDateTime from, OffsetDateTime to);
 
+    List<RecommendationResponse> generateForSystem(UUID homeId, OffsetDateTime from, OffsetDateTime to);
+
     List<RecommendationResponse> list(UUID userId, UUID homeId);
+
+    RecommendationResponse getTopRecommendation(UUID userId, UUID homeId);
 
     RecommendationResponse approve(UUID userId, UUID homeId, UUID recommendationId);
 
