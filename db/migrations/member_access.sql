@@ -49,7 +49,7 @@ BEGIN
         WHERE table_name = 'home_invitations' AND column_name = 'access_payload'
     ) THEN
         ALTER TABLE home_invitations 
-        ADD COLUMN access_payload JSONB;
+        ADD COLUMN access_payload TEXT;
 
         COMMENT ON COLUMN home_invitations.access_payload IS 'Optional preset room/device permissions JSON when access_scope is CUSTOM';
     END IF;
