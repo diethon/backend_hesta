@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/homes/{homeId}/members/{memberUserId}/access")
+@RequestMapping("/api/v1/homes/{homeId}/members/{userId}/access")
 @RequiredArgsConstructor
 public class HomeMemberAccessController {
 
@@ -27,10 +27,10 @@ public class HomeMemberAccessController {
     public ResponseEntity<ApiResponse<MemberAccessDetailResponse>> getMemberAccess(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID homeId,
-            @PathVariable UUID memberUserId) {
+            @PathVariable UUID userId) {
 
         MemberAccessDetailResponse response = memberAccessService.getMemberAccess(
-                userDetails.getId(), homeId, memberUserId);
+                userDetails.getId(), homeId, userId);
 
         return ResponseEntity.ok(ApiResponse.<MemberAccessDetailResponse>builder()
                 .code(1000)
@@ -43,11 +43,11 @@ public class HomeMemberAccessController {
     public ResponseEntity<ApiResponse<MemberAccessDetailResponse>> updateMemberAccess(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID homeId,
-            @PathVariable UUID memberUserId,
+            @PathVariable UUID userId,
             @Valid @RequestBody UpdateMemberAccessRequest request) {
 
         MemberAccessDetailResponse response = memberAccessService.updateMemberAccess(
-                userDetails.getId(), homeId, memberUserId, request);
+                userDetails.getId(), homeId, userId, request);
 
         return ResponseEntity.ok(ApiResponse.<MemberAccessDetailResponse>builder()
                 .code(1000)
@@ -56,4 +56,3 @@ public class HomeMemberAccessController {
                 .build());
     }
 }
-

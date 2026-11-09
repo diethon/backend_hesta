@@ -127,7 +127,12 @@ public enum ErrorCode {
     LAST_OWNER_REQUIRED(1056, "Ngôi nhà phải có ít nhất một chủ nhà đang hoạt động", HttpStatus.BAD_REQUEST),
     MEMBER_NOT_FOUND(1057, "Không tìm thấy thành viên trong nhà", HttpStatus.NOT_FOUND),
     MEMBER_ACCESS_CONFLICT(1058, "Cấu hình phân quyền đã bị thay đổi bởi người khác", HttpStatus.CONFLICT),
-    INVALID_ACCESS_PAYLOAD(1059, "Dữ liệu phân quyền không hợp lệ", HttpStatus.BAD_REQUEST);
+    INVALID_ACCESS_PAYLOAD(1059, "Dữ liệu phân quyền không hợp lệ", HttpStatus.BAD_REQUEST),
+    CANNOT_MODIFY_OWNER_ACCESS(1060, "Không thể thay đổi quyền của chủ nhà", HttpStatus.CONFLICT),
+    STALE_ACCESS_VERSION(1061, "Phiên bản cấu hình phân quyền đã cũ. Vui lòng tải lại dữ liệu", HttpStatus.CONFLICT),
+    FEATURE_DISABLED(1062, "Chưa bật quyền tùy chỉnh", HttpStatus.CONFLICT),
+    MEMBER_ALREADY_EXISTS(1063, "Người dùng này đã là thành viên của ngôi nhà", HttpStatus.CONFLICT),
+    INVITATION_ALREADY_EXISTS(1064, "Đã có lời mời đang chờ xử lý cho email này", HttpStatus.CONFLICT);
 
 
     private final int code;

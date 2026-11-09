@@ -18,6 +18,7 @@ import com.hesta.backend.service.EmailService;
 import com.hesta.backend.service.HomeService;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 
@@ -32,9 +33,8 @@ import java.util.*;
 
 
 @Service
-
 @RequiredArgsConstructor
-
+@Slf4j
 public class HomeServiceImpl implements HomeService {
 
 
@@ -59,6 +59,9 @@ public class HomeServiceImpl implements HomeService {
 
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:false}")
+    private boolean customScopeEnabled;
+
 
 
     @Override
@@ -81,16 +84,40 @@ public class HomeServiceImpl implements HomeService {
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
 
-        String targetEmail = (request != null && request.getEmail() != null && !request.getEmail().trim().isEmpty())
-                ? request.getEmail().trim()
-                : (email != null ? email.trim() : null);
+        String targetEmail = null;
+        if (request != null && request.getEmail() != null && !request.getEmail().trim().isEmpty()) {
+            targetEmail = request.getEmail().trim();
+        } else if (email != null && !email.trim().isEmpty()) {
+            targetEmail = email.trim();
+        }
 
-        AccessScope scope = (request != null && request.getAccessScope() != null)
-                ? request.getAccessScope()
-                : AccessScope.ALL;
+        if (targetEmail != null) {
+            if (!targetEmail.matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
+                throw new AppException(ErrorCode.INVALID_EMAIL);
+            }
+            Optional<User> existingUser = userRepository.findByEmail(targetEmail);
+            if (existingUser.isPresent() && homeMemberRepository.existsByHomeIdAndUserId(homeId, existingUser.get().getId())) {
+                throw new AppException(ErrorCode.MEMBER_ALREADY_EXISTS);
+            }
+            List<HomeInvitation> pendingInvites = homeInvitationRepository.findByHomeIdAndTargetEmailAndStatus(
+                    homeId, targetEmail, InvitationStatus.PENDING);
+            boolean hasActiveInvite = pendingInvites.stream()
+                    .anyMatch(inv -> inv.getExpiresAt().isAfter(OffsetDateTime.now()));
+            if (hasActiveInvite) {
+                throw new AppException(ErrorCode.INVITATION_ALREADY_EXISTS);
+            }
+        }
+
+        AccessScope scope = request != null ? request.getEffectiveScope() : AccessScope.ALL;
+        if (scope == null) {
+            scope = AccessScope.ALL;
+        }
 
         String accessPayload = null;
         if (scope == AccessScope.CUSTOM && request != null) {
+            if (!customScopeEnabled) {
+                throw new AppException(ErrorCode.FEATURE_DISABLED, "Chưa bật quyền tùy chỉnh");
+            }
             try {
                 Map<UUID, Room> homeRoomsById = roomRepository.findByHomeId(homeId).stream()
                         .collect(Collectors.toMap(Room::getId, r -> r));
@@ -98,23 +125,47 @@ public class HomeServiceImpl implements HomeService {
                         .filter(d -> !d.isDeleted())
                         .collect(Collectors.toMap(Device::getId, d -> d));
 
-                if (request.getRooms() != null) {
-                    for (var r : request.getRooms()) {
-                        if (r.getRoomId() != null && !homeRoomsById.containsKey(r.getRoomId())) {
-                            throw new AppException(ErrorCode.INVALID_ACCESS_PAYLOAD);
+                List<com.hesta.backend.dto.access.MemberRoomAccessDto> reqRooms = request.getEffectiveRooms();
+                List<com.hesta.backend.dto.access.MemberDeviceAccessDto> reqDevices = request.getEffectiveDevices();
+
+                List<String> offending = new ArrayList<>();
+                Set<UUID> seenRooms = new HashSet<>();
+                if (reqRooms != null) {
+                    for (var r : reqRooms) {
+                        if (r.getRoomId() == null || r.getLevel() == null) {
+                            offending.add("room:invalid");
+                            continue;
+                        }
+                        if (!seenRooms.add(r.getRoomId())) {
+                            offending.add("duplicate_room:" + r.getRoomId());
+                        }
+                        if (!homeRoomsById.containsKey(r.getRoomId())) {
+                            offending.add("room:" + r.getRoomId());
                         }
                     }
                 }
-                if (request.getDevices() != null) {
-                    for (var d : request.getDevices()) {
-                        if (d.getDeviceId() != null && !homeDevicesById.containsKey(d.getDeviceId())) {
-                            throw new AppException(ErrorCode.INVALID_ACCESS_PAYLOAD);
+                Set<UUID> seenDevices = new HashSet<>();
+                if (reqDevices != null) {
+                    for (var d : reqDevices) {
+                        if (d.getDeviceId() == null || d.getLevel() == null) {
+                            offending.add("device:invalid");
+                            continue;
+                        }
+                        if (!seenDevices.add(d.getDeviceId())) {
+                            offending.add("duplicate_device:" + d.getDeviceId());
+                        }
+                        if (!homeDevicesById.containsKey(d.getDeviceId())) {
+                            offending.add("device:" + d.getDeviceId());
                         }
                     }
                 }
-                Map<String, Object> payloadMap = new HashMap<>();
-                payloadMap.put("rooms", request.getRooms() != null ? request.getRooms() : List.of());
-                payloadMap.put("devices", request.getDevices() != null ? request.getDevices() : List.of());
+                if (!offending.isEmpty()) {
+                    throw new AppException(ErrorCode.INVALID_ACCESS_PAYLOAD, "Dữ liệu phân quyền không hợp lệ: " + offending);
+                }
+
+                Map<String, Object> payloadMap = new LinkedHashMap<>();
+                payloadMap.put("rooms", reqRooms != null ? reqRooms : List.of());
+                payloadMap.put("devices", reqDevices != null ? reqDevices : List.of());
                 accessPayload = objectMapper.writeValueAsString(payloadMap);
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                 throw new AppException(ErrorCode.INVALID_REQUEST);
@@ -192,45 +243,36 @@ public class HomeServiceImpl implements HomeService {
 
 
         if (homeMemberRepository.existsByHomeIdAndUserId(invitation.getHome().getId(), userId)) {
-
-            throw new RuntimeException("Bạn đã là thành viên của nhà này");
-
+            throw new AppException(ErrorCode.MEMBER_ALREADY_EXISTS);
         }
 
-
+        AccessScope scopeToApply = invitation.getAccessScope() != null ? invitation.getAccessScope() : AccessScope.ALL;
+        if (scopeToApply == AccessScope.CUSTOM && !customScopeEnabled) {
+            log.warn("Custom scope is disabled at join time; falling back to ALL for user {} joining home {}",
+                    userId, invitation.getHome().getId());
+            scopeToApply = AccessScope.ALL;
+        }
 
         HomeMember member = HomeMember.builder()
-
                 .home(invitation.getHome())
-
                 .user(user)
-
                 .role(HomeRole.MEMBER)
-
                 .invitedBy(invitation.getInviter())
-
-                .accessScope(invitation.getAccessScope() != null ? invitation.getAccessScope() : AccessScope.ALL)
-
+                .accessScope(scopeToApply)
                 .build();
 
         HomeMember savedMember = homeMemberRepository.save(member);
 
-        if (savedMember.getAccessScope() == AccessScope.CUSTOM && invitation.getAccessPayload() != null) {
+        if (scopeToApply == AccessScope.CUSTOM && invitation.getAccessPayload() != null) {
             applyInvitationAccess(savedMember, invitation.getAccessPayload());
         }
 
         invitation.setStatus(InvitationStatus.ACCEPTED);
-
         homeInvitationRepository.save(invitation);
-
     }
 
-
-
     @Override
-
     @Transactional(readOnly = true)
-
     public Object getHomeMembers(UUID userId, UUID homeId) {
         HomeMember caller = homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
@@ -259,10 +301,14 @@ public class HomeServiceImpl implements HomeService {
                 AccessScope scope = m.getAccessScope() != null ? m.getAccessScope() : AccessScope.ALL;
                 map.put("accessScope", scope.name());
                 if (m.getRole() == HomeRole.OWNER || scope == AccessScope.ALL) {
+                    map.put("accessRoomCount", 0L);
+                    map.put("accessDeviceOverrideCount", 0L);
                     map.put("accessSummary", Map.of("scope", scope.name(), "allAccess", true));
                 } else {
                     long roomCount = memberRoomAccessRepository.countByMemberId(m.getId());
                     long deviceCount = memberDeviceAccessRepository.countByMemberId(m.getId());
+                    map.put("accessRoomCount", roomCount);
+                    map.put("accessDeviceOverrideCount", deviceCount);
                     map.put("accessSummary", Map.of(
                             "scope", scope.name(),
                             "roomCount", roomCount,
@@ -286,10 +332,14 @@ public class HomeServiceImpl implements HomeService {
                     .filter(d -> !d.isDeleted())
                     .collect(Collectors.toMap(Device::getId, d -> d));
 
+            int skippedRooms = 0;
+            int skippedDevices = 0;
+
             if (tree.has("rooms") && tree.get("rooms").isArray()) {
                 for (var rNode : tree.get("rooms")) {
                     UUID roomId = UUID.fromString(rNode.get("roomId").asText());
-                    AccessLevel level = AccessLevel.valueOf(rNode.get("accessLevel").asText());
+                    String levelStr = rNode.has("level") ? rNode.get("level").asText() : rNode.get("accessLevel").asText();
+                    AccessLevel level = AccessLevel.valueOf(levelStr);
                     Room r = liveRooms.get(roomId);
                     if (r != null) {
                         memberRoomAccessRepository.save(MemberRoomAccess.builder()
@@ -297,6 +347,8 @@ public class HomeServiceImpl implements HomeService {
                                 .room(r)
                                 .accessLevel(level)
                                 .build());
+                    } else {
+                        skippedRooms++;
                     }
                 }
             }
@@ -304,7 +356,8 @@ public class HomeServiceImpl implements HomeService {
             if (tree.has("devices") && tree.get("devices").isArray()) {
                 for (var dNode : tree.get("devices")) {
                     UUID deviceId = UUID.fromString(dNode.get("deviceId").asText());
-                    AccessLevel level = AccessLevel.valueOf(dNode.get("accessLevel").asText());
+                    String levelStr = dNode.has("level") ? dNode.get("level").asText() : dNode.get("accessLevel").asText();
+                    AccessLevel level = AccessLevel.valueOf(levelStr);
                     Device d = liveDevices.get(deviceId);
                     if (d != null) {
                         memberDeviceAccessRepository.save(MemberDeviceAccess.builder()
@@ -312,11 +365,18 @@ public class HomeServiceImpl implements HomeService {
                                 .device(d)
                                 .accessLevel(level)
                                 .build());
+                    } else {
+                        skippedDevices++;
                     }
                 }
             }
+
+            if (skippedRooms > 0 || skippedDevices > 0) {
+                log.warn("Join home: skipped {} room(s) and {} device(s) that no longer exist in home {}",
+                        skippedRooms, skippedDevices, homeId);
+            }
         } catch (Exception ex) {
-            // Skip invalid IDs without failing join
+            log.warn("Failed to apply invitation access: {}", ex.getMessage());
         }
     }
 
@@ -441,6 +501,13 @@ public class HomeServiceImpl implements HomeService {
         }
 
         target.setRole(newRole);
+        if (newRole == HomeRole.OWNER) {
+            target.setAccessScope(AccessScope.ALL);
+            memberRoomAccessRepository.deleteByMemberId(target.getId());
+            memberDeviceAccessRepository.deleteByMemberId(target.getId());
+            memberRoomAccessRepository.flush();
+            memberDeviceAccessRepository.flush();
+        }
         homeMemberRepository.save(target);
     }
 
@@ -464,6 +531,10 @@ public class HomeServiceImpl implements HomeService {
             throw new AppException(ErrorCode.CANNOT_REMOVE_OWNER);
         }
 
+        memberRoomAccessRepository.deleteByMemberId(target.getId());
+        memberDeviceAccessRepository.deleteByMemberId(target.getId());
+        memberRoomAccessRepository.flush();
+        memberDeviceAccessRepository.flush();
         homeMemberRepository.delete(target);
     }
 

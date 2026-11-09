@@ -53,8 +53,10 @@ public final class EndpointPolicyRegistry {
         CLASS_POLICIES.put("BehaviorController", AccessPolicyType.HOME_ACCESS);
         CLASS_POLICIES.put("EdgeNodeController", AccessPolicyType.HOME_ACCESS);
         CLASS_POLICIES.put("EnergyController", AccessPolicyType.HOME_ACCESS);
+        CLASS_POLICIES.put("HomeMemberAccessController", AccessPolicyType.HOME_ACCESS);
 
         // Specific method overrides (Owner only or specific level)
+        METHOD_POLICIES.put("HomeMemberAccessController.updateMemberAccess", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("EnergyController.updateDemandResponseSettings", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("HomeController.updateMemberRole", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("HomeController.removeMember", AccessPolicyType.HOME_OWNER);
