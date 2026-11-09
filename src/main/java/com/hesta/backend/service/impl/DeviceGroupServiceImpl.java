@@ -17,6 +17,9 @@ import com.hesta.backend.repository.HomeRepository;
 import com.hesta.backend.service.DeviceCommandService;
 import com.hesta.backend.service.DeviceGroupService;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
+import com.hesta.backend.enums.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -47,9 +50,27 @@ public class DeviceGroupServiceImpl implements DeviceGroupService {
     @Transactional(readOnly = true)
     public List<DeviceGroupResponse> getGroupsByHome(UUID userId, UUID homeId) {
         homeAuthorizationService.requireAccess(userId, homeId);
-        return groupRepository.findByHomeIdWithDevices(homeId).stream()
-                .map(DeviceGroupResponse::fromEntity)
-                .collect(Collectors.toList());
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        List<DeviceGroup> groups = groupRepository.findByHomeIdWithDevices(homeId);
+        List<DeviceGroupResponse> responses = new ArrayList<>();
+        for (DeviceGroup g : groups) {
+            List<Device> devices = g.getDevices() != null ? g.getDevices() : List.of();
+            if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                List<Device> visible = devices.stream()
+                        .filter(d -> !d.isDeleted())
+                        .filter(d -> {
+                            AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                            return level != null && level.canView();
+                        })
+                        .toList();
+                if (!visible.isEmpty()) {
+                    responses.add(DeviceGroupResponse.fromEntity(g, visible));
+                }
+            } else {
+                responses.add(DeviceGroupResponse.fromEntity(g, devices));
+            }
+        }
+        return responses;
     }
 
     @Override
@@ -57,8 +78,24 @@ public class DeviceGroupServiceImpl implements DeviceGroupService {
     public DeviceGroupResponse getGroupDetail(UUID userId, UUID groupId) {
         DeviceGroup group = groupRepository.findById(groupId)
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        homeAuthorizationService.requireAccess(userId, group.getHome().getId());
-        return DeviceGroupResponse.fromEntity(group);
+        UUID homeId = group.getHome().getId();
+        homeAuthorizationService.requireAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        List<Device> devices = group.getDevices() != null ? group.getDevices() : List.of();
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            List<Device> visible = devices.stream()
+                    .filter(d -> !d.isDeleted())
+                    .filter(d -> {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    })
+                    .toList();
+            if (visible.isEmpty()) {
+                throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
+            }
+            return DeviceGroupResponse.fromEntity(group, visible);
+        }
+        return DeviceGroupResponse.fromEntity(group, devices);
     }
 
     @Override
@@ -128,6 +165,12 @@ public class DeviceGroupServiceImpl implements DeviceGroupService {
         DeviceGroup group = groupRepository.findById(groupId)
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         homeAuthorizationService.requireAccess(userId, group.getHome().getId());
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(group.getHome().getId(), userId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            if (!homeAuthorizationService.canControlGroup(userId, groupId)) {
+                throw new AppException(ErrorCode.UNAUTHORIZED);
+            }
+        }
 
         List<Device> members = group.getDevices();
         if (members == null || members.isEmpty()) {

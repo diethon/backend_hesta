@@ -75,3 +75,4 @@ class AuthorizationPolicyScannerTest {
                 || method.isAnnotationPresent(RequestMapping.class);
     }
 }
+

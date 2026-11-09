@@ -16,6 +16,8 @@ public interface MemberRoomAccessRepository extends JpaRepository<MemberRoomAcce
 
     List<MemberRoomAccess> findByMemberId(UUID memberId);
 
+    long countByMemberId(UUID memberId);
+
     @Query("SELECT mra FROM MemberRoomAccess mra " +
            "JOIN FETCH mra.room r " +
            "WHERE mra.member.home.id = :homeId AND mra.member.user.id = :userId")
@@ -27,3 +29,4 @@ public interface MemberRoomAccessRepository extends JpaRepository<MemberRoomAcce
     @Query("DELETE FROM MemberRoomAccess mra WHERE mra.member.id = :memberId")
     void deleteByMemberId(@Param("memberId") UUID memberId);
 }
+

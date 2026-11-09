@@ -29,3 +29,4 @@ public enum AccessPolicyType {
     /** Internal service-to-service communication (e.g. X-Internal-Api-Key). */
     INTERNAL_SERVICE
 }
+

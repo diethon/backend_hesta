@@ -44,3 +44,4 @@ public class MemberDeviceAccess {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 }
+

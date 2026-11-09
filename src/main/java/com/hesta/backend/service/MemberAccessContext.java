@@ -40,3 +40,4 @@ public record MemberAccessContext(
         return isActive() && role == HomeRole.OWNER;
     }
 }
+

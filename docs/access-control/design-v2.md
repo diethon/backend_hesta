@@ -235,3 +235,4 @@ Dịch vụ tập trung `HomeAuthorizationService` được mở rộng với c�
 ## 10. CÂU HỎI VÀ XÁC NHẬN CHO NGƯỜI DÙNG (OPEN QUESTIONS)
 1. **Nâng cấp Voice Service:** Khi triển khai Phase 2a, chúng tôi sẽ áp dụng nguyên tắc fail-closed (thành viên `CUSTOM` không thể điều khiển bằng giọng nói do thiếu định danh người dùng). Bạn có dự định nâng cấp `voice-service` để chuyển tiếp `userId` hoặc Authorization Header từ frontend hay không?
 2. **Chế độ xem lịch sử thông báo:** Đối với các thông báo cũ đã lưu trước khi thành viên bị giảm quyền từ `CONTROL` xuống `NONE`, bạn có muốn hệ thống ẩn hoàn toàn lịch sử thông báo cũ đó trên giao diện của họ không? (Đề xuất: Có, ẩn để đảm bảo nguyên tắc deny-by-default).
+

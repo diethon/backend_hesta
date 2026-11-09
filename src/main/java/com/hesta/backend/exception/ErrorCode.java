@@ -125,7 +125,9 @@ public enum ErrorCode {
     CANNOT_CHANGE_OWNER_ROLE(1054, "Không thể thay đổi vai trò của chủ nhà", HttpStatus.FORBIDDEN),
     CANNOT_REMOVE_SELF(1055, "Bạn không thể tự xóa chính mình khỏi nhà", HttpStatus.BAD_REQUEST),
     LAST_OWNER_REQUIRED(1056, "Ngôi nhà phải có ít nhất một chủ nhà đang hoạt động", HttpStatus.BAD_REQUEST),
-    MEMBER_NOT_FOUND(1057, "Không tìm thấy thành viên trong nhà", HttpStatus.NOT_FOUND);
+    MEMBER_NOT_FOUND(1057, "Không tìm thấy thành viên trong nhà", HttpStatus.NOT_FOUND),
+    MEMBER_ACCESS_CONFLICT(1058, "Cấu hình phân quyền đã bị thay đổi bởi người khác", HttpStatus.CONFLICT),
+    INVALID_ACCESS_PAYLOAD(1059, "Dữ liệu phân quyền không hợp lệ", HttpStatus.BAD_REQUEST);
 
 
     private final int code;

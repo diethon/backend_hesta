@@ -16,6 +16,8 @@ public interface MemberDeviceAccessRepository extends JpaRepository<MemberDevice
 
     List<MemberDeviceAccess> findByMemberId(UUID memberId);
 
+    long countByMemberId(UUID memberId);
+
     @Query("SELECT mda FROM MemberDeviceAccess mda " +
            "JOIN FETCH mda.device d " +
            "WHERE mda.member.home.id = :homeId AND mda.member.user.id = :userId")
@@ -27,3 +29,4 @@ public interface MemberDeviceAccessRepository extends JpaRepository<MemberDevice
     @Query("DELETE FROM MemberDeviceAccess mda WHERE mda.member.id = :memberId")
     void deleteByMemberId(@Param("memberId") UUID memberId);
 }
+
