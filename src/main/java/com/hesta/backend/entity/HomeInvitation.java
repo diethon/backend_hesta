@@ -1,5 +1,6 @@
 package com.hesta.backend.entity;
 
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.enums.InvitationStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -42,6 +43,14 @@ public class HomeInvitation {
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private InvitationStatus status = InvitationStatus.PENDING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "access_scope", nullable = false, length = 20)
+    @Builder.Default
+    private AccessScope accessScope = AccessScope.ALL;
+
+    @Column(name = "access_payload", columnDefinition = "TEXT")
+    private String accessPayload;
 
     @Column(name = "expires_at", nullable = false)
     private OffsetDateTime expiresAt;

@@ -114,7 +114,7 @@ class MqttDeviceCommandServiceImplTest {
     }
 
     @Test
-    @DisplayName("LED: action SET_RGB should remain SET_RGB in MQTT payload")
+    @DisplayName("LED: action SET_RGB should remain SET_RGB in MQTT payload with root r, g, b and power ON")
     void testSendCommand_Led_SetRgb() throws Exception {
         when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
 
@@ -131,6 +131,78 @@ class MqttDeviceCommandServiceImplTest {
         Map<String, Object> map = objectMapper.readValue(json, Map.class);
         assertEquals("SET_RGB", map.get("action"));
         assertEquals("pin_4", map.get("target"));
+        assertEquals(255, map.get("r"));
+        assertEquals(0, map.get("g"));
+        assertEquals(0, map.get("b"));
+
+        assertEquals("ON", ledDevice.getCurrentState().get("power"));
+        assertNotNull(ledDevice.getCurrentState().get("color"));
+        Map<?, ?> colorMap = (Map<?, ?>) ledDevice.getCurrentState().get("color");
+        assertEquals(255, colorMap.get("r"));
+        assertEquals(0, colorMap.get("g"));
+        assertEquals(0, colorMap.get("b"));
+    }
+
+    @Test
+    @DisplayName("LED: action SET_COLOR should normalize to SET_RGB with nested color map extracted to root")
+    void testSendCommand_Led_SetColor_NormalizedToSetRgb() throws Exception {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> colorMap = new HashMap<>();
+        colorMap.put("r", 0);
+        colorMap.put("g", 255);
+        colorMap.put("b", 128);
+        params.put("color", colorMap);
+
+        commandService.sendCommand(deviceId, "SET_COLOR", params, StateChangeSource.MANUAL);
+
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(mqttGateway, atLeastOnce()).sendToMqtt(anyString(), anyInt(), payloadCaptor.capture());
+
+        String json = payloadCaptor.getValue();
+        Map<String, Object> map = objectMapper.readValue(json, Map.class);
+        assertEquals("SET_RGB", map.get("action"));
+        assertEquals("pin_4", map.get("target"));
+        assertEquals(0, map.get("r"));
+        assertEquals(255, map.get("g"));
+        assertEquals(128, map.get("b"));
+
+        assertEquals("ON", ledDevice.getCurrentState().get("power"));
+        Map<?, ?> savedColor = (Map<?, ?>) ledDevice.getCurrentState().get("color");
+        assertNotNull(savedColor);
+        assertEquals(0, savedColor.get("r"));
+        assertEquals(255, savedColor.get("g"));
+        assertEquals(128, savedColor.get("b"));
+    }
+
+    @Test
+    @DisplayName("LED: action SET_RGB clamps RGB values safely to [0, 255]")
+    void testSendCommand_Led_SetRgb_ClampsSafely() throws Exception {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("r", 350);
+        params.put("g", -40);
+        params.put("b", "100");
+
+        commandService.sendCommand(deviceId, "SET_RGB", params, StateChangeSource.MANUAL);
+
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(mqttGateway, atLeastOnce()).sendToMqtt(anyString(), anyInt(), payloadCaptor.capture());
+
+        String json = payloadCaptor.getValue();
+        Map<String, Object> map = objectMapper.readValue(json, Map.class);
+        assertEquals("SET_RGB", map.get("action"));
+        assertEquals(255, map.get("r"));
+        assertEquals(0, map.get("g"));
+        assertEquals(100, map.get("b"));
+
+        assertEquals("ON", ledDevice.getCurrentState().get("power"));
+        Map<?, ?> savedColor = (Map<?, ?>) ledDevice.getCurrentState().get("color");
+        assertEquals(255, savedColor.get("r"));
+        assertEquals(0, savedColor.get("g"));
+        assertEquals(100, savedColor.get("b"));
     }
 
     @Test
@@ -186,4 +258,95 @@ class MqttDeviceCommandServiceImplTest {
         assertEquals("CIRCUIT_BREAKER_OPEN", result.getErrorCode());
         assertEquals("Mạch điều khiển Node đang ngắt bảo vệ (CIRCUIT OPEN)", result.getMessage());
     }
+
+    @Test
+    @DisplayName("Realtime: sendCommand publishes DeviceStateChangedEvent to home")
+    void testSendCommand_PublishesDeviceStateChangedEvent() {
+        org.springframework.context.ApplicationEventPublisher mockPublisher = mock(org.springframework.context.ApplicationEventPublisher.class);
+        ReflectionTestUtils.setField(commandService, "applicationEventPublisher", mockPublisher);
+
+        UUID homeId = UUID.randomUUID();
+        com.hesta.backend.entity.Home home = com.hesta.backend.entity.Home.builder().id(homeId).build();
+        com.hesta.backend.entity.Room room = com.hesta.backend.entity.Room.builder().id(UUID.randomUUID()).home(home).build();
+        ledDevice.setRoom(room);
+
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+
+        ArgumentCaptor<com.hesta.backend.dto.command.DeviceStateChangedEvent> eventCaptor =
+                ArgumentCaptor.forClass(com.hesta.backend.dto.command.DeviceStateChangedEvent.class);
+        verify(mockPublisher, times(1)).publishEvent(eventCaptor.capture());
+
+        com.hesta.backend.dto.command.DeviceStateChangedEvent capturedEvent = eventCaptor.getValue();
+        assertEquals(homeId, capturedEvent.homeId());
+        assertEquals(deviceId, capturedEvent.payload().deviceId());
+        assertEquals("ON", capturedEvent.payload().currentState().path("power").asText());
+    }
+
+    @Test
+    @DisplayName("Realtime: sendCommand triggers Server Optimistic Broadcast via realtimeEventPublisher")
+    void testSendCommand_ServerOptimisticBroadcast() {
+        com.hesta.backend.realtime.publisher.RealtimeEventPublisher mockRealtime =
+                mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        ReflectionTestUtils.setField(commandService, "realtimeEventPublisher", mockRealtime);
+
+        UUID homeId = UUID.randomUUID();
+        com.hesta.backend.entity.Home home = com.hesta.backend.entity.Home.builder().id(homeId).build();
+        com.hesta.backend.entity.Room room = com.hesta.backend.entity.Room.builder().id(UUID.randomUUID()).home(home).build();
+        ledDevice.setRoom(room);
+
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+
+        ArgumentCaptor<com.hesta.backend.realtime.model.RealtimeEvent<?>> captor =
+                ArgumentCaptor.forClass(com.hesta.backend.realtime.model.RealtimeEvent.class);
+        verify(mockRealtime, times(1)).publish(captor.capture());
+
+        com.hesta.backend.realtime.model.RealtimeEvent<?> event = captor.getValue();
+        assertEquals(com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED, event.type());
+        assertEquals(homeId, event.homeId());
+        assertEquals(deviceId, event.deviceId());
+    }
+
+    @Test
+    @DisplayName("Voice: fast-return succeeds with SUCCESS within ~250ms when no hardware ACK")
+    void testSendCommand_Voice_FastReturn() {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(acDevice));
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("temperature", 24);
+
+        long start = System.currentTimeMillis();
+        com.hesta.backend.dto.command.CommandResult result = commandService
+                .sendCommand(deviceId, "SET_TEMPERATURE", params, StateChangeSource.VOICE)
+                .join();
+        long duration = System.currentTimeMillis() - start;
+
+        assertNotNull(result);
+        assertTrue(result.isSuccess());
+        assertEquals("SUCCESS", result.getStatus());
+        assertEquals("Dispatched to MQTT broker", result.getMessage());
+        assertTrue(duration < 800, "Fast-return should complete well under 800ms, actual: " + duration + "ms");
+    }
+
+    @Test
+    @DisplayName("Voice: supersedes previous in-flight command rather than rejecting or queuing")
+    void testSendCommand_Voice_SupersedesPendingCommand() {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        // First command pending
+        var future1 = commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+
+        // Immediate voice command should supersede rather than being rejected
+        com.hesta.backend.dto.command.CommandResult result2 = commandService
+                .sendCommand(deviceId, "POWER_OFF", new HashMap<>(), StateChangeSource.VOICE)
+                .join();
+
+        assertNotNull(result2);
+        assertTrue(result2.isSuccess());
+        assertEquals("SUCCESS", result2.getStatus());
+    }
 }
+

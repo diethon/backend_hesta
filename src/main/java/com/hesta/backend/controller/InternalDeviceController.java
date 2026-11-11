@@ -7,6 +7,10 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
+import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.enums.AccessLevel;
+import com.hesta.backend.exception.AppException;
+import com.hesta.backend.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +36,7 @@ public class InternalDeviceController {
 
     private final DeviceRepository deviceRepository;
     private final DeviceCommandService deviceCommandService;
+    private final HomeAuthorizationService homeAuthorizationService;
 
     @GetMapping("/devices")
     @Transactional(readOnly = true)
@@ -63,6 +68,16 @@ public class InternalDeviceController {
             @PathVariable UUID deviceId,
             @RequestBody Map<String, Object> payload) {
             
+        Object userIdObj = payload.get("userId");
+        if (userIdObj != null) {
+            try {
+                UUID userId = UUID.fromString(userIdObj.toString());
+                homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.CONTROL);
+            } catch (IllegalArgumentException e) {
+                throw new AppException(ErrorCode.INVALID_REQUEST);
+            }
+        }
+
         String action = (String) payload.get("action");
         @SuppressWarnings("unchecked")
         Map<String, Object> parameters = (Map<String, Object>) payload.get("parameters");

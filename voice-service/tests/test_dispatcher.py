@@ -194,6 +194,31 @@ class TestDispatchBatch:
         assert batch.total_devices == 0
         assert batch.successful_count == 0
 
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key-123"})
+    def test_batch_parallel_execution(self, config):
+        """Kiểm tra batch dispatch chạy song song (parallel) thay vì tuần tự."""
+        import time
+
+        def slow_handler(request: httpx.Request) -> httpx.Response:
+            time.sleep(0.08)  # Mỗi request tốn 80ms
+            return httpx.Response(200, json={"status": "ok"})
+
+        transport = httpx.MockTransport(slow_handler)
+        client = httpx.Client(base_url=config.base_url, transport=transport)
+        dispatcher = Dispatcher(config=config, http_client=client)
+
+        t_start = time.perf_counter()
+        batch = dispatcher.dispatch_batch(
+            ["dev-1", "dev-2", "dev-3", "dev-4"],
+            "TURN_ON",
+        )
+        total_time = time.perf_counter() - t_start
+
+        assert batch.total_devices == 4
+        assert batch.all_success is True
+        # Nếu tuần tự: 4 * 0.08 = 0.32s. Nếu song song: < 0.25s
+        assert total_time < 0.25, f"Expected parallel batch < 0.25s, but took {total_time:.3f}s"
+
 
 class TestDispatchBatchResultMessages:
     def test_summary_single_success(self):
@@ -236,3 +261,73 @@ class TestDispatchBatchResultMessages:
         msg = batch.summary_message("TURN_ON", "light")
         assert "đèn" in msg
         # Không có tên phòng
+
+    def test_summary_led_rgb(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg_led = batch.summary_message("TURN_ON", "led_rgb", "phòng khách", pattern="bật đèn led")
+        assert "bật" in msg_led
+        assert "đèn LED" in msg_led
+        assert "phòng khách" in msg_led
+
+        msg_rgb = batch.summary_message("TURN_OFF", "led_rgb", "phòng ngủ", pattern="tắt đèn rgb")
+        assert "tắt" in msg_rgb
+        assert "đèn RGB" in msg_rgb
+        assert "phòng ngủ" in msg_rgb
+
+    def test_summary_set_color(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg = batch.summary_message(
+            "SET_COLOR", "led_rgb", "phòng khách",
+            parameters={"color": "đỏ", "r": 255, "g": 0, "b": 0},
+            pattern="đổi màu đèn led sang màu đỏ"
+        )
+        assert "đổi màu" in msg
+        assert "màu đỏ" in msg
+        assert "đèn LED" in msg
+
+    def test_summary_night_light(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg = batch.summary_message("TURN_ON", "light", "phòng ngủ", pattern="bật đèn ngủ")
+        assert "bật" in msg
+        assert "đèn ngủ" in msg
+
+    def test_summary_mode(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=1, failed_count=0
+        )
+        msg = batch.summary_message(
+            "SET_COLOR", "led_rgb", "phòng ngủ",
+            parameters={"mode": "Chơi game", "r": 0, "g": 255, "b": 128},
+            pattern="bật đèn led phòng ngủ chế độ chơi game"
+        )
+        assert "bật" in msg
+        assert "chế độ Chơi game" in msg
+        assert "phòng ngủ" in msg
+
+    def test_summary_all_devices(self):
+        batch = DispatchBatchResult(
+            total_devices=3, successful_count=3, failed_count=0
+        )
+        msg = batch.summary_message("TURN_OFF", "all", "phòng ngủ", pattern="tắt tất cả thiết bị phòng ngủ")
+        assert "tắt" in msg
+        assert "tất cả 3 thiết bị" in msg
+        assert "phòng ngủ" in msg
+
+        batch_house = DispatchBatchResult(
+            total_devices=7, successful_count=7, failed_count=0
+        )
+        msg_house = batch_house.summary_message("TURN_OFF", "all", None, pattern="tắt cả nhà")
+        assert "tắt" in msg_house
+        assert "tất cả 7 thiết bị trong nhà" in msg_house
+
+        batch_fans = DispatchBatchResult(
+            total_devices=2, successful_count=2, failed_count=0
+        )
+        msg_fans = batch_fans.summary_message("TURN_OFF", "fan", None, pattern="tắt tất cả quạt")
+        assert "tất cả 2 quạt trong nhà" in msg_fans

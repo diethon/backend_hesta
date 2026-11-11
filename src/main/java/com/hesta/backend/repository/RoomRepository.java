@@ -7,12 +7,21 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface RoomRepository extends JpaRepository<Room, UUID> {
     List<Room> findByHomeId(UUID homeId);
 
+    List<Room> findByHomeIdOrderByCreatedAtAsc(UUID homeId);
+
+    Optional<Room> findByIdAndHomeId(UUID id, UUID homeId);
+
+    boolean existsByHomeIdAndNameIgnoreCase(UUID homeId, String name);
+
+    boolean existsByHomeIdAndNameIgnoreCaseAndIdNot(UUID homeId, String name, UUID id);
+
     @Query("SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END FROM Room r JOIN HomeMember hm ON r.home.id = hm.home.id WHERE r.id = :roomId AND hm.user.id = :userId")
     boolean hasAccessToRoom(@Param("roomId") UUID roomId, @Param("userId") UUID userId);
-}
+}

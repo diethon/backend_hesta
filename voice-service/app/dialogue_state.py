@@ -121,8 +121,8 @@ class DialogueState:
         filled_home_id = home_id
 
         if ctx.is_valid:
-            # Không kế thừa phòng từ context cho các thiết bị ngoài nhà / cổng / máy bơm
-            if filled_device_type not in {"gate", "water_pump"} and filled_room is None and ctx.last_room is not None:
+            # Không kế thừa phòng từ context cho các thiết bị ngoài nhà / cổng / máy bơm hoặc lệnh điều khiển toàn bộ nhà (all)
+            if filled_device_type not in {"gate", "water_pump", "all"} and filled_room is None and ctx.last_room is not None:
                 filled_room = ctx.last_room
                 logger.info("Dùng room từ context trước: '%s'", filled_room)
 

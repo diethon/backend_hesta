@@ -32,12 +32,22 @@ public class ScheduleRunner {
     private final AutomationEngine automationEngine;
     private final JdbcTemplate jdbcTemplate;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.ParentalGuardianService parentalGuardianService;
+
     @Value("${hesta.scheduler.zone:Asia/Ho_Chi_Minh}")
     private String zoneName;
 
     @Scheduled(cron = "0 * * * * *", zone = "${hesta.scheduler.zone:Asia/Ho_Chi_Minh}")
     public void runDueSchedules() {
         runDueSchedules(ZonedDateTime.now(ZoneId.of(zoneName)));
+        if (parentalGuardianService != null) {
+            try {
+                parentalGuardianService.checkDueSessions();
+            } catch (Exception ex) {
+                log.error("Parental guardian due session check failed", ex);
+            }
+        }
     }
 
     void runDueSchedules(ZonedDateTime now) {

@@ -1,10 +1,12 @@
 import httpx
 import os
 from pprint import pprint
+import pytest
 
 BASE_URL = "http://localhost:8080"
 API_KEY = "super_secret_voice_key_123"
 
+@pytest.mark.skip(reason="Manual integration test against live Spring Boot and hardware")
 def test_real_backend():
     print("Testing GET /internal/devices...")
     with httpx.Client(base_url=BASE_URL) as client:

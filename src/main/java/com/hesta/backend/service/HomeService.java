@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public interface HomeService {
     Map<String, Object> generateInvitation(UUID inviterId, UUID homeId, String email);
+    Map<String, Object> generateInvitation(UUID inviterId, UUID homeId, String email, com.hesta.backend.dto.access.CreateInvitationRequest request);
     void joinHome(UUID userId, String codeOrToken);
     Object getHomeMembers(UUID userId, UUID homeId);
     
@@ -17,4 +18,5 @@ public interface HomeService {
     void updateMemberRole(UUID ownerId, UUID homeId, UUID memberId, HomeRole newRole);
     void removeMember(UUID ownerId, UUID homeId, UUID memberId);
     Map<String, Object> createHome(UUID userId, String homeName);
+    Map<String, Object> updateHome(UUID userId, UUID homeId, String newName);
 }

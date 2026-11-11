@@ -42,7 +42,7 @@ class ManualControlServiceTest {
     UUID deviceId = UUID.randomUUID();
 
     @Test
-    void manualPowerCommandActivatesOverrideBeforeSending() {
+    void manualPowerCommandSendsCommandBeforeActivatingOverride() {
         Home home = Home.builder().id(homeId).build();
         Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
                 .room(Room.builder().home(home).build())
@@ -58,11 +58,30 @@ class ManualControlServiceTest {
 
         assertThat(result.getCommand().isSuccess()).isTrue();
         assertThat(result.getOverrideUntil()).isEqualTo(until);
-        var order = inOrder(authorization, overrides, commands, recorder);
+        var order = inOrder(authorization, commands, overrides, recorder);
         order.verify(authorization).requireAccess(userId, homeId);
-        order.verify(overrides).activate(device, userId, "OVERRIDE");
         order.verify(commands).sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL);
+        order.verify(overrides).activate(device, userId, "OVERRIDE");
         order.verify(recorder).recordCommand(device, "TURN_ON", StateChangeSource.MANUAL, command);
+    }
+
+    @Test
+    void manualPowerCommandFailureDoesNotActivateOverride() {
+        Home home = Home.builder().id(homeId).build();
+        Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build())
+                .capabilities(java.util.Map.of("POWER", java.util.List.of("TURN_ON", "TURN_OFF"))).build();
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        CommandResult command = CommandResult.builder().success(false).status("TIMEOUT").build();
+        when(commands.sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL))
+                .thenReturn(CompletableFuture.completedFuture(command));
+
+        var result = service.command(userId, deviceId, "TURN_ON");
+
+        assertThat(result.getCommand().isSuccess()).isFalse();
+        assertThat(result.getOverrideUntil()).isNull();
+        verify(overrides, never()).activate(any(), any(), any());
+        verify(recorder, never()).recordCommand(any(), any(), any(), any());
     }
 
     @Test

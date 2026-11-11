@@ -39,6 +39,7 @@ class DeviceOnboardingServiceTest {
     @Mock RoomRepository roomRepository;
     @Mock UserRepository userRepository;
     @Mock HomeAuthorizationService homeAuthorizationService;
+    @Mock DeviceCatalogRepository catalogRepository;
 
     @InjectMocks DeviceOnboardingServiceImpl onboardingService;
 

@@ -8,6 +8,7 @@ voice-service KHÔNG publish MQTT trực tiếp — đó là trách nhiệm củ
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import time
@@ -25,7 +26,11 @@ class DispatchConfig:
     base_url: str = "http://localhost:8080"
     action_endpoint_template: str = "/internal/devices/{device_id}/actions"
     api_key_env: str = "INTERNAL_API_KEY"
-    request_timeout_seconds: float = 8.0
+    request_timeout_seconds: float = 3.0
+    max_workers: int = 10
+    max_connections: int = 50
+    max_keepalive_connections: int = 20
+    keepalive_expiry: float = 30.0
 
 
 @dataclass
@@ -52,7 +57,7 @@ class DispatchBatchResult:
     def all_success(self) -> bool:
         return self.failed_count == 0 and self.successful_count > 0
 
-    def summary_message(self, action: str, device_type: str, room: str | None = None, parameters: dict[str, Any] | None = None) -> str:
+    def summary_message(self, action: str, device_type: str, room: str | None = None, parameters: dict[str, Any] | None = None, pattern: str = "", hint: str = "") -> str:
         """Tạo thông báo xác nhận cho người dùng.
         VD: 'Đã bật 2 đèn phòng khách' hoặc 'Đã chỉnh nhiệt độ điều hòa phòng ngủ về 26 độ'
         """
@@ -67,26 +72,61 @@ class DispatchBatchResult:
             "SET_BRIGHTNESS": "đặt độ sáng",
             "INCREASE_BRIGHTNESS": "tăng sáng",
             "DECREASE_BRIGHTNESS": "giảm sáng",
+            "SET_COLOR": "đổi màu",
+            "SET_RGB": "đổi màu",
         }.get(action, action)
 
-        type_vi = {
-            "light": "đèn",
-            "fan": "quạt",
-            "air_conditioner": "điều hòa",
-            "door_lock": "khóa cửa",
-            "curtain": "rèm",
-            "water_heater": "bình nóng lạnh",
-            "gate": "cổng",
-            "water_pump": "máy bơm nước",
-            "led_rgb": "đèn RGB",
-        }.get(device_type, device_type)
+        pattern_lower = pattern.lower() if pattern else ""
+        hint_lower = hint.lower() if hint else ""
+        if device_type == "led_rgb":
+            if "rgb" in pattern_lower or "rgb" in hint_lower:
+                type_vi = "đèn RGB"
+            elif "led" in pattern_lower or "led" in hint_lower:
+                type_vi = "đèn LED"
+            else:
+                type_vi = "đèn LED RGB"
+        elif device_type == "light" and (hint_lower == "ngủ" or "den ngu" in pattern_lower or "đèn ngủ" in pattern_lower):
+            type_vi = "đèn ngủ"
+            if room == "phòng ngủ":
+                room = None  # tự nhiên hơn: "Đã bật đèn ngủ" thay vì "Đã bật đèn ngủ phòng ngủ"
+        else:
+            type_vi = {
+                "light": "đèn",
+                "fan": "quạt",
+                "air_conditioner": "điều hòa",
+                "door_lock": "khóa cửa",
+                "curtain": "rèm",
+                "water_heater": "bình nóng lạnh",
+                "gate": "cổng",
+                "water_pump": "máy bơm nước",
+                "led_rgb": "đèn RGB",
+                "socket": "ổ cắm",
+                "tv": "tivi",
+                "all": "thiết bị",
+            }.get(device_type, device_type)
+
+        is_all_cmd = (
+            device_type == "all"
+            or any(w in pattern_lower for w in ["tất cả", "tat ca", "toàn bộ", "toan bo", "hết", "het", "cả nhà", "ca nha"])
+        )
 
         room_str = f" {room}" if room else ""
+        if not room and (device_type == "all" or is_all_cmd) and self.total_devices > 1:
+            room_str = " trong nhà"
         
         param_str = ""
         if parameters:
-            if "temperature" in parameters:
+            if "mode" in parameters:
+                param_str = f" chế độ {parameters['mode']}"
+                if action in ("SET_COLOR", "SET_RGB", "SET_BRIGHTNESS"):
+                    if "đổi" in pattern_lower or "chuyển" in pattern_lower:
+                        action_vi = "chuyển"
+                    else:
+                        action_vi = "bật"
+            elif "temperature" in parameters:
                 param_str = f" về {parameters['temperature']} độ"
+            elif "color" in parameters:
+                param_str = f" sang màu {parameters['color']}"
             elif "brightness" in parameters:
                 param_str = f" về mức {parameters['brightness']}"
             elif "amount" in parameters:
@@ -99,7 +139,10 @@ class DispatchBatchResult:
             if self.total_devices == 1:
                 return f"Đã {action_vi} {type_vi}{room_str}{param_str}"
             else:
-                return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}"
+                if is_all_cmd:
+                    return f"Đã {action_vi} tất cả {self.successful_count} {type_vi}{room_str}{param_str}"
+                else:
+                    return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}"
         elif self.successful_count > 0:
             return (f"Đã {action_vi} {self.successful_count}/{self.total_devices} "
                     f"{type_vi}{room_str}, {self.failed_count} thiết bị lỗi")
@@ -125,9 +168,15 @@ class Dispatcher:
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
+            limits = httpx.Limits(
+                max_keepalive_connections=self.config.max_keepalive_connections,
+                max_connections=self.config.max_connections,
+                keepalive_expiry=self.config.keepalive_expiry,
+            )
             self._client = httpx.Client(
                 base_url=self.config.base_url,
                 timeout=self.config.request_timeout_seconds,
+                limits=limits,
             )
         return self._client
 
@@ -205,8 +254,9 @@ class Dispatcher:
                        parameters: dict[str, Any] | None = None) -> DispatchBatchResult:
         """Gửi cùng 1 action tới nhiều thiết bị (Mục 2.4 bước 3).
 
-        Dùng khi có nhiều thiết bị cùng loại trong 1 phòng.
-        Dispatch tuần tự (không parallel) — đơn giản, phù hợp quy mô MVP.
+        Dùng khi có nhiều thiết bị cùng loại trong 1 phòng hoặc toàn nhà.
+        Dispatch song song (parallel) qua ThreadPoolExecutor kết hợp connection pooling
+        giúp giảm thời gian trễ từ N * delay xuống ~1 * delay.
 
         Args:
             device_ids: danh sách device ID
@@ -216,12 +266,24 @@ class Dispatcher:
         Returns:
             DispatchBatchResult tổng hợp.
         """
+        if not device_ids:
+            return DispatchBatchResult(
+                results=[],
+                total_devices=0,
+                successful_count=0,
+                failed_count=0,
+                total_duration_ms=0.0,
+            )
+
         t0 = time.perf_counter()
         results: list[DispatchResult] = []
 
-        for device_id in device_ids:
-            result = self.dispatch(device_id, action, parameters)
-            results.append(result)
+        if len(device_ids) == 1:
+            results.append(self.dispatch(device_ids[0], action, parameters))
+        else:
+            workers = min(self.config.max_workers, len(device_ids))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                results = list(executor.map(lambda d_id: self.dispatch(d_id, action, parameters), device_ids))
 
         total_duration = (time.perf_counter() - t0) * 1000
         success_count = sum(1 for r in results if r.success)
@@ -235,8 +297,8 @@ class Dispatcher:
         )
 
         logger.info(
-            "Batch dispatch: %d/%d success, %.0fms total",
-            success_count, len(device_ids), total_duration,
+            "Batch dispatch: %d/%d success, %.0fms total (parallel across %d devices)",
+            success_count, len(device_ids), total_duration, len(device_ids),
         )
 
         return batch_result

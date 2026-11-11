@@ -109,9 +109,30 @@ public enum ErrorCode {
     DEVICE_ALREADY_CLAIMED(1045, "Thiết bị này đã được thêm vào hệ thống", HttpStatus.CONFLICT),
     ROOM_NOT_FOUND(1046, "Phòng không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
     ROOM_ACCESS_DENIED(1047, "Bạn không có quyền thêm thiết bị vào phòng này", HttpStatus.FORBIDDEN),
-    SERIAL_NUMBER_REQUIRED(1048, "Số serial không được để trống", HttpStatus.BAD_REQUEST),
+    ROOM_NAME_INVALID(1051, "Tên phòng không được để trống", HttpStatus.BAD_REQUEST),
+    ROOM_NAME_ALREADY_EXISTS(1052, "Tên phòng đã tồn tại trong ngôi nhà", HttpStatus.CONFLICT),
+    SERIAL_NUMBER_REQUIRED(1049, "Số serial không được để trống", HttpStatus.BAD_REQUEST),
     DEVICE_NAME_REQUIRED(1049, "Tên thiết bị không được để trống", HttpStatus.BAD_REQUEST),
-    DEVICE_TYPE_REQUIRED(1050, "Loại thiết bị không được để trống", HttpStatus.BAD_REQUEST);
+    DEVICE_TYPE_REQUIRED(1050, "Loại thiết bị không được để trống", HttpStatus.BAD_REQUEST),
+    OTA_PACKAGE_NOT_FOUND(1600, "Firmware package not found", HttpStatus.NOT_FOUND),
+    OTA_CAMPAIGN_CONFLICT(1601, "Active OTA campaign already exists for this device type", HttpStatus.CONFLICT),
+    OTA_CAMPAIGN_NOT_FOUND(1602, "OTA campaign not found", HttpStatus.NOT_FOUND),
+    GUARDIAN_RULE_NOT_FOUND(1500, "Parental guardian rule not found", HttpStatus.NOT_FOUND),
+    GUARDIAN_RULE_INVALID(1501, "Parental guardian rule parameters are invalid", HttpStatus.BAD_REQUEST),
+
+    // Home membership & ownership protection
+    CANNOT_REMOVE_OWNER(1053, "Không thể xóa chủ nhà", HttpStatus.FORBIDDEN),
+    CANNOT_CHANGE_OWNER_ROLE(1054, "Không thể thay đổi vai trò của chủ nhà", HttpStatus.FORBIDDEN),
+    CANNOT_REMOVE_SELF(1055, "Bạn không thể tự xóa chính mình khỏi nhà", HttpStatus.BAD_REQUEST),
+    LAST_OWNER_REQUIRED(1056, "Ngôi nhà phải có ít nhất một chủ nhà đang hoạt động", HttpStatus.BAD_REQUEST),
+    MEMBER_NOT_FOUND(1057, "Không tìm thấy thành viên trong nhà", HttpStatus.NOT_FOUND),
+    MEMBER_ACCESS_CONFLICT(1058, "Cấu hình phân quyền đã bị thay đổi bởi người khác", HttpStatus.CONFLICT),
+    INVALID_ACCESS_PAYLOAD(1059, "Dữ liệu phân quyền không hợp lệ", HttpStatus.BAD_REQUEST),
+    CANNOT_MODIFY_OWNER_ACCESS(1060, "Không thể thay đổi quyền của chủ nhà", HttpStatus.CONFLICT),
+    STALE_ACCESS_VERSION(1061, "Phiên bản cấu hình phân quyền đã cũ. Vui lòng tải lại dữ liệu", HttpStatus.CONFLICT),
+    FEATURE_DISABLED(1062, "Chưa bật quyền tùy chỉnh", HttpStatus.CONFLICT),
+    MEMBER_ALREADY_EXISTS(1063, "Người dùng này đã là thành viên của ngôi nhà", HttpStatus.CONFLICT),
+    INVITATION_ALREADY_EXISTS(1064, "Đã có lời mời đang chờ xử lý cho email này", HttpStatus.CONFLICT);
 
 
     private final int code;

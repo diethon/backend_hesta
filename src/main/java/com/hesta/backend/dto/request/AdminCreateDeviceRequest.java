@@ -37,5 +37,9 @@ public class AdminCreateDeviceRequest {
     @Size(max = 50, message = "Icon tối đa 50 ký tự")
     private String icon;
 
+    private String imageUrl;
+
+    private java.util.UUID catalogId;
+
     private Map<String, List<String>> capabilities;
 }

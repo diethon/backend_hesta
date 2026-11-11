@@ -46,6 +46,8 @@ public class DeviceController {
     private com.hesta.backend.service.DeviceProfilingService deviceProfilingService;
     @Autowired(required = false)
     private com.hesta.backend.service.DeviceHealthService deviceHealthService;
+    @Autowired(required = false)
+    private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
 
     @GetMapping("/devices/qr/{token}")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DevicePublicPreviewResponse>> resolveQrToken(
@@ -85,7 +87,27 @@ public class DeviceController {
 
     @PostMapping("/devices/{deviceId}/automation/cancel")
     public ResponseEntity<ApiResponse<OffsetDateTime>> cancelAutomation(
-            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestBody(required = false) Map<String, Object> requestBody) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
+        int minutes = 30;
+        if (requestBody != null && requestBody.containsKey("minutes")) {
+            try {
+                minutes = Integer.parseInt(requestBody.get("minutes").toString());
+            } catch (Exception ignored) {}
+        } else if (requestBody != null && requestBody.containsKey("hours")) {
+            try {
+                minutes = (int) Math.round(Double.parseDouble(requestBody.get("hours").toString()) * 60);
+            } catch (Exception ignored) {}
+        }
+        if (minutes <= 0) minutes = 30;
+        if (minutes != 30 && manualOverrideService != null) {
+            return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
+                    .result(manualOverrideService.recordOverride(deviceId, userDetails.getId(), minutes)).build());
+        }
         return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
                 .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId)).build());
     }
@@ -93,20 +115,39 @@ public class DeviceController {
     @PostMapping("/devices/{deviceId}/automation/resume")
     public ResponseEntity<ApiResponse<Void>> resumeAutomation(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
         manualControlService.resumeAutomation(userDetails.getId(), deviceId);
         return ResponseEntity.ok(ApiResponse.<Void>builder().code(1000)
                 .message("Đã khôi phục tự động hóa").build());
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/automation/extend")
     public ResponseEntity<ApiResponse<OffsetDateTime>> extendAutomation(
-            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID deviceId) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID deviceId,
+            @RequestBody(required = false) Map<String, Object> requestBody) {
+        if (userDetails == null) {
+            throw new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.UNAUTHENTICATED);
+        }
         if (manualOverrideService == null) {
             throw new RuntimeException("Manual override service not available");
         }
-        OffsetDateTime until = manualOverrideService.extendOverride(deviceId, userDetails.getId(), 60);
+        int minutes = 60;
+        if (requestBody != null && requestBody.containsKey("hours")) {
+            try {
+                minutes = (int) Math.round(Double.parseDouble(requestBody.get("hours").toString()) * 60);
+            } catch (Exception ignored) {}
+        } else if (requestBody != null && requestBody.containsKey("minutes")) {
+            try {
+                minutes = Integer.parseInt(requestBody.get("minutes").toString());
+            } catch (Exception ignored) {}
+        }
+        OffsetDateTime until = manualOverrideService.extendOverride(deviceId, userDetails.getId(), minutes);
         return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
-                .message("Đã gia hạn khóa tự động hóa thêm 60 phút")
+                .message("Đã gia hạn khóa tự động hóa thêm " + minutes + " phút")
                 .result(until).build());
     }
 
@@ -265,6 +306,7 @@ public class DeviceController {
                 .body(csv);
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/analytics/uptime")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceUptimeResponse>> getDeviceUptime(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -277,6 +319,7 @@ public class DeviceController {
                 .build());
     }
 
+    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/health")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceHealthResponse>> getDeviceHealth(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -305,16 +348,7 @@ public class DeviceController {
             params.remove("action");
         }
         return deviceCommandService.sendCommand(deviceId, actionStr, params, StateChangeSource.MANUAL)
-                .thenApply(result -> {
-                    if (result.isSuccess() && manualOverrideService != null && userDetails != null) {
-                        try {
-                            manualOverrideService.recordOverride(deviceId, userDetails.getId(), 30);
-                        } catch (Exception ex) {
-                            // Do not fail command result on override failure
-                        }
-                    }
-                    return ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build());
-                });
+                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
     }
 
 @PreAuthorize("@deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
@@ -335,5 +369,47 @@ public class DeviceController {
         }
         return deviceCommandService.sendRoomCommand(roomId, actionStr, params, StateChangeSource.MANUAL)
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<List<CommandResult>>builder().result(result).build()));
+    }
+
+    @GetMapping("/devices/{deviceId}/shadow")
+    public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> getDeviceShadow(
+            @PathVariable UUID deviceId) {
+        if (deviceShadowService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder().build());
+        }
+        com.hesta.backend.shadow.DeviceShadowDto shadow = deviceShadowService.getShadow(deviceId);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder()
+                .code(1000)
+                .result(shadow)
+                .build());
+    }
+
+    @PutMapping("/devices/{deviceId}/shadow/desired")
+    public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> updateDesiredShadow(
+            @PathVariable UUID deviceId,
+            @RequestBody Map<String, Object> desiredState) {
+        if (deviceShadowService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder().build());
+        }
+        com.hesta.backend.shadow.DeviceShadowDto shadow = deviceShadowService.updateDesiredState(deviceId, desiredState);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder()
+                .code(1000)
+                .message("Đã cập nhật Desired State cho Device Shadow")
+                .result(shadow)
+                .build());
+    }
+
+    @PostMapping("/devices/{deviceId}/shadow/reconcile")
+    public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> reconcileDeviceShadow(
+            @PathVariable UUID deviceId) {
+        if (deviceShadowService == null) {
+            return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder().build());
+        }
+        com.hesta.backend.shadow.DeviceShadowDto shadow = deviceShadowService.reconcile(deviceId);
+        return ResponseEntity.ok(ApiResponse.<com.hesta.backend.shadow.DeviceShadowDto>builder()
+                .code(1000)
+                .message("Đã kích hoạt Reconcile Device Shadow")
+                .result(shadow)
+                .build());
     }
 }

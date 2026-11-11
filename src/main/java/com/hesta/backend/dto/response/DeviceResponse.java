@@ -3,6 +3,7 @@ package com.hesta.backend.dto.response;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
+import com.hesta.backend.enums.AccessLevel;
 import lombok.Builder;
 import lombok.Data;
 
@@ -28,14 +29,18 @@ public class DeviceResponse {
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
+    private Map<String, Object> settings;
     @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.hesta.backend.entity.DeviceCapabilitiesDeserializer.class)
     private java.util.Map<String, java.util.List<String>> capabilities;
     private String icon;
+    private String imageUrl;
+    private UUID catalogId;
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
     private BigDecimal digitalTwinZ;
     private OffsetDateTime manualOverrideUntil;
     private Boolean manualOverrideActive;
+    private AccessLevel accessLevel;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 
@@ -61,8 +66,11 @@ public class DeviceResponse {
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
                 .currentState(device.getCurrentState())
+                .settings(device.getSettings() != null ? device.getSettings() : java.util.Collections.emptyMap())
                 .capabilities(device.getCapabilities())
                 .icon(device.getIcon())
+                .imageUrl(device.getImageUrl())
+                .catalogId(device.getCatalog() != null ? device.getCatalog().getId() : null)
                 .digitalTwinX(device.getDigitalTwinX())
                 .digitalTwinY(device.getDigitalTwinY())
                 .digitalTwinZ(device.getDigitalTwinZ())

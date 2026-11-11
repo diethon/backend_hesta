@@ -20,10 +20,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<Object>> handleAppException(AppException exception) {
         ErrorCode errorCode = exception.getErrorCode();
+        String message = (exception.getMessage() != null && !exception.getMessage().isBlank())
+                ? exception.getMessage()
+                : errorCode.getMessage();
         
         ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
                 .code(errorCode.getCode())
-                .message(errorCode.getMessage())
+                .message(message)
                 .build();
                 
         return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);

@@ -1,5 +1,6 @@
 package com.hesta.backend.dto.response;
 
+import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.DeviceGroup;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -28,10 +29,15 @@ public class DeviceGroupResponse {
 
     public static DeviceGroupResponse fromEntity(DeviceGroup group) {
         if (group == null) return null;
-        List<DeviceResponse> deviceResponses = group.getDevices() == null ? List.of()
-                : group.getDevices().stream().map(DeviceResponse::fromEntity).collect(Collectors.toList());
-        List<UUID> ids = group.getDevices() == null ? List.of()
-                : group.getDevices().stream().map(d -> d.getId()).collect(Collectors.toList());
+        return fromEntity(group, group.getDevices());
+    }
+
+    public static DeviceGroupResponse fromEntity(DeviceGroup group, List<Device> visibleDevices) {
+        if (group == null) return null;
+        List<DeviceResponse> deviceResponses = visibleDevices == null ? List.of()
+                : visibleDevices.stream().map(DeviceResponse::fromEntity).collect(Collectors.toList());
+        List<UUID> ids = visibleDevices == null ? List.of()
+                : visibleDevices.stream().map(Device::getId).collect(Collectors.toList());
 
         return DeviceGroupResponse.builder()
                 .id(group.getId())
