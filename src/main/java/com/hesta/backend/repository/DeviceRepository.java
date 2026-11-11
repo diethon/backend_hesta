@@ -105,4 +105,21 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("SELECT d.deviceType, COUNT(d) FROM Device d GROUP BY d.deviceType")
     List<Object[]> countGroupedByDeviceType();
+
+    @Query("""
+        SELECT d FROM Device d
+        LEFT JOIN FETCH d.room r
+        LEFT JOIN FETCH r.home
+        LEFT JOIN FETCH d.node n
+        LEFT JOIN FETCH n.home
+        WHERE d.isDeleted = false
+          AND (d.status IS NULL OR d.status != com.hesta.backend.enums.DeviceStatus.UNCLAIMED)
+          AND d.deviceType IN :monitoredTypes
+          AND d.lastSeen IS NOT NULL
+          AND d.lastSeen >= :maxAgeCutoff
+    """)
+    List<Device> findCandidateSensorsForOfflineMonitoring(
+            @Param("monitoredTypes") java.util.Collection<String> monitoredTypes,
+            @Param("maxAgeCutoff") java.time.OffsetDateTime maxAgeCutoff
+    );
 }

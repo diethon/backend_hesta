@@ -35,6 +35,18 @@ public interface DeviceAnomalyRepository extends JpaRepository<DeviceAnomaly, UU
             Collection<AnomalyStatus> statuses
     );
 
+    @Query("""
+        SELECT a FROM DeviceAnomaly a
+        JOIN FETCH a.device d
+        LEFT JOIN FETCH a.home h
+        WHERE a.anomalyType = :anomalyType
+          AND a.status IN :statuses
+    """)
+    List<DeviceAnomaly> findActiveByTypeWithDevice(
+            @Param("anomalyType") AnomalyType anomalyType,
+            @Param("statuses") Collection<AnomalyStatus> statuses
+    );
+
     Optional<DeviceAnomaly> findByIdAndHomeId(UUID id, UUID homeId);
 
     @Query(value = """
