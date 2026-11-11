@@ -466,15 +466,12 @@ public class HomeServiceImpl implements HomeService {
 
         for (HomeMember m : memberships) {
 
-            result.add(Map.of(
-
-                    "homeId", m.getHome().getId(),
-
-                    "homeName", m.getHome().getName(),
-
-                    "role", m.getRole().name()
-
-            ));
+            Map<String, Object> homeItem = new HashMap<>();
+            homeItem.put("homeId", m.getHome().getId());
+            homeItem.put("homeName", m.getHome().getName());
+            homeItem.put("role", m.getRole().name());
+            homeItem.put("accessScope", m.getAccessScope() != null ? m.getAccessScope().name() : "ALL");
+            result.add(homeItem);
 
         }
 
