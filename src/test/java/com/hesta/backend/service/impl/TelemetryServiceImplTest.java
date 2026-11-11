@@ -43,6 +43,12 @@ class TelemetryServiceImplTest {
     @Mock
     private RealtimeEventPublisher realtimeEventPublisher;
 
+    @Mock
+    private com.hesta.backend.service.AnomalyDetectionService anomalyDetectionService;
+
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
+
     private TelemetryServiceImpl telemetryService;
 
     @BeforeEach
@@ -51,7 +57,9 @@ class TelemetryServiceImplTest {
                 deviceRepository,
                 sensorReadingRepository,
                 edgeNodeRepository,
-                realtimeEventPublisher
+                realtimeEventPublisher,
+                anomalyDetectionService,
+                applicationEventPublisher
         );
     }
 
@@ -78,6 +86,13 @@ class TelemetryServiceImplTest {
         when(deviceRepository.findByNodeCodeAndName("ESP32-001", "DHT-01"))
                 .thenReturn(Optional.of(device));
 
+        when(sensorReadingRepository.save(any(SensorReading.class)))
+                .thenAnswer(inv -> {
+                    SensorReading r = inv.getArgument(0);
+                    r.setId(100L);
+                    return r;
+                });
+
         TelemetryPayload payload = TelemetryPayload.builder()
                 .nodeId("ESP32-001")
                 .deviceId("DHT-01")
@@ -101,9 +116,36 @@ class TelemetryServiceImplTest {
         verify(deviceRepository, times(1)).save(device);
         assertEquals(DeviceStatus.ONLINE, device.getStatus());
         assertEquals(new BigDecimal("28.5"), device.getCurrentState().get("temperature"));
+        assertNotNull(device.getLastSeen());
 
         // Verify Realtime event published
         verify(realtimeEventPublisher, times(1)).publish(any());
+        verify(applicationEventPublisher, times(1)).publishEvent(any(com.hesta.backend.dto.event.TelemetryAnomalyEvent.class));
+    }
+
+    @Test
+    void onSensorReadingCommitted_DispatchesToAnomalyDetectionService() {
+        UUID deviceId = UUID.randomUUID();
+        Device device = Device.builder().id(deviceId).name("Gas Sensor").build();
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+
+        com.hesta.backend.dto.event.TelemetryAnomalyEvent event = new com.hesta.backend.dto.event.TelemetryAnomalyEvent(
+                101L,
+                deviceId,
+                "gas_ppm",
+                new BigDecimal("1250.0"),
+                java.time.OffsetDateTime.now()
+        );
+
+        telemetryService.onSensorReadingCommitted(event);
+
+        verify(anomalyDetectionService, times(1)).evaluateReading(
+                eq(device),
+                eq("gas_ppm"),
+                eq(new BigDecimal("1250.0")),
+                eq(event.recordedAt()),
+                eq(101L)
+        );
     }
 
     @Test

@@ -227,6 +227,9 @@ public class MqttMessageReceiver {
             // Full device state telemetry (e.g., Air Conditioner telemetry or composite state)
             handleDeviceState(topic, payload);
 
+            // Extract safety metrics from flat map if present: gas_ppm, smoke, temperature
+            extractAndProcessSafetyMetricsFromFlatMap(topic, payload);
+
             try {
                 String deviceIdStr = extractDeviceIdFromTopic(topic);
                 if (deviceIdStr != null) {
@@ -279,6 +282,39 @@ public class MqttMessageReceiver {
             }
             triggerAutomation(device, data, "SENSOR");
         });
+    }
+
+    private void extractAndProcessSafetyMetricsFromFlatMap(String topic, String payload) {
+        try {
+            Map<String, Object> map = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            if (map == null || map.isEmpty()) return;
+
+            String nodeCode = extractNodeCodeFromTopic(topic);
+            String deviceIdStr = map.containsKey("deviceId") && map.get("deviceId") != null
+                    ? map.get("deviceId").toString()
+                    : extractDeviceIdFromTopic(topic);
+
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "gas_ppm", "ppm");
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "smoke", "ppm");
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "temperature", "°C");
+            if (!map.containsKey("temperature")) {
+                extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "temp", "°C");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to extract safety metrics from flat map payload: {}", e.getMessage());
+        }
+    }
+
+    private void extractSingleSafetyMetric(String topic, String nodeCode, String deviceIdStr, Map<String, Object> map, String metricKey, String unit) {
+        if (!map.containsKey(metricKey) || map.get(metricKey) == null) return;
+        Object valObj = map.get(metricKey);
+        try {
+            java.math.BigDecimal val = new java.math.BigDecimal(valObj.toString().trim());
+            TelemetryPayload singlePayload = new TelemetryPayload(nodeCode, deviceIdStr, metricKey, val, unit);
+            telemetryService.processTelemetry(topic, singlePayload);
+        } catch (Exception ex) {
+            log.warn("Could not parse safety metric [{}] value [{}] from flat map: {}", metricKey, valObj, ex.getMessage());
+        }
     }
 
     private void processSensorAutomation(String topic, String payload) {
