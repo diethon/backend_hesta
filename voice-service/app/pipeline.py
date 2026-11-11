@@ -59,6 +59,8 @@ class PipelineResult:
     total_duration_ms: float = 0.0
     step_durations: dict[str, float] = field(default_factory=dict)
     error: str = ""
+    error_code: str | None = None
+    status: str = "SUCCESS"
     sub_results: list[PipelineResult] = field(default_factory=list)
 
 
@@ -248,7 +250,7 @@ class VoicePipeline:
         )
         return res
 
-    def _execute_single_command(self, text: str, custom_rooms: list[str]) -> PipelineResult:
+    def _execute_single_command(self, text: str, custom_rooms: list[str], user_id: str = "") -> PipelineResult:
         """Thực thi một câu lệnh đơn lẻ (Mapping -> Dialogue State -> Resolve -> Dispatch)."""
         t_start = time.perf_counter()
         step_durations: dict[str, float] = {}
@@ -263,6 +265,8 @@ class VoicePipeline:
                 success=False,
                 message=f"Không hiểu lệnh: \"{text}\".",
                 transcript=text,
+                error_code="INTENT_NOT_FOUND",
+                status="FAILED",
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
@@ -278,6 +282,8 @@ class VoicePipeline:
                 message="Không xác định được loại thiết bị.",
                 transcript=text,
                 intent=intent,
+                error_code="DEVICE_TYPE_UNKNOWN",
+                status="FAILED",
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
@@ -382,7 +388,7 @@ class VoicePipeline:
         t0 = time.perf_counter()
         device_ids = [d.device_id for d in devices]
         dispatch_result = self.dispatcher.dispatch_batch(
-            device_ids, intent.action, intent.parameters or None
+            device_ids, intent.action, intent.parameters or None, user_id=user_id
         )
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
@@ -398,6 +404,26 @@ class VoicePipeline:
                 device_ids=device_ids, action=intent.action, home_id=home_id,
             )
 
+        err_code = None
+        status = "SUCCESS"
+        if not dispatch_result.all_success:
+            err_codes = {r.error_code for r in dispatch_result.results if r.error_code}
+            if "ACCESS_DENIED" in err_codes or any(r.status_code == 403 for r in dispatch_result.results):
+                err_code = "ACCESS_DENIED"
+                status = "ACCESS_DENIED"
+            elif "UNAUTHORIZED" in err_codes or any(r.status_code == 401 for r in dispatch_result.results):
+                err_code = "UNAUTHORIZED"
+                status = "ACCESS_DENIED"
+            elif "DEVICE_OFFLINE" in err_codes:
+                err_code = "DEVICE_OFFLINE"
+                status = "DEVICE_OFFLINE"
+            elif "GATEWAY_DISCONNECTED" in err_codes:
+                err_code = "GATEWAY_DISCONNECTED"
+                status = "GATEWAY_DISCONNECTED"
+            else:
+                err_code = "FAILED"
+                status = "FAILED"
+
         total_ms = (time.perf_counter() - t_start) * 1000
 
         return PipelineResult(
@@ -408,13 +434,16 @@ class VoicePipeline:
             dispatch_result=dispatch_result,
             total_duration_ms=round(total_ms, 1),
             step_durations=step_durations,
+            error_code=err_code,
+            status=status,
         )
 
-    def process_text(self, text: str) -> PipelineResult:
+    def process_text(self, text: str, user_id: str = "") -> PipelineResult:
         """Xử lý lệnh từ text (hỗ trợ cả lệnh đơn và chuỗi lệnh kép).
 
         Args:
             text: câu lệnh tiếng Việt
+            user_id: ID người dùng ra lệnh (để kiểm tra phân quyền RBAC)
 
         Returns:
             PipelineResult
@@ -424,7 +453,7 @@ class VoicePipeline:
         sub_commands = split_compound_command(text, custom_rooms=known_rooms)
 
         if len(sub_commands) <= 1:
-            res = self._execute_single_command(text, custom_rooms=known_rooms)
+            res = self._execute_single_command(text, custom_rooms=known_rooms, user_id=user_id)
             res.transcript = text
             res.total_duration_ms = round((time.perf_counter() - t_start) * 1000, 1)
             return res
@@ -438,7 +467,7 @@ class VoicePipeline:
         }
 
         for sub_cmd in sub_commands:
-            r = self._execute_single_command(sub_cmd, custom_rooms=known_rooms)
+            r = self._execute_single_command(sub_cmd, custom_rooms=known_rooms, user_id=user_id)
             sub_results.append(r)
             for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
                 combined_durations[k] += r.step_durations.get(k, 0.0)

@@ -47,6 +47,7 @@ class DeviceInfo:
     room_name: str
     home_id: str
     settings: dict[str, Any] = field(default_factory=dict)
+    status: str = "ONLINE"
 
 
 # Ngữ cảnh ánh sáng gợi ý mặc định (Built-in Mood Presets) đồng bộ với Frontend
@@ -256,6 +257,7 @@ class DeviceDirectory:
                         types_to_register.add("fan")
 
                 dev_settings = dev.get("settings") if isinstance(dev.get("settings"), dict) else {}
+                dev_status = str(dev.get("status", "ONLINE")).upper()
                 for t in types_to_register:
                     info = DeviceInfo(
                         device_id=str(dev["id"]),
@@ -264,6 +266,7 @@ class DeviceDirectory:
                         room_name=str(dev.get("roomName", dev.get("room", ""))).strip().lower(),
                         home_id=str(dev.get("homeId", dev.get("home_id", ""))),
                         settings=dev_settings,
+                        status=dev_status,
                     )
                     key = (info.home_id, info.room_name, t)
                     if key not in cache:

@@ -196,6 +196,20 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
             resolvedNodeCode = nodeCode;
 
+            // Rejection for devices that are physically OFFLINE
+            if (device != null && device.getStatus() == com.hesta.backend.enums.DeviceStatus.OFFLINE) {
+                log.warn("Command rejected: device {} ({}) is OFFLINE", deviceId, device.getName());
+                activeDeviceCommands.remove(deviceId, future);
+                commandStartTimes.remove(deviceId);
+                return CompletableFuture.completedFuture(CommandResult.builder()
+                        .commandId(commandId)
+                        .success(false)
+                        .status("FAILED")
+                        .errorCode("DEVICE_OFFLINE")
+                        .message("Thiết bị đang ngoại tuyến hoặc chưa kết nối")
+                        .build());
+            }
+
             // Circuit Breaker check
             if (diagnosticsService != null && nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)
                     && !diagnosticsService.allowExecution(nodeCode)) {
@@ -441,12 +455,23 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 diagnosticsService.recordCommandFailure(resolvedNodeCode);
             }
             log.error("Failed to send command to device {}", deviceId, e);
+
+            boolean isMqttConnectionError = e.getMessage() != null && (
+                    e.getMessage().contains("mqttOutbound") ||
+                    e.getMessage().contains("Client is not connected") ||
+                    e.getMessage().contains("Connection lost") ||
+                    e.getMessage().contains("timed out waiting for a response") ||
+                    e.getMessage().contains("No provider available")
+            );
+            String errCode = isMqttConnectionError ? "GATEWAY_DISCONNECTED" : "INTERNAL_ERROR";
+            String errMsg = isMqttConnectionError ? "Không thể kết nối đến Gateway MQTT hoặc Broker chưa khởi động" : e.getMessage();
+
             future.complete(CommandResult.builder()
                     .commandId(commandId)
                     .success(false)
                     .status("FAILED")
-                    .errorCode("INTERNAL_ERROR")
-                    .message(e.getMessage())
+                    .errorCode(errCode)
+                    .message(errMsg)
                     .build());
         }
         

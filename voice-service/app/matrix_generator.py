@@ -62,7 +62,14 @@ def generate_phrases_for_room(
         phrases.append(f"Đã bật {dev} {clean_room}")
         phrases.append(f"Đã tắt {dev} {clean_room}")
 
-        # 2. Báo lỗi khi chưa kết nối / lỗi thiết bị
+        # 2. Báo lỗi phân quyền, ngoại tuyến, gateway và không phản hồi
+        phrases.append(f"Bạn không có quyền bật {dev} {clean_room}.")
+        phrases.append(f"Bạn không có quyền tắt {dev} {clean_room}.")
+        phrases.append(f"{dev.capitalize()} {clean_room} hiện đang ngoại tuyến hoặc chưa kết nối.")
+        phrases.append(f"Không thể kết nối đến Gateway để bật {dev} {clean_room}.")
+        phrases.append(f"Không thể kết nối đến Gateway để tắt {dev} {clean_room}.")
+        phrases.append(f"Không thể bật {dev} {clean_room} — thiết bị không phản hồi.")
+        phrases.append(f"Không thể tắt {dev} {clean_room} — thiết bị không phản hồi.")
         phrases.append(f"Không thể bật {dev} {clean_room} — tất cả thiết bị đều lỗi")
         phrases.append(f"Không thể tắt {dev} {clean_room} — tất cả thiết bị đều lỗi")
 
@@ -107,6 +114,10 @@ def generate_matrix_phrases(
         "Không thể đóng cổng — tất cả thiết bị đều lỗi",
         "Không thể mở cổng chính — tất cả thiết bị đều lỗi",
         "Không thể đóng cổng chính — tất cả thiết bị đều lỗi",
+        "Bạn không có quyền điều khiển thiết bị này.",
+        "Bạn chưa đăng nhập hoặc không có quyền điều khiển thiết bị.",
+        "Thiết bị hiện đang ngoại tuyến hoặc chưa kết nối.",
+        "Không thể kết nối đến Gateway thiết bị.",
         "Không tìm thấy thiết bị nào phù hợp.",
         "Thiết bị chưa sẵn sàng hoặc đang ngoại tuyến.",
         "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",

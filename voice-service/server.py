@@ -141,6 +141,7 @@ def _verify_api_key(x_api_key: str | None):
 class VoiceCommandRequest(BaseModel):
     text: str
     homeId: str = ""
+    userId: str = ""
 
 
 class VoiceCommandResponse(BaseModel):
@@ -150,6 +151,8 @@ class VoiceCommandResponse(BaseModel):
     action: str | None = None
     room: str | None = None
     deviceType: str | None = None
+    errorCode: str | None = None
+    status: str | None = None
     totalDurationMs: float = 0.0
     stepDurations: dict[str, float] = {}
     audioUrl: str | None = None
@@ -221,12 +224,13 @@ async def get_voice_tts(
 async def process_voice_command(
     request: VoiceCommandRequest,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
 ):
     """
     Xử lý lệnh voice dạng text.
 
     Frontend gửi text (đã chuyển từ speech qua Web Speech API)
-    + homeId → pipeline xử lý → trả kết quả kèm audio MP3 tức thì nếu có sẵn trong cache.
+    + homeId + userId → pipeline xử lý → trả kết quả kèm audio MP3 tức thì nếu có sẵn trong cache.
     """
     _verify_api_key(x_api_key)
 
@@ -240,10 +244,12 @@ async def process_voice_command(
     if request.homeId:
         pipeline.home_id = request.homeId
 
-    logger.info("Processing command: '%s' (homeId=%s)", text, pipeline.home_id)
+    user_id = request.userId or (x_user_id or "")
+
+    logger.info("Processing command: '%s' (homeId=%s, userId=%s)", text, pipeline.home_id, user_id or "anonymous")
 
     try:
-        result = pipeline.process_text(text)
+        result = pipeline.process_text(text, user_id=user_id)
     except Exception as e:
         logger.exception("Pipeline error")
         raise HTTPException(status_code=500, detail=str(e))
@@ -271,6 +277,8 @@ async def process_voice_command(
             "action": sub.intent.action if sub.intent else None,
             "room": sub.intent.room if sub.intent else None,
             "deviceType": sub.intent.device_type if sub.intent else None,
+            "errorCode": getattr(sub, "error_code", None),
+            "status": getattr(sub, "status", None),
         })
 
     return VoiceCommandResponse(
@@ -280,6 +288,8 @@ async def process_voice_command(
         action=result.intent.action if result.intent else None,
         room=result.intent.room if result.intent else None,
         deviceType=result.intent.device_type if result.intent else None,
+        errorCode=getattr(result, "error_code", None),
+        status=getattr(result, "status", None),
         totalDurationMs=result.total_duration_ms,
         stepDurations=result.step_durations,
         audioUrl=audio_url,
