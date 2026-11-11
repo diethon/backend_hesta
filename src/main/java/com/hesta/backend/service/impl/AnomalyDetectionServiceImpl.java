@@ -178,11 +178,6 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
                 shouldAlert = true;
                 log.warn("Escalating anomaly {} for device {} from HIGH to CRITICAL ({}{})",
                         active.getId(), device.getId(), numValue, config.getUnit());
-            } else {
-                // Cooldown check for re-alerting existing anomaly
-                if (tracker.lastNotificationAt == null || now.isAfter(tracker.lastNotificationAt.plus(config.getNotificationCooldown()))) {
-                    shouldAlert = true;
-                }
             }
 
             anomalyRepository.save(active);

@@ -116,6 +116,9 @@ public class NotificationServiceImpl implements NotificationService {
                 event.message().trim(),
                 event.priority()
         );
+        if (event.sourceAnomalyId() != null) {
+            notification.setSourceAnomalyId(event.sourceAnomalyId());
+        }
         NotificationResponse response = NotificationResponse.fromEntity(notificationRepository.saveAndFlush(notification));
         applicationEventPublisher.publishEvent(
                 new NotificationCreatedEvent(NotificationRealtimePayload.from(response))
