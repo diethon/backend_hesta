@@ -226,13 +226,8 @@ public class Device {
 
 
 
-    // DUMMY METHODS FOR COMPATIBILITY WITH TWIN HEALTH
-
-    public OffsetDateTime getLastSeen() { return null; }
-
-
-
-    public void setLastSeen(OffsetDateTime lastSeen) {}
+    @Column(name = "last_seen")
+    private OffsetDateTime lastSeen;
 
 
 
