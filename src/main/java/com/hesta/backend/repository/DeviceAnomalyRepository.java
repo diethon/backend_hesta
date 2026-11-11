@@ -37,7 +37,7 @@ public interface DeviceAnomalyRepository extends JpaRepository<DeviceAnomaly, UU
 
     Optional<DeviceAnomaly> findByIdAndHomeId(UUID id, UUID homeId);
 
-    @Query("""
+    @Query(value = """
         SELECT a FROM DeviceAnomaly a
         JOIN FETCH a.device d
         WHERE a.home.id = :homeId
@@ -45,9 +45,42 @@ public interface DeviceAnomalyRepository extends JpaRepository<DeviceAnomaly, UU
           AND (:severity IS NULL OR a.severity = :severity)
           AND d.isDeleted = false
         ORDER BY a.detectedAt DESC
+    """, countQuery = """
+        SELECT count(a) FROM DeviceAnomaly a
+        JOIN a.device d
+        WHERE a.home.id = :homeId
+          AND (:status IS NULL OR a.status = :status)
+          AND (:severity IS NULL OR a.severity = :severity)
+          AND d.isDeleted = false
     """)
     Page<DeviceAnomaly> findByHomeIdWithFilters(
             @Param("homeId") UUID homeId,
+            @Param("status") AnomalyStatus status,
+            @Param("severity") SeverityLevel severity,
+            Pageable pageable
+    );
+
+    @Query(value = """
+        SELECT a FROM DeviceAnomaly a
+        JOIN FETCH a.device d
+        WHERE a.home.id = :homeId
+          AND a.device.id IN :deviceIds
+          AND (:status IS NULL OR a.status = :status)
+          AND (:severity IS NULL OR a.severity = :severity)
+          AND d.isDeleted = false
+        ORDER BY a.detectedAt DESC
+    """, countQuery = """
+        SELECT count(a) FROM DeviceAnomaly a
+        JOIN a.device d
+        WHERE a.home.id = :homeId
+          AND a.device.id IN :deviceIds
+          AND (:status IS NULL OR a.status = :status)
+          AND (:severity IS NULL OR a.severity = :severity)
+          AND d.isDeleted = false
+    """)
+    Page<DeviceAnomaly> findByHomeIdAndDeviceIdsWithFilters(
+            @Param("homeId") UUID homeId,
+            @Param("deviceIds") Collection<UUID> deviceIds,
             @Param("status") AnomalyStatus status,
             @Param("severity") SeverityLevel severity,
             Pageable pageable

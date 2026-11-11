@@ -132,7 +132,11 @@ public enum ErrorCode {
     STALE_ACCESS_VERSION(1061, "Phiên bản cấu hình phân quyền đã cũ. Vui lòng tải lại dữ liệu", HttpStatus.CONFLICT),
     FEATURE_DISABLED(1062, "Chưa bật quyền tùy chỉnh", HttpStatus.CONFLICT),
     MEMBER_ALREADY_EXISTS(1063, "Người dùng này đã là thành viên của ngôi nhà", HttpStatus.CONFLICT),
-    INVITATION_ALREADY_EXISTS(1064, "Đã có lời mời đang chờ xử lý cho email này", HttpStatus.CONFLICT);
+    INVITATION_ALREADY_EXISTS(1064, "Đã có lời mời đang chờ xử lý cho email này", HttpStatus.CONFLICT),
+
+    // Anomaly detection & management
+    ANOMALY_NOT_FOUND(1700, "Bất thường không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
+    ANOMALY_INVALID_STATUS(1701, "Trạng thái bất thường không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST);
 
 
     private final int code;
