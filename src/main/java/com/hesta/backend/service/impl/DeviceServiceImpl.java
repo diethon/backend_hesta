@@ -49,6 +49,18 @@ public class DeviceServiceImpl implements DeviceService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.DeviceHealthService deviceHealthService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.EnergyAnalyticsService energyAnalyticsService;
+
+    private static final long HISTORY_CACHE_TTL_MILLIS = 15_000L;
+    private final Map<UUID, CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>> historyCache = new ConcurrentHashMap<>();
+
+    private record CacheEntry<T>(T value, long expiresAt) {
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiresAt;
+        }
+    }
+
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
@@ -240,6 +252,8 @@ public class DeviceServiceImpl implements DeviceService {
                 }
             }
 
+            historyCache.remove(device.getId());
+
             if (device.getHome() != null && device.getHome().getId() != null) {
                 applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
                         device.getHome().getId(), twinSnapshotMapper.device(device)));
@@ -291,6 +305,10 @@ public class DeviceServiceImpl implements DeviceService {
         }
 
         Device saved = deviceRepository.save(device);
+        historyCache.remove(deviceId);
+        if (energyAnalyticsService != null && getHomeId(device) != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        }
         return DeviceResponse.fromEntity(saved);
     }
 
@@ -304,6 +322,10 @@ public class DeviceServiceImpl implements DeviceService {
 
         device.setDeleted(true);
         deviceRepository.save(device);
+        historyCache.remove(deviceId);
+        if (energyAnalyticsService != null && getHomeId(device) != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        }
     }
 
     @Override
@@ -313,10 +335,35 @@ public class DeviceServiceImpl implements DeviceService {
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
 
-        return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
+        CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>> cached = historyCache.get(deviceId);
+        if (cached != null && !cached.isExpired()) {
+            return cached.value();
+        }
+
+        List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> result = deviceStateHistoryRepository
+                .findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()
                 .map(com.hesta.backend.dto.response.DeviceStateHistoryResponse::fromEntity)
                 .collect(Collectors.toList());
+
+        historyCache.put(deviceId, new CacheEntry<>(result, System.currentTimeMillis() + HISTORY_CACHE_TTL_MILLIS));
+        return result;
+    }
+
+    @Override
+    public void evictDeviceHistoryCache(UUID deviceId) {
+        if (deviceId != null) {
+            historyCache.remove(deviceId);
+        } else {
+            historyCache.clear();
+        }
+    }
+
+    @org.springframework.context.event.EventListener
+    public void onDeviceStateChanged(DeviceStateChangedEvent event) {
+        if (event != null && event.payload() != null && event.payload().deviceId() != null) {
+            evictDeviceHistoryCache(event.payload().deviceId());
+        }
     }
 
     @Override

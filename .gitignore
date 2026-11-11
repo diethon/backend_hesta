@@ -66,3 +66,13 @@ client_secret_*.json
 token.json
 .aider*
 hesta-backend-*
+
+### Temporary scripts, diagrams, test reports & weights ###
+diagram*.xml
+*.pt
+*.xlsx
+/scripts/
+/ai_hesta/
+fix_json.py
+fix_sensors.sql
+

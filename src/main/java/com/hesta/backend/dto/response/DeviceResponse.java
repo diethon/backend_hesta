@@ -41,6 +41,7 @@ public class DeviceResponse {
     private Boolean manualOverrideActive;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    private OffsetDateTime lastSeen;
 
     public static DeviceResponse fromEntity(Device device) {
         if (device == null) {
@@ -74,6 +75,7 @@ public class DeviceResponse {
                 .digitalTwinZ(device.getDigitalTwinZ())
                 .createdAt(device.getCreatedAt())
                 .updatedAt(device.getUpdatedAt())
+                .lastSeen(device.getLastSeen() != null ? device.getLastSeen() : device.getUpdatedAt())
                 .build();
     }
 

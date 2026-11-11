@@ -89,7 +89,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
                 .id(incidentId)
                 .homeId(homeId)
                 .deviceId(eventDTO.getDeviceId())
-                .roomName("Phòng Khách (Bàn ghế gỗ)")
+                .roomName("Toàn Cảnh Camera Quan Sát")
                 .incidentType(incidentType)
                 .state(FallIncidentState.SUSPECTED_COUNTDOWN)
                 .confidenceScore(eventDTO.getConfidence() != null ? eventDTO.getConfidence() : 0.95)
