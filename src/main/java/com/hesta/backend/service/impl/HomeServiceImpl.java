@@ -105,10 +105,11 @@ public class HomeServiceImpl implements HomeService {
             }
             List<HomeInvitation> pendingInvites = homeInvitationRepository.findByHomeIdAndTargetEmailAndStatus(
                     homeId, targetEmail, InvitationStatus.PENDING);
-            boolean hasActiveInvite = pendingInvites.stream()
-                    .anyMatch(inv -> inv.getExpiresAt().isAfter(OffsetDateTime.now()));
-            if (hasActiveInvite) {
-                throw new AppException(ErrorCode.INVITATION_ALREADY_EXISTS);
+            if (!pendingInvites.isEmpty()) {
+                for (HomeInvitation oldInvite : pendingInvites) {
+                    oldInvite.setStatus(InvitationStatus.CANCELLED);
+                }
+                homeInvitationRepository.saveAll(pendingInvites);
             }
         }
 
