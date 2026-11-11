@@ -20,6 +20,8 @@ import com.hesta.backend.service.HomeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import com.hesta.backend.event.MemberAccessChangedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +60,8 @@ public class HomeServiceImpl implements HomeService {
     private final DeviceRepository deviceRepository;
 
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:false}")
     private boolean customScopeEnabled;
@@ -509,6 +513,9 @@ public class HomeServiceImpl implements HomeService {
             memberDeviceAccessRepository.flush();
         }
         homeMemberRepository.save(target);
+        if (applicationEventPublisher != null) {
+            applicationEventPublisher.publishEvent(new MemberAccessChangedEvent(homeId, memberId));
+        }
     }
 
     @Override
@@ -536,6 +543,9 @@ public class HomeServiceImpl implements HomeService {
         memberRoomAccessRepository.flush();
         memberDeviceAccessRepository.flush();
         homeMemberRepository.delete(target);
+        if (applicationEventPublisher != null) {
+            applicationEventPublisher.publishEvent(new MemberAccessChangedEvent(homeId, memberId));
+        }
     }
 
 

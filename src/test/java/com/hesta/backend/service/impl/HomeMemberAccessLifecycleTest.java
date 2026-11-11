@@ -48,6 +48,9 @@ class HomeMemberAccessLifecycleTest {
     @Mock
     private HomeAuthorizationService homeAuthorizationService;
 
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
+
     @InjectMocks
     private HomeServiceImpl homeService;
 

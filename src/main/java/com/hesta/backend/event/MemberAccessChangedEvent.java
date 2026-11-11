@@ -8,3 +8,4 @@ import java.util.UUID;
  */
 public record MemberAccessChangedEvent(UUID homeId, UUID userId) {
 }
+
