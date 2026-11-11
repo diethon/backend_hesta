@@ -63,7 +63,7 @@ public class HomeServiceImpl implements HomeService {
 
     private final ApplicationEventPublisher applicationEventPublisher;
 
-    @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:false}")
+    @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:true}")
     private boolean customScopeEnabled;
 
 
