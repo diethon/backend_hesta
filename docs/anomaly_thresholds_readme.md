@@ -209,3 +209,33 @@ File migration chứa:
   ```
 - **Quyền hạn:** Có quyền điều khiển thiết bị (`CONTROL`) hoặc chủ nhà (`OWNER`).
 - **Phản hồi:** `status = RESOLVED`, `resolvedAt`, `resolvedBy`, ghi chú xử lý. Kích hoạt khoảng hoãn cảnh báo 10-15 phút.
+
+---
+
+## 6. Kiến Trúc Kênh STOMP WebSocket Realtime Cho Anomaly Notification
+
+Hệ thống HESTA đã hợp nhất toàn bộ kênh đẩy sự kiện thời gian thực (realtime broker) về một kênh duy nhất theo từng ngôi nhà:
+
+- **Subscribe Destination:** `/topic/homes/{homeId}/events`
+- **Loại sự kiện:** `RealtimeEventType.NOTIFICATION_CREATED`
+- **Phong bì dữ liệu (Envelope):** `RealtimeEvent<NotificationRealtimePayload>`
+  ```json
+  {
+    "eventId": "uuid",
+    "type": "NOTIFICATION_CREATED",
+    "homeId": "uuid",
+    "timestamp": "2026-11-12T16:00:00Z",
+    "data": {
+      "notificationId": "uuid",
+      "recipientId": "uuid",
+      "homeId": "uuid",
+      "isRead": false,
+      "createdAt": "2026-11-12T16:00:00Z"
+    }
+  }
+  ```
+- **Xác thực & Ủy quyền kênh:** `RealtimeWebSocketChannelInterceptor` chặn kết nối STOMP và chỉ cho phép người dùng đăng ký đúng `/topic/homes/{homeId}/events` nếu người dùng đó là thành viên hợp lệ của ngôi nhà (`subscriptionService.authorizeSubscription`). Mọi kênh khác (`/topic/user/...`, `/queue/...`, `/topic/home/...`) đều bị từ chối với lỗi `AccessDeniedException`.
+- **Cơ chế nhận thông báo phía Frontend (`hesta_frontend`):**
+  1. Frontend đăng ký lắng nghe `/topic/homes/{homeId}/events` qua `SharedRealtimeClient`.
+  2. Khi có sự kiện `NOTIFICATION_CREATED`, `NotificationLifecycle` kiểm tra nếu `recipientId` khớp với người dùng đang đăng nhập, nó sẽ gọi `GET /notifications/{notificationId}` để tải chi tiết thông báo (đảm bảo tính bảo mật riêng tư, không phát tán nội dung nhạy cảm ra kênh chung).
+  3. UI hiển thị badge thông báo và toast cảnh báo bất thường khẩn cấp ngay lập tức.
