@@ -51,8 +51,8 @@ hesta.anomaly.metrics.gas_ppm.manual-resolve-suppress=10m
 
 # --- Cảm biến Khói (smoke: MQ-2 ppm) ---
 hesta.anomaly.metrics.smoke.enabled=true
-hesta.anomaly.metrics.smoke.warn=200.0
-hesta.anomaly.metrics.smoke.critical=600.0
+hesta.anomaly.metrics.smoke.warn=300.0
+hesta.anomaly.metrics.smoke.critical=1000.0
 hesta.anomaly.metrics.smoke.valid-min=0.0
 hesta.anomaly.metrics.smoke.valid-max=10000.0
 hesta.anomaly.metrics.smoke.unit=ppm
@@ -65,8 +65,8 @@ hesta.anomaly.metrics.smoke.manual-resolve-suppress=10m
 
 # --- Cảm biến Nhiệt độ quá cao (temperature: °C) ---
 hesta.anomaly.metrics.temperature.enabled=true
-hesta.anomaly.metrics.temperature.warn=45.0
-hesta.anomaly.metrics.temperature.critical=60.0
+hesta.anomaly.metrics.temperature.warn=50.0
+hesta.anomaly.metrics.temperature.critical=65.0
 hesta.anomaly.metrics.temperature.valid-min=-20.0
 hesta.anomaly.metrics.temperature.valid-max=100.0
 hesta.anomaly.metrics.temperature.unit=°C
@@ -129,20 +129,41 @@ hesta.anomaly.offline-max-age=24h
 
 > [!IMPORTANT]
 > Toàn bộ quá trình phát triển tuân thủ nguyên tắc an toàn: **CHỈ kết nối đọc (SELECT), KHÔNG chạy `supabase db push` tự động trên database môi trường dùng chung.**
+> 
+> **LƯU Ý VỀ KHỞI ĐỘNG ỨNG DỤNG:**
+> Dự án HESTA Backend cấu hình `spring.jpa.hibernate.ddl-auto=validate`. Khi khởi động, Hibernate sẽ đối chiếu toàn bộ Entity (`DeviceAnomaly`, `Notification`, v.v.) với schema thực tế trong database. **Nếu chưa chạy migration, backend sẽ báo lỗi `SchemaManagementException` (thiếu cột hoặc chỉ mục) và từ chối khởi động.**
 
-Khi đội ngũ kỹ thuật triển khai lên môi trường Staging/Production:
+### Quy trình áp dụng migration an toàn:
 
-### Cách 1: Sử dụng Supabase CLI (Khuyến nghị)
+#### Bước 1: Kiểm tra trước bằng cờ `--dry-run` (Dry Run)
+Luôn kiểm tra các câu lệnh SQL sẽ được áp dụng mà không làm thay đổi dữ liệu:
 ```bash
 cd backend_hesta
-# Đảm bảo đã link với dự án Supabase tương ứng
 supabase link --project-ref <PROJECT_ID>
-
-# Chạy migration
-supabase db push
+supabase db push --dry-run
 ```
 
-### Cách 2: Chạy trực tiếp qua psql / Supabase SQL Editor
+#### Bước 2: Áp dụng và kiểm thử trước trên môi trường DB Dev / Local
+Thực thi migration trên database phát triển riêng biệt:
+```bash
+supabase db push
+# Chạy toàn bộ test suite để xác minh tính tương thích
+mvn test -Dtest=AnomalyDetectionServiceTest,DeviceAnomalyManagementServiceImplTest
+```
+
+#### Bước 3: Sao lưu (Backup) cơ sở dữ liệu chính trước khi chạy Production
+Trước khi áp dụng lên môi trường production:
+```bash
+supabase db dump -f backup_pre_anomaly_$(date +%Y%m%d).sql
+```
+
+#### Bước 4: Áp dụng migration lên database chính
+- **Qua Supabase CLI:**
+  ```bash
+  supabase db push
+  ```
+- **Hoặc qua Supabase SQL Editor:** Mở và chạy file:
+  `backend_hesta/supabase/migrations/20261111170000_extend_device_anomalies_schema.sql`
 Mở và thực thi file sau trong Supabase SQL Editor:
 `backend_hesta/supabase/migrations/20261111170000_extend_device_anomalies_schema.sql`
 

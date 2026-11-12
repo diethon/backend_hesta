@@ -263,4 +263,88 @@ class AnomalyDetectionServiceTest {
         verify(anomalyRepository, times(1)).save(any());
         verify(eventPublisher, never()).publishEvent(any(AnomalyRaisedEvent.class));
     }
+
+    @Test
+    @DisplayName("Smoke thresholds: 250 is normal, 350 triggers HIGH after 2 streaks, 1100 triggers CRITICAL")
+    void evaluateReading_SmokeThresholds_Warn300_Critical1000() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.SMOKE_DETECTED), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // 250 is normal (< 300)
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(250.0), now, 501L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 350 exceeds warn (300). Streak = 1 -> no alert yet
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(350.0), now.plusSeconds(5), 502L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 360 exceeds warn (300). Streak = 2 -> raises HIGH anomaly
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(360.0), now.plusSeconds(10), 503L);
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.HIGH);
+        assertThat(captor.getValue().getAnomalyType()).isEqualTo(AnomalyType.SMOKE_DETECTED);
+
+        // Reset mock and test CRITICAL (>= 1000)
+        reset(anomalyRepository, eventPublisher);
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.SMOKE_DETECTED), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(1100.0), now.plusSeconds(15), 504L);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+    }
+
+    @Test
+    @DisplayName("Temperature thresholds: 45 is normal, 52 triggers HIGH after 2 streaks, 70 triggers CRITICAL")
+    void evaluateReading_TemperatureThresholds_Warn50_Critical65() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.HIGH_TEMPERATURE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // 45 is normal (< 50)
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(45.0), now, 601L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 52 exceeds warn (50). Streak = 1 -> no alert yet
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(52.0), now.plusSeconds(5), 602L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 53 exceeds warn (50). Streak = 2 -> raises HIGH anomaly
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(53.0), now.plusSeconds(10), 603L);
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.HIGH);
+        assertThat(captor.getValue().getAnomalyType()).isEqualTo(AnomalyType.HIGH_TEMPERATURE);
+
+        // Reset mock and test CRITICAL (>= 65)
+        reset(anomalyRepository, eventPublisher);
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.HIGH_TEMPERATURE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(70.0), now.plusSeconds(15), 604L);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+    }
 }
