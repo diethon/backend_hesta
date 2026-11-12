@@ -1,6 +1,7 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.request.TelemetryPayload;
+import com.hesta.backend.dto.event.TelemetryAnomalyEvent;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
@@ -176,5 +177,64 @@ class TelemetryServiceImplTest {
                 telemetryService.processTelemetry("test/topic", null)
         );
         verifyNoInteractions(sensorReadingRepository, deviceRepository, realtimeEventPublisher);
+    }
+
+    @Test
+    void onSensorReadingCommitted_WhenAnomalyDetectionThrows_ExceptionCaughtSafely() {
+        Device mockDevice = Device.builder().id(UUID.randomUUID()).name("Gas Sensor").build();
+        when(deviceRepository.findById(mockDevice.getId())).thenReturn(Optional.of(mockDevice));
+
+        doThrow(new RuntimeException("Simulated unexpected anomaly engine failure"))
+                .when(anomalyDetectionService).evaluateReading(any(), any(), any(), any(), any());
+
+        TelemetryAnomalyEvent event = new TelemetryAnomalyEvent(
+                999L,
+                mockDevice.getId(),
+                "gas_ppm",
+                new BigDecimal("500.0"),
+                java.time.OffsetDateTime.now()
+        );
+
+        assertDoesNotThrow(() -> telemetryService.onSensorReadingCommitted(event));
+    }
+
+    @Test
+    void processTelemetry_SavesReadingAndPublishesEventEvenIfDownstreamAnomalyFails() {
+        Device device = Device.builder().id(UUID.randomUUID()).name("GAS-01").build();
+        when(deviceRepository.findByNodeCodeAndName("ESP32-001", "GAS-01"))
+                .thenReturn(Optional.of(device));
+
+        when(sensorReadingRepository.save(any(SensorReading.class))).thenAnswer(invocation -> {
+            SensorReading r = invocation.getArgument(0);
+            r.setId(555L);
+            return r;
+        });
+
+        TelemetryPayload payload = TelemetryPayload.builder()
+                .nodeId("ESP32-001")
+                .deviceId("GAS-01")
+                .metricType("gas_ppm")
+                .value(new BigDecimal("800.0"))
+                .unit("ppm")
+                .build();
+
+        assertDoesNotThrow(() ->
+                telemetryService.processTelemetry("hesta/nodes/ESP32-001/devices/GAS-01/telemetry", payload)
+        );
+
+        verify(sensorReadingRepository, times(1)).save(any(SensorReading.class));
+
+        ArgumentCaptor<TelemetryAnomalyEvent> eventCaptor = ArgumentCaptor.forClass(TelemetryAnomalyEvent.class);
+        verify(applicationEventPublisher).publishEvent(eventCaptor.capture());
+        TelemetryAnomalyEvent capturedEvent = eventCaptor.getValue();
+        assertEquals(555L, capturedEvent.readingId());
+        assertEquals("gas_ppm", capturedEvent.metricType());
+
+        when(deviceRepository.findById(device.getId())).thenReturn(Optional.of(device));
+        doThrow(new RuntimeException("Downstream crash"))
+                .when(anomalyDetectionService).evaluateReading(any(), any(), any(), any(), any());
+
+        assertDoesNotThrow(() -> telemetryService.onSensorReadingCommitted(capturedEvent));
+        verify(sensorReadingRepository, times(1)).save(any(SensorReading.class));
     }
 }
