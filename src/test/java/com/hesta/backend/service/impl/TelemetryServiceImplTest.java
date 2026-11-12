@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -236,5 +237,47 @@ class TelemetryServiceImplTest {
 
         assertDoesNotThrow(() -> telemetryService.onSensorReadingCommitted(capturedEvent));
         verify(sensorReadingRepository, times(1)).save(any(SensorReading.class));
+    }
+
+    @Test
+    void processTelemetry_MergesNewMetricIntoExistingCurrentStateWithoutOverwritingOtherMetrics() {
+        UUID deviceId = UUID.randomUUID();
+        Map<String, Object> existingState = new HashMap<>();
+        existingState.put("humidity", 65.0);
+        existingState.put("lux", 200.0);
+        existingState.put("power", true);
+
+        Device device = Device.builder()
+                .id(deviceId)
+                .name("Multi-Sensor")
+                .deviceType("ENVIRONMENT_SENSOR")
+                .currentState(existingState)
+                .build();
+
+        when(deviceRepository.findByNodeCodeAndName("ESP32-001", "MULTI-01"))
+                .thenReturn(Optional.of(device));
+
+        when(sensorReadingRepository.save(any(SensorReading.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TelemetryPayload payload = TelemetryPayload.builder()
+                .nodeId("ESP32-001")
+                .deviceId("MULTI-01")
+                .metricType("gas_ppm")
+                .value(new BigDecimal("500.0"))
+                .unit("ppm")
+                .build();
+
+        telemetryService.processTelemetry("hesta/nodes/ESP32-001/devices/MULTI-01/telemetry", payload);
+
+        ArgumentCaptor<Device> deviceCaptor = ArgumentCaptor.forClass(Device.class);
+        verify(deviceRepository).save(deviceCaptor.capture());
+        Device savedDevice = deviceCaptor.getValue();
+
+        Map<String, Object> updatedState = savedDevice.getCurrentState();
+        assertNotNull(updatedState);
+        assertEquals(new BigDecimal("500.0"), updatedState.get("gas_ppm"));
+        assertEquals(65.0, updatedState.get("humidity"));
+        assertEquals(200.0, updatedState.get("lux"));
+        assertEquals(true, updatedState.get("power"));
     }
 }

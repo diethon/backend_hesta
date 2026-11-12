@@ -103,11 +103,10 @@ public class TelemetryServiceImpl implements TelemetryService {
             log.info("Saved SensorReading for device [{}] ({}): {} {}",
                     device.getName(), payload.getMetricType(), payload.getValue(), payload.getUnit());
 
-            // 3. Update Device live current_state, status, and lastSeen
-            Map<String, Object> currentState = device.getCurrentState();
-            if (currentState == null) {
-                currentState = new HashMap<>();
-            }
+            // 3. Update Device live current_state (merge without overwriting other metrics), status, and lastSeen
+            Map<String, Object> currentState = device.getCurrentState() != null
+                    ? new HashMap<>(device.getCurrentState())
+                    : new HashMap<>();
             currentState.put(payload.getMetricType(), payload.getValue());
             device.setCurrentState(currentState);
             device.setStatus(DeviceStatus.ONLINE);
