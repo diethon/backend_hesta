@@ -4,6 +4,9 @@ import com.hesta.backend.dto.request.ScheduleRequest;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneSchedule;
+import com.hesta.backend.enums.AccessScope;
+import com.hesta.backend.enums.HomeRole;
+import com.hesta.backend.enums.MemberStatus;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.AutomationScheduleRepository;
@@ -79,6 +82,8 @@ class ScheduleServiceTest {
                 .triggerType(com.hesta.backend.enums.TriggerType.SCHEDULE).build();
         var only = com.hesta.backend.entity.AutomationSchedule.builder().id(UUID.randomUUID()).rule(rule)
                 .scheduledTime(LocalTime.of(7, 0)).active(true).build();
+        when(authorization.loadAccessContext(homeId, userId)).thenReturn(new MemberAccessContext(homeId, userId,
+                UUID.randomUUID(), HomeRole.OWNER, MemberStatus.ACTIVE, AccessScope.ALL, null, null));
         when(rules.findByIdAndHomeId(ruleId, homeId)).thenReturn(Optional.of(rule));
         when(ruleSchedules.findById(only.getId())).thenReturn(Optional.of(only));
         when(ruleSchedules.countByRuleIdAndActiveTrue(ruleId)).thenReturn(1L);
