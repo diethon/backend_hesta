@@ -37,7 +37,7 @@ class DeviceStateRealtimeTest {
     @BeforeEach
     void setUp() {
         service = new DeviceServiceImpl(devices, new HomeAuthorizationService(homes, members), rooms, history, events,
-                TwinHealthTestSupport.mapper(new ObjectMapper()));
+                TwinHealthTestSupport.mapper(new ObjectMapper()), null);
     }
 
     @Test

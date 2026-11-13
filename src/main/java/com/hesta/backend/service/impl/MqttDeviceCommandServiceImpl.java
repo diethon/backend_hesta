@@ -65,9 +65,42 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> commandStartTimes = new ConcurrentHashMap<>();
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.BehaviorEventRecorder behaviorEventRecorder;
+
+    /** Commands a person gave; their successful runs are the habit data for recommendations. */
+    private static final java.util.Set<StateChangeSource> HUMAN_SOURCES =
+            java.util.EnumSet.of(StateChangeSource.MANUAL, StateChangeSource.VOICE, StateChangeSource.GESTURE);
+
+    /** true when we sent this device a command recently, so a state change it reports is our doing, not a wall switch. */
+    public static boolean commandedWithin(UUID deviceId, long millis) {
+        Long started = commandStartTimes.get(deviceId);
+        return started != null && System.currentTimeMillis() - started < millis;
+    }
+
     @Transactional
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
+        // Every app, web, voice, AC and gate command ends up here, so this is the one place that records them.
+        if (behaviorEventRecorder == null || !HUMAN_SOURCES.contains(source)) {
+            return dispatch(deviceId, action, parameters, source);
+        }
+        Map<String, Object> before = deviceRepository.findById(deviceId)
+                .map(Device::getCurrentState).map(state -> (Map<String, Object>) new HashMap<>(state))
+                .orElseGet(HashMap::new);
+        return dispatch(deviceId, action, parameters, source).thenApply(result -> {
+            if (result != null && result.isSuccess() && !"SUPERSEDED".equals(result.getStatus())) {
+                try {
+                    behaviorEventRecorder.recordUserCommand(deviceId, action, parameters, before, source);
+                } catch (Exception ex) {
+                    log.warn("Could not record user command for device {}: {}", deviceId, ex.getMessage());
+                }
+            }
+            return result;
+        });
+    }
+
+    private CompletableFuture<CommandResult> dispatch(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
         Long lastStartTime = commandStartTimes.get(deviceId);
         long now = System.currentTimeMillis();
 
