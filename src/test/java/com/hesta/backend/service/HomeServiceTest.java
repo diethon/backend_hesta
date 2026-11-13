@@ -33,6 +33,12 @@ class HomeServiceTest {
     @Mock
     private HomeMemberRepository homeMemberRepository;
 
+    @Mock
+    private com.hesta.backend.repository.MemberRoomAccessRepository memberRoomAccessRepository;
+
+    @Mock
+    private com.hesta.backend.repository.MemberDeviceAccessRepository memberDeviceAccessRepository;
+
     @InjectMocks
     private HomeServiceImpl homeService;
 
