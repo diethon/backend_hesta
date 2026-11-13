@@ -158,4 +158,4 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .currentState(Map.of("resumedAt", now.toString()))
                 .occurredAt(now).build());
     }
-}
+}

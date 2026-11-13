@@ -38,7 +38,10 @@ class AutomationEngineTest {
 
     @BeforeEach
     void setUp() {
-        engine = new AutomationEngineImpl(ruleRepository, executionRepository, deviceRepository, commandService, new ObjectMapper(), behaviorEventRecorder, manualOverrideService, sceneExecutionService);
+        engine = new AutomationEngineImpl(ruleRepository, executionRepository, deviceRepository, behaviorEventRecorder,
+                manualOverrideService, sceneExecutionService, new com.hesta.backend.service.automation.RuleMatcher("Asia/Ho_Chi_Minh"),
+                new com.hesta.backend.service.automation.RuleTriggerGate(0),
+                new com.hesta.backend.service.execution.CommandBatchRunner(commandService, behaviorEventRecorder));
         Home home = Home.builder().id(homeId).name("Home").build();
         device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
                 .room(Room.builder().home(home).build()).name("Fan").deviceType("FAN").build();
@@ -162,6 +165,72 @@ class AutomationEngineTest {
                 .isEqualTo("SKIPPED_CONFLICT");
         verify(commandService, times(1)).sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any());
         verify(commandService, never()).sendCommand(eq(deviceId), eq("TURN_OFF"), anyMap(), any());
+    }
+
+    @Test
+    void stateReportsFireOnlyOnFalseToTrueTransition() {
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any()))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        engine.process(homeId, report(31));
+        engine.process(homeId, report(32)); // still hot: no second run
+        engine.process(homeId, report(25)); // cooled down: re-arms
+        engine.process(homeId, report(33));
+
+        verify(commandService, times(2)).sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any());
+    }
+
+    @Test
+    void conditionOnAnotherDeviceUsesItsCurrentState() {
+        Device lightSensor = Device.builder().id(UUID.randomUUID()).name("Lux").deviceType("LIGHT_SENSOR")
+                .currentState(Map.of("lux", 5)).build();
+        rule.getConditions().add(RuleCondition.builder().rule(rule).device(lightSensor).attribute("lux")
+                .operator(ConditionOperator.LT).expectedValue(JsonNodeFactory.instance.numberNode(10))
+                .logicalOperator(LogicalOperator.AND).order(1).build());
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any()))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(engine.process(homeId, event(31)).getMatchedRules()).isEqualTo(1);
+        lightSensor.setCurrentState(Map.of("lux", 500));
+        assertThat(engine.process(homeId, event(31)).getMatchedRules()).isZero();
+    }
+
+    @Test
+    void andBindsTighterThanOr() {
+        // temperature > 30 OR (temperature < 0 AND temperature > 100) -> true for 31
+        rule.getConditions().add(RuleCondition.builder().rule(rule).device(device).attribute("temperature")
+                .operator(ConditionOperator.LT).expectedValue(JsonNodeFactory.instance.numberNode(0))
+                .logicalOperator(LogicalOperator.OR).order(1).build());
+        rule.getConditions().add(RuleCondition.builder().rule(rule).device(device).attribute("temperature")
+                .operator(ConditionOperator.GT).expectedValue(JsonNodeFactory.instance.numberNode(100))
+                .logicalOperator(LogicalOperator.AND).order(2).build());
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), any()))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(engine.process(homeId, event(31)).getMatchedRules()).isEqualTo(1);
+    }
+
+    @Test
+    void disabledSceneIsSkippedWithoutCallingSceneService() {
+        Scene scene = Scene.builder().id(UUID.randomUUID()).home(rule.getHome()).name("Off").enabled(false).build();
+        rule.getActions().clear();
+        rule.getActions().add(RuleAction.builder().rule(rule).scene(scene).action("EXECUTE_SCENE").order(0).build());
+        when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = engine.process(homeId, event(35));
+
+        assertThat(response.getExecutions().getFirst().getResultDetail().get(0).get("status").asText())
+                .isEqualTo("SKIPPED_DISABLED");
+        verifyNoInteractions(sceneExecutionService);
+    }
+
+    private AutomationEventRequest report(int temperature) {
+        AutomationEventRequest event = event(temperature);
+        event.setStateReport(true);
+        return event;
     }
 
     private AutomationEventRequest event(int temperature) {

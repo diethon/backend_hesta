@@ -84,4 +84,4 @@ public class RoomController {
                 .message("Xoá phòng thành công. Các thiết bị trong phòng đã được chuyển sang trạng thái chưa gán phòng.")
                 .build());
     }
-}
+}

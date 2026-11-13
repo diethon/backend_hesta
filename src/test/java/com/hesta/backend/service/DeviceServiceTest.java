@@ -28,6 +28,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
@@ -39,6 +40,7 @@ class DeviceServiceTest {
     @Mock RoomRepository roomRepository;
     @Mock DeviceStateHistoryRepository deviceStateHistoryRepository;
     @Mock RealtimeEventPublisher realtimeEventPublisher;
+    @Mock com.hesta.backend.service.automation.DeviceReferenceCleaner deviceReferenceCleaner;
     @InjectMocks DeviceServiceImpl service;
 
     @Test
@@ -267,7 +269,10 @@ class DeviceServiceTest {
         service.removeDevice(userId, deviceId);
 
         assertThat(device.isDeleted()).isTrue();
-        verify(deviceRepository).save(device);
+        // References are removed while the device can still be loaded, before it is hidden as deleted.
+        var order = inOrder(deviceReferenceCleaner, deviceRepository);
+        order.verify(deviceReferenceCleaner).detach(deviceId);
+        order.verify(deviceRepository).save(device);
         verify(homeAuthorizationService).requireSceneManagement(userId, homeId);
     }
 

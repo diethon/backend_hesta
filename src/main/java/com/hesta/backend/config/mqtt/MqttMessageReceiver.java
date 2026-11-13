@@ -40,6 +40,8 @@ public class MqttMessageReceiver {
     private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AutomationDispatcher automationDispatcher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.diagnostics.MqttDlqService dlqService;
@@ -343,18 +345,25 @@ public class MqttMessageReceiver {
         if (device.getRoom() == null || device.getRoom().getHome() == null) {
             return;
         }
-        try {
-            automationEngine.process(
-                    device.getRoom().getHome().getId(),
-                    AutomationEventRequest.builder()
-                            .sourceDeviceId(device.getId())
-                            .eventType(eventType)
-                            .data(data)
-                            .build()
-            );
-        } catch (Exception ex) {
-            log.warn("AutomationEngine execution error for device {}: {}", device.getId(), ex.getMessage());
-        }
+        UUID homeId = device.getRoom().getHome().getId();
+        UUID deviceId = device.getId();
+        AutomationEventRequest event = AutomationEventRequest.builder()
+                .sourceDeviceId(deviceId)
+                .eventType(eventType)
+                .data(new HashMap<>(data))
+                .stateReport(true)
+                .build();
+        Runnable task = () -> {
+            try {
+                automationEngine.process(homeId, event);
+            } catch (Exception ex) {
+                log.warn("AutomationEngine execution error for device {}: {}", deviceId, ex.getMessage());
+            }
+        };
+        // Async: own transaction (an engine failure can no longer roll back this telemetry write)
+        // and the MQTT thread stays free to deliver the ACKs the engine waits for.
+        if (automationDispatcher != null) automationDispatcher.dispatch(task);
+        else task.run();
     }
 
     private void applyMetricAliases(Map<String, Object> data, String metricType, Object value) {

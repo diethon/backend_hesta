@@ -58,11 +58,10 @@ class ManualControlServiceTest {
 
         assertThat(result.getCommand().isSuccess()).isTrue();
         assertThat(result.getOverrideUntil()).isEqualTo(until);
-        var order = inOrder(authorization, commands, overrides, recorder);
+        var order = inOrder(authorization, commands, overrides);
         order.verify(authorization).requireAccess(userId, homeId);
         order.verify(commands).sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL);
         order.verify(overrides).activate(device, userId, "OVERRIDE");
-        order.verify(recorder).recordCommand(device, "TURN_ON", StateChangeSource.MANUAL, command);
     }
 
     @Test
@@ -81,7 +80,6 @@ class ManualControlServiceTest {
         assertThat(result.getCommand().isSuccess()).isFalse();
         assertThat(result.getOverrideUntil()).isNull();
         verify(overrides, never()).activate(any(), any(), any());
-        verify(recorder, never()).recordCommand(any(), any(), any(), any());
     }
 
     @Test

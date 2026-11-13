@@ -47,6 +47,7 @@ public class DeviceServiceImpl implements DeviceService {
     private final DeviceStateHistoryRepository deviceStateHistoryRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final TwinSnapshotMapper twinSnapshotMapper;
+    private final com.hesta.backend.service.automation.DeviceReferenceCleaner deviceReferenceCleaner;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.ManualOverrideService manualOverrideService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -64,6 +65,10 @@ public class DeviceServiceImpl implements DeviceService {
     }
 
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
+    /** A state report this soon after one of our commands is the command's echo, not a wall switch. */
+    private static final long PHYSICAL_SWITCH_GRACE_MS = 15_000;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.BehaviorEventRecorder behaviorEventRecorder;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
         homeAuthorizationService.requireAccess(userId, homeId);
@@ -296,6 +301,15 @@ public class DeviceServiceImpl implements DeviceService {
                         deviceHealthService.recordSwitch(device.getId());
                     } catch (Exception ignored) {}
                 }
+                // Power flipped without any command from us (wall switch, IR remote): still a habit of the user.
+                if (behaviorEventRecorder != null && !isSensor && powerToggled && source == StateChangeSource.MANUAL
+                        && !MqttDeviceCommandServiceImpl.commandedWithin(device.getId(), PHYSICAL_SWITCH_GRACE_MS)) {
+                    try {
+                        behaviorEventRecorder.recordPhysicalToggle(device, prevState, newState);
+                    } catch (Exception ex) {
+                        System.err.println("Could not record physical switch for device " + device.getId() + ": " + ex.getMessage());
+                    }
+                }
             }
 
             historyCache.remove(device.getId());
@@ -365,6 +379,7 @@ public class DeviceServiceImpl implements DeviceService {
 
         checkHomeOwner(userId, getHomeId(device));
 
+        deviceReferenceCleaner.detach(deviceId);
         device.setDeleted(true);
         deviceRepository.save(device);
         historyCache.remove(deviceId);
