@@ -37,7 +37,7 @@ BEGIN
     RAISE NOTICE 'Starting test_behavior_trigger.sql...';
 
     -- 1. Setup test fixture
-    INSERT INTO users (id, email, password_hash, full_name, role)
+    INSERT INTO users (id, email, password_hash, full_name, platform_role)
     VALUES (u_test, 'trigger_test@hesta.internal', 'hash', 'Trigger Test User', 'USER');
 
     INSERT INTO homes (id, name, created_by) VALUES (h1, 'Trigger Test Home 1', u_test);
