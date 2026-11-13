@@ -13,4 +13,4 @@ public interface RoomService {
     RoomResponse createRoom(UUID userId, UUID homeId, RoomCreateRequest request);
     RoomResponse updateRoom(UUID userId, UUID homeId, UUID roomId, RoomUpdateRequest request);
     void deleteRoom(UUID userId, UUID homeId, UUID roomId);
-}
+}
