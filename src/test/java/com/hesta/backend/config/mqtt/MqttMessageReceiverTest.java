@@ -47,7 +47,7 @@ class MqttMessageReceiverTest {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+        when(devices.findByIdWithNode(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
                 .deviceType("SENSOR").build()));
@@ -78,6 +78,8 @@ class MqttMessageReceiverTest {
 
         verify(deviceService).updateDeviceStateFromMqtt(eq(nodeId.toString()), eq(deviceId.toString()), argThat(map ->
                 Boolean.TRUE.equals(map.get("power")) && Integer.valueOf(26).equals(map.get("temperature")) && "COOL".equals(map.get("mode"))));
+        // AC "temperature" is a setpoint, not a safety reading
+        verify(telemetryService, never()).processTelemetry(anyString(), any());
     }
 
     @Test
@@ -100,7 +102,7 @@ class MqttMessageReceiverTest {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+        when(devices.findByIdWithNode(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
                 .deviceType("TEMPERATURE_SENSOR").build()));
@@ -131,5 +133,48 @@ class MqttMessageReceiverTest {
                 .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/status").build());
         verify(applicationEvents).publishEvent(argThat((DeviceStateChangedEvent event) ->
                 event.homeId().equals(homeId) && event.payload().status() == status && event.payload().lastSeen() == null));
+    }
+
+    @Test
+    void flatMapTelemetryExtractsSafetyMetricsAndPreservesStateUpdate() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        String payload = "{\"nodeId\":\"" + nodeId + "\",\"deviceId\":\"" + deviceId + "\",\"humidity\":65.0,\"temperature\":29.5,\"gas_ppm\":850.0,\"smoke\":120.0}";
+
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/telemetry")
+                .build());
+
+        // 1. Existing behavior preserved: full map sent to updateDeviceStateFromMqtt
+        verify(deviceService).updateDeviceStateFromMqtt(eq(nodeId.toString()), eq(deviceId.toString()), argThat(map ->
+                Double.valueOf(65.0).equals(map.get("humidity"))
+                        && Double.valueOf(29.5).equals(map.get("temperature"))
+                        && Double.valueOf(850.0).equals(map.get("gas_ppm"))
+                        && Double.valueOf(120.0).equals(map.get("smoke"))
+        ));
+
+        // 2. Safety metrics extracted and dispatched to telemetryService
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "gas_ppm".equals(p.getMetricType()) && new java.math.BigDecimal("850.0").equals(p.getValue())));
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "smoke".equals(p.getMetricType()) && new java.math.BigDecimal("120.0").equals(p.getValue())));
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "temperature".equals(p.getMetricType()) && new java.math.BigDecimal("29.5").equals(p.getValue())));
+    }
+
+    @Test
+    void flatMapTelemetryWithTempKeyNormalizesMetricTypeToTemperature() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        String payload = "{\"nodeId\":\"" + nodeId + "\",\"deviceId\":\"" + deviceId + "\",\"temp\":55.0}";
+
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/telemetry")
+                .build());
+
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "temperature".equals(p.getMetricType())
+                        && new java.math.BigDecimal("55.0").equals(p.getValue())
+                        && "°C".equals(p.getUnit())));
     }
 }

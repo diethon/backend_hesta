@@ -49,7 +49,13 @@ public class AutomationEngineImpl implements AutomationEngine {
         validateSourceDevice(homeId, event);
         if (event.getSourceDeviceId() != null && !event.isTest()) {
             deviceRepository.findById(event.getSourceDeviceId())
-                    .ifPresent(device -> behaviorEventRecorder.recordSensor(device, event));
+                    .ifPresent(device -> {
+                        try {
+                            behaviorEventRecorder.recordSensor(device, event);
+                        } catch (Exception ex) {
+                            log.error("Failed to record sensor behavior event for device {}: {}", device.getId(), ex.getMessage(), ex);
+                        }
+                    });
         }
         List<AutomationRule> rules = ruleRepository.findAllByHomeIdAndEnabledTrueAndTriggerTypeIn(
                 homeId, List.of(TriggerType.SENSOR, TriggerType.EVENT));
