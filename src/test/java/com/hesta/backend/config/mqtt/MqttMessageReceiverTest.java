@@ -47,7 +47,7 @@ class MqttMessageReceiverTest {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+        when(devices.findByIdWithNode(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
                 .deviceType("SENSOR").build()));
@@ -100,7 +100,7 @@ class MqttMessageReceiverTest {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+        when(devices.findByIdWithNode(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
                 .deviceType("TEMPERATURE_SENSOR").build()));

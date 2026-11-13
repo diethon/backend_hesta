@@ -407,19 +407,19 @@ public class MqttMessageReceiver {
         if (deviceIdStr != null && !deviceIdStr.isBlank()) {
             try {
                 UUID uuid = UUID.fromString(deviceIdStr);
-                java.util.Optional<com.hesta.backend.entity.Device> byId = devices.findById(uuid);
+                java.util.Optional<com.hesta.backend.entity.Device> byId = devices.findByIdWithNode(uuid);
                 if (byId.isPresent()) return byId;
             } catch (IllegalArgumentException ignored) {}
         }
         if (nodeCode != null && deviceIdStr != null) {
-            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndLocal = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndLocal = devices.findByNodeCodeAndLocalIdWithRoomAndHome(nodeCode, deviceIdStr);
             if (byNodeAndLocal.isPresent()) return byNodeAndLocal;
 
-            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndName = devices.findByNodeCodeAndName(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndName = devices.findByNodeCodeAndNameWithRoomAndHome(nodeCode, deviceIdStr);
             if (byNodeAndName.isPresent()) return byNodeAndName;
         }
         if (topic != null && !topic.isBlank()) {
-            return devices.findByMqttTopic(topic);
+            return devices.findByMqttTopicWithRoomAndHome(topic);
         }
         return java.util.Optional.empty();
     }
