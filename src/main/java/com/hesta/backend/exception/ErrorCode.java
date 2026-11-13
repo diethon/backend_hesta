@@ -47,6 +47,7 @@ public enum ErrorCode {
     AUTOMATION_ACTION_INVALID(1206, "Automation action is invalid", HttpStatus.BAD_REQUEST),
     AUTOMATION_DEVICE_HOME_MISMATCH(1207, "Automation device must belong to the rule home", HttpStatus.BAD_REQUEST),
     AUTOMATION_EVENT_INVALID(1208, "Automation event is invalid", HttpStatus.BAD_REQUEST),
+    AUTOMATION_SCHEDULE_REQUIRED(1209, "Quy tắc hẹn giờ cần ít nhất một giờ chạy đang bật", HttpStatus.BAD_REQUEST),
     BEHAVIOR_DATASET_INVALID(1300, "Behavior dataset request is invalid", HttpStatus.BAD_REQUEST),
     BEHAVIOR_DEVICE_REQUIRED(1301, "At least one device is required to generate behavior data", HttpStatus.BAD_REQUEST),
     RECOMMENDATION_NOT_FOUND(1302, "Recommendation not found", HttpStatus.NOT_FOUND),

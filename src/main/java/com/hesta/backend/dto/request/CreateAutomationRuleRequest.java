@@ -34,4 +34,8 @@ public class CreateAutomationRuleRequest {
     @NotEmpty(message = "AUTOMATION_ACTION_INVALID")
     @Builder.Default
     List<RuleActionRequest> actions = new ArrayList<>();
+
+    /** All times of a SCHEDULE rule, saved with it (null on update keeps the stored ones). At least one must be active. */
+    @Valid
+    List<ScheduleRequest> schedules;
 }
