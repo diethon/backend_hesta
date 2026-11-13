@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -31,13 +32,16 @@ public class AnomalyNotificationListener {
 
     @Async("anomalyNotificationExecutor")
     @EventListener
+    @Transactional
     public void onAnomalyRaised(AnomalyRaisedEvent event) {
         if (event == null || event.homeId() == null || event.deviceId() == null) {
             return;
         }
 
         try {
-            Device device = deviceRepository.findById(event.deviceId()).orElse(null);
+            Device device = deviceRepository.findByIdWithNode(event.deviceId())
+                    .or(() -> deviceRepository.findById(event.deviceId()))
+                    .orElse(null);
             List<HomeMember> members = homeMemberRepository.findByHomeIdWithUser(event.homeId());
             if (members == null || members.isEmpty()) {
                 log.info("No members found for home {}. Anomaly notification skipped.", event.homeId());

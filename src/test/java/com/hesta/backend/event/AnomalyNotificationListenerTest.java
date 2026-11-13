@@ -264,4 +264,46 @@ class AnomalyNotificationListenerTest {
         assertThat(notif.message()).contains("Khu vực trong nhà");
         assertThat(notif.priority()).isEqualTo(NotificationPriority.MEDIUM);
     }
+
+    @Test
+    @DisplayName("Regression: Eager device loading with room prevents LazyInitializationException and generates notification")
+    void onAnomalyRaised_DeviceWithEagerRoom_NotificationCreatedSuccessfully() {
+        Room mockRoom = mock(Room.class);
+        when(mockRoom.getName()).thenReturn("Phòng khách");
+
+        Device deviceWithRoom = Device.builder()
+                .id(deviceId)
+                .name("Cảm biến nhiệt độ")
+                .deviceType("TEMP_SENSOR")
+                .room(mockRoom)
+                .isDeleted(false)
+                .build();
+
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(deviceWithRoom));
+        when(homeMemberRepository.findByHomeIdWithUser(homeId)).thenReturn(List.of(ownerMember));
+
+        AnomalyRaisedEvent event = new AnomalyRaisedEvent(
+                anomalyId,
+                homeId,
+                deviceId,
+                "Cảm biến nhiệt độ",
+                AnomalyType.HIGH_TEMPERATURE,
+                SeverityLevel.HIGH,
+                "temperature",
+                "55.0 °C",
+                "<= 50.0 °C",
+                false,
+                OffsetDateTime.now()
+        );
+
+        listener.onAnomalyRaised(event);
+
+        ArgumentCaptor<NotificationEvent> captor = ArgumentCaptor.forClass(NotificationEvent.class);
+        verify(notificationService, times(1)).create(captor.capture());
+
+        NotificationEvent notif = captor.getValue();
+        assertThat(notif.userId()).isEqualTo(ownerUser.getId());
+        assertThat(notif.message()).contains("Phòng khách");
+        assertThat(notif.message()).contains("Cảm biến nhiệt độ");
+    }
 }
