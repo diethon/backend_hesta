@@ -3,6 +3,7 @@ package com.hesta.backend.service.impl;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.request.AirConditionerCommandRequest;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.enums.AccessLevel;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
@@ -43,9 +44,10 @@ public class AirConditionerServiceImpl implements AirConditionerService {
 
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID userId, UUID deviceId, AirConditionerCommandRequest request) {
-        Device device = authorizeDevice(userId, deviceId);
+        String rawAction = request != null && request.getAction() != null ? request.getAction().trim().toUpperCase() : "";
+        AccessLevel requiredLevel = "GET_STATE".equalsIgnoreCase(rawAction) ? AccessLevel.VIEW : AccessLevel.CONTROL;
+        Device device = authorizeDevice(userId, deviceId, requiredLevel);
         validateRequest(request);
-
         String action = normalizeAction(request.getAction(), request);
         Map<String, Object> parameters = request.toParameters();
 
@@ -130,12 +132,15 @@ public class AirConditionerServiceImpl implements AirConditionerService {
                 .build());
     }
 
-    private Device authorizeDevice(UUID userId, UUID deviceId) {
+    private Device authorizeDevice(UUID userId, UUID deviceId, AccessLevel minLevel) {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
         if (userId != null && device.getHome() != null) {
             homeAuthorizationService.requireAccess(userId, device.getHome().getId());
+            if (minLevel != null) {
+                homeAuthorizationService.requireDeviceAccess(userId, deviceId, minLevel);
+            }
         }
         return device;
     }

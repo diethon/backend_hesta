@@ -10,14 +10,17 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface AutomationRecommendationRepository extends JpaRepository<AutomationRecommendation, UUID> {
-    @EntityGraph(attributePaths = {"device"})
+    @EntityGraph(attributePaths = {"device", "device.room"})
     List<AutomationRecommendation> findAllByHomeIdOrderByCreatedAtDesc(UUID homeId);
 
-    @EntityGraph(attributePaths = {"device"})
+    @EntityGraph(attributePaths = {"device", "device.room"})
     Optional<AutomationRecommendation> findByIdAndHomeId(UUID id, UUID homeId);
 
     boolean existsByHomeIdAndDeviceIdAndStatus(UUID homeId, UUID deviceId, String status);
 
-    @EntityGraph(attributePaths = {"device"})
+    @EntityGraph(attributePaths = {"device", "device.room"})
     List<AutomationRecommendation> findAllByHomeIdAndDeviceIdAndCreatedAtAfter(UUID homeId, UUID deviceId, OffsetDateTime after);
+
+    @EntityGraph(attributePaths = {"device", "device.room"})
+    Optional<AutomationRecommendation> findFirstByHomeIdAndStatusOrderByConfidenceScoreDescCreatedAtDesc(UUID homeId, String status);
 }

@@ -11,6 +11,9 @@ import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.service.EnergyAnalyticsService;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessLevel;
+import com.hesta.backend.enums.AccessScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -85,6 +88,8 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     public EnergyAnalyticsResponse getHomeEnergyAnalytics(UUID userId, UUID homeId, String period) {
         homeAuthorizationService.requireAccess(userId, homeId);
 
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+
         String normPeriod = period == null ? "30D" : period.trim().toUpperCase();
         String cacheKey = (homeId != null ? homeId.toString() : "null") + ":" + normPeriod;
 
@@ -96,7 +101,16 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = resolveStartTime(now, normPeriod);
 
-        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
+        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId).stream()
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .toList();
         if (devices.isEmpty()) {
             EnergyAnalyticsResponse emptyResponse = EnergyAnalyticsResponse.builder()
                     .summary(EnergySummaryResponse.builder().period(normPeriod).build())
@@ -200,13 +214,15 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     @Transactional(readOnly = true)
     public DeviceEnergyBreakdown getDeviceEnergy(UUID userId, UUID deviceId, String period) {
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-
-        if (device.getHome() != null) {
-            homeAuthorizationService.requireAccess(userId, device.getHome().getId());
-        } else {
-            throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
+        UUID homeId = (device.getRoom() != null && device.getRoom().getHome() != null)
+                ? device.getRoom().getHome().getId()
+                : (device.getNode() != null && device.getNode().getHome() != null ? device.getNode().getHome().getId() : null);
+        if (homeId != null) {
+            homeAuthorizationService.requireAccess(userId, homeId);
         }
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
         String normPeriod = period == null ? "30D" : period.trim().toUpperCase();
         String cacheKey = (deviceId != null ? deviceId.toString() : "null") + ":" + normPeriod;
