@@ -31,4 +31,8 @@ public interface AutomationRuleRepository extends JpaRepository<AutomationRule, 
 
     @Query("select count(action) > 0 from RuleAction action where action.scene.id = :sceneId")
     boolean existsActionForScene(@Param("sceneId") UUID sceneId);
+
+    @Query("select distinct rule from AutomationRule rule left join rule.actions action left join rule.conditions condition "
+            + "where action.device.id = :deviceId or condition.device.id = :deviceId")
+    List<AutomationRule> findAllReferencingDevice(@Param("deviceId") UUID deviceId);
 }

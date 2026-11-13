@@ -100,7 +100,8 @@ public class AutomationRuleController {
     public ResponseEntity<ApiResponse<AutomationEngineResponse>> processEvent(
             @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
             @Valid @RequestBody AutomationEventRequest request) {
-        homeAuthorizationService.requireAccess(user.getId(), homeId);
+        // Injected events can carry emergency flags that bypass manual override and cooldown.
+        homeAuthorizationService.requireSceneManagement(user.getId(), homeId);
         return ok("Đã xử lý sự kiện tự động hóa", automationEngine.process(homeId, request));
     }
 
