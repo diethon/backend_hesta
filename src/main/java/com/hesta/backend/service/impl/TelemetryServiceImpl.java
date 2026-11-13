@@ -159,7 +159,7 @@ public class TelemetryServiceImpl implements TelemetryService {
                 );
             }
         } catch (Exception ex) {
-            log.error("Error in anomaly evaluation after commit for reading {}: {}", event.readingId(), ex.getMessage(), ex);
+            log.error("Error in anomaly evaluation after commit for device {} (readingId: {}, metric: {}): {}", event.deviceId(), event.readingId(), event.metricType(), ex.getMessage(), ex);
         }
     }
 

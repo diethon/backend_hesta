@@ -101,7 +101,7 @@ public class AnomalyNotificationListener {
             }
 
         } catch (Exception ex) {
-            log.error("Failed to process AnomalyRaisedEvent for anomaly {}: {}", event.anomalyId(), ex.getMessage(), ex);
+            log.error("Failed to process AnomalyRaisedEvent for anomaly {} (device: {}, type: {}): {}", event.anomalyId(), event.deviceId(), event.anomalyType(), ex.getMessage(), ex);
         }
     }
 

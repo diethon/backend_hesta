@@ -133,7 +133,7 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
             }
 
         } catch (Exception ex) {
-            log.error("Unhandled error evaluating anomaly for device {} metric {}: {}", device.getId(), metric, ex.getMessage(), ex);
+            log.error("Unhandled error evaluating anomaly for device {} metric {} (readingId: {}): {}", device.getId(), metric, readingId, ex.getMessage(), ex);
         }
     }
 
