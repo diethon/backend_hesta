@@ -287,6 +287,9 @@ public class MqttMessageReceiver {
         try {
             Map<String, Object> map = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
             if (map == null || map.isEmpty()) return;
+            // Actuators (e.g. AC) report a "temperature" setpoint, not a measured value.
+            Object deviceType = map.get("deviceType");
+            if (deviceType != null && !deviceType.toString().toUpperCase().contains("SENSOR")) return;
 
             String nodeCode = extractNodeCodeFromTopic(topic);
             String deviceIdStr = map.containsKey("deviceId") && map.get("deviceId") != null

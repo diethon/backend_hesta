@@ -12,9 +12,11 @@ import com.hesta.backend.service.MemberAccessContext;
 import com.hesta.backend.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -31,8 +33,9 @@ public class AnomalyNotificationListener {
     private final DeviceRepository deviceRepository;
 
     @Async("anomalyNotificationExecutor")
-    @EventListener
-    @Transactional
+    // After commit: notifications.source_anomaly_id has an FK to device_anomalies.
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onAnomalyRaised(AnomalyRaisedEvent event) {
         if (event == null || event.homeId() == null || event.deviceId() == null) {
             return;

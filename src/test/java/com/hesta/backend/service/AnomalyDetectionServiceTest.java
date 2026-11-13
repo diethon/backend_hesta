@@ -19,7 +19,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataIntegrityViolationException;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -29,6 +28,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -226,7 +226,7 @@ class AnomalyDetectionServiceTest {
     }
 
     @Test
-    @DisplayName("Input validation: null, out-of-bounds, or deleted devices are safely ignored")
+    @DisplayName("Input validation: null, below-min, or deleted devices are safely ignored")
     void evaluateReading_ValidationFailures_SafelyHandled() {
         OffsetDateTime now = OffsetDateTime.now();
 
@@ -237,9 +237,6 @@ class AnomalyDetectionServiceTest {
         Device deleted = Device.builder().id(UUID.randomUUID()).isDeleted(true).build();
         service.evaluateReading(deleted, "gas_ppm", BigDecimal.valueOf(500), now, 2L);
 
-        // Out of valid range (validMax is 10000)
-        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(99999), now, 3L);
-
         // Negative reading below validMin 0
         service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(-5), now, 4L);
 
@@ -248,20 +245,33 @@ class AnomalyDetectionServiceTest {
     }
 
     @Test
-    @DisplayName("Concurrent insert race condition catching DataIntegrityViolationException safely")
-    void evaluateReading_ConcurrentCreation_HandlesDataIntegrityViolation() {
-        OffsetDateTime now = OffsetDateTime.now();
+    @DisplayName("Saturated reading above validMax is clamped and raises CRITICAL instead of being dropped")
+    void evaluateReading_AboveValidMax_RaisesCritical() {
         when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
                 .thenReturn(Optional.empty());
-        when(anomalyRepository.save(any(DeviceAnomaly.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate key value violates unique constraint"));
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        // Critical streak is 1 for gas_ppm >= 1000
-        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(1500.0), now, 401L);
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(99999), OffsetDateTime.now(), 3L);
 
-        // Method finishes without throwing unhandled exception
-        verify(anomalyRepository, times(1)).save(any());
-        verify(eventPublisher, never()).publishEvent(any(AnomalyRaisedEvent.class));
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+        assertThat(captor.getValue().getCurrentValue()).isEqualTo("10000.0 ppm");
+        verify(eventPublisher).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Manual resolution cooldown never suppresses a CRITICAL reading")
+    void evaluateReading_ManualResolution_DoesNotSuppressCritical() {
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service.recordManualResolution(deviceId, AnomalyType.GAS_LEAKAGE);
+
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(2000.0), OffsetDateTime.now(), 302L);
+
+        verify(anomalyRepository).save(argThat(a -> a.getSeverity() == SeverityLevel.CRITICAL));
+        verify(eventPublisher).publishEvent(any(AnomalyRaisedEvent.class));
     }
 
     @Test

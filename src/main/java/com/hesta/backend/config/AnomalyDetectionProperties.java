@@ -54,7 +54,6 @@ public class AnomalyDetectionProperties {
         gas.setConfirmReadingsCritical(1);
         gas.setClearMargin(0.10);
         gas.setClearReadings(3);
-        gas.setNotificationCooldown(Duration.ofMinutes(5));
         gas.setManualResolveSuppress(Duration.ofMinutes(10));
         metrics.put("gas_ppm", gas);
 
@@ -70,7 +69,6 @@ public class AnomalyDetectionProperties {
         smoke.setConfirmReadingsCritical(1);
         smoke.setClearMargin(0.10);
         smoke.setClearReadings(3);
-        smoke.setNotificationCooldown(Duration.ofMinutes(5));
         smoke.setManualResolveSuppress(Duration.ofMinutes(10));
         metrics.put("smoke", smoke);
 
@@ -86,7 +84,6 @@ public class AnomalyDetectionProperties {
         temp.setConfirmReadingsCritical(1);
         temp.setClearMargin(0.10);
         temp.setClearReadings(3);
-        temp.setNotificationCooldown(Duration.ofMinutes(5));
         temp.setManualResolveSuppress(Duration.ofMinutes(10));
         metrics.put("temperature", temp);
     }
@@ -112,7 +109,6 @@ public class AnomalyDetectionProperties {
         private int confirmReadingsCritical = 1;
         private double clearMargin = 0.10; // 10% below warn
         private int clearReadings = 3;
-        private Duration notificationCooldown = Duration.ofMinutes(5);
         private Duration manualResolveSuppress = Duration.ofMinutes(10);
     }
 }

@@ -78,6 +78,8 @@ class MqttMessageReceiverTest {
 
         verify(deviceService).updateDeviceStateFromMqtt(eq(nodeId.toString()), eq(deviceId.toString()), argThat(map ->
                 Boolean.TRUE.equals(map.get("power")) && Integer.valueOf(26).equals(map.get("temperature")) && "COOL".equals(map.get("mode"))));
+        // AC "temperature" is a setpoint, not a safety reading
+        verify(telemetryService, never()).processTelemetry(anyString(), any());
     }
 
     @Test

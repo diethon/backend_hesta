@@ -49,9 +49,12 @@ public interface DeviceAnomalyRepository extends JpaRepository<DeviceAnomaly, UU
 
     Optional<DeviceAnomaly> findByIdAndHomeId(UUID id, UUID homeId);
 
+    boolean existsByDeviceIdAndAnomalyTypeAndResolvedAtAfter(UUID deviceId, AnomalyType anomalyType, java.time.OffsetDateTime resolvedAt);
+
     @Query(value = """
         SELECT a FROM DeviceAnomaly a
         JOIN FETCH a.device d
+        LEFT JOIN FETCH d.room
         WHERE a.home.id = :homeId
           AND (:status IS NULL OR a.status = :status)
           AND (:severity IS NULL OR a.severity = :severity)
@@ -75,6 +78,7 @@ public interface DeviceAnomalyRepository extends JpaRepository<DeviceAnomaly, UU
     @Query(value = """
         SELECT a FROM DeviceAnomaly a
         JOIN FETCH a.device d
+        LEFT JOIN FETCH d.room
         WHERE a.home.id = :homeId
           AND a.device.id IN :deviceIds
           AND (:status IS NULL OR a.status = :status)

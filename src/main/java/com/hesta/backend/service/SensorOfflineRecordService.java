@@ -48,6 +48,12 @@ public class SensorOfflineRecordService {
             return;
         }
 
+        // Resolved after the last heartbeat: the user already handled this outage, wait until it reconnects.
+        if (deviceAnomalyRepository.existsByDeviceIdAndAnomalyTypeAndResolvedAtAfter(
+                device.getId(), AnomalyType.SENSOR_OFFLINE, device.getLastSeen())) {
+            return;
+        }
+
         OffsetDateTime now = OffsetDateTime.now();
         long minutesOffline = Duration.between(device.getLastSeen(), now).toMinutes();
 

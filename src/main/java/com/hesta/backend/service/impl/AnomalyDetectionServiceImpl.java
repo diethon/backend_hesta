@@ -15,7 +15,6 @@ import com.hesta.backend.service.AnomalyDetectionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,7 +46,6 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
     private static class TrackerState {
         int consecutiveViolations = 0;
         int consecutiveClears = 0;
-        OffsetDateTime lastNotificationAt = null;
         OffsetDateTime manualResolvedAt = null;
     }
 
@@ -101,18 +99,22 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
                 log.warn("Reading {} out of valid min range [{}..{}] for device {}", numValue, config.getValidMin(), config.getValidMax(), device.getId());
                 return;
             }
+            // Fail-safe: a saturated sensor (above validMax) is treated as max reading, never dropped.
             if (config.getValidMax() != null && numValue > config.getValidMax()) {
-                log.warn("Reading {} out of valid max range [{}..{}] for device {}", numValue, config.getValidMin(), config.getValidMax(), device.getId());
-                return;
+                log.warn("Reading {} above valid max {} for device {}; clamping to max", numValue, config.getValidMax(), device.getId());
+                numValue = config.getValidMax();
             }
 
             OffsetDateTime now = timestamp != null ? timestamp : OffsetDateTime.now();
             String key = trackerKey(device.getId(), anomalyType);
             TrackerState tracker = trackers.computeIfAbsent(key, k -> new TrackerState());
 
+            boolean isCritical = config.getCritical() != null && numValue >= config.getCritical();
+            boolean isWarn = config.getWarn() != null && numValue >= config.getWarn();
+
             synchronized (tracker) {
-                // 1. Check manual resolution suppression window
-                if (tracker.manualResolvedAt != null) {
+                // 1. Manual resolution suppresses re-alerts, but never a CRITICAL reading
+                if (tracker.manualResolvedAt != null && !isCritical) {
                     if (now.isBefore(tracker.manualResolvedAt.plus(config.getManualResolveSuppress()))) {
                         log.debug("Anomaly creation suppressed by manual resolution cooldown for device {} type {}", device.getId(), anomalyType);
                         return;
@@ -120,10 +122,6 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
                         tracker.manualResolvedAt = null; // window expired
                     }
                 }
-
-                // 2. Evaluate violation levels
-                boolean isCritical = config.getCritical() != null && numValue >= config.getCritical();
-                boolean isWarn = config.getWarn() != null && numValue >= config.getWarn();
 
                 if (isCritical || isWarn) {
                     handleViolation(device, anomalyType, metric, numValue, config, tracker, isCritical, now, readingId);
@@ -183,14 +181,13 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
             anomalyRepository.save(active);
 
             if (shouldAlert) {
-                tracker.lastNotificationAt = now;
                 publishAlertEvent(active, device, isEscalation);
             }
 
         } else {
             // New anomaly: check streak requirement
             if (tracker.consecutiveViolations >= requiredReadings) {
-                createAnomaly(device, anomalyType, metric, numValue, candidateSeverity, config, tracker, now, readingId);
+                createAnomaly(device, anomalyType, metric, numValue, candidateSeverity, config, now, readingId);
             } else {
                 log.info("Violation observed for device {} type {} ({}/{} required confirmations)",
                         device.getId(), anomalyType, tracker.consecutiveViolations, requiredReadings);
@@ -205,7 +202,6 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
             double numValue,
             SeverityLevel severity,
             AnomalyDetectionProperties.MetricThresholdConfig config,
-            TrackerState tracker,
             OffsetDateTime now,
             Long readingId
     ) {
@@ -237,28 +233,11 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
                 .occurrenceCount(1)
                 .build();
 
-        try {
-            DeviceAnomaly saved = anomalyRepository.save(newAnomaly);
-            tracker.lastNotificationAt = now;
-            publishAlertEvent(saved, device, false);
-            log.warn("Raised new {} anomaly [{}] for device {} at {}{}",
-                    severity, anomalyType, device.getName(), numValue, config.getUnit());
-
-        } catch (DataIntegrityViolationException ex) {
-            // Anti-race protection: another thread committed active anomaly concurrently
-            log.warn("Race condition on active anomaly insertion for device {} type {}. Updating existing anomaly.", device.getId(), anomalyType);
-            Optional<DeviceAnomaly> concurrent = anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(
-                    device.getId(),
-                    anomalyType,
-                    List.of(AnomalyStatus.OPEN, AnomalyStatus.ACKNOWLEDGED)
-            );
-            concurrent.ifPresent(active -> {
-                active.setLastSeenAt(now);
-                active.setOccurrenceCount(active.getOccurrenceCount() + 1);
-                active.setCurrentValue(formatValue(numValue, config.getUnit()));
-                anomalyRepository.save(active);
-            });
-        }
+        // Duplicate active anomalies are blocked by idx_device_anomalies_active_unique at commit.
+        DeviceAnomaly saved = anomalyRepository.save(newAnomaly);
+        publishAlertEvent(saved, device, false);
+        log.warn("Raised new {} anomaly [{}] for device {} at {}{}",
+                severity, anomalyType, device.getName(), numValue, config.getUnit());
     }
 
     private void handleSafeReading(
