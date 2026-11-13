@@ -159,4 +159,20 @@ class MqttMessageReceiverTest {
         verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
                 "temperature".equals(p.getMetricType()) && new java.math.BigDecimal("29.5").equals(p.getValue())));
     }
+
+    @Test
+    void flatMapTelemetryWithTempKeyNormalizesMetricTypeToTemperature() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        String payload = "{\"nodeId\":\"" + nodeId + "\",\"deviceId\":\"" + deviceId + "\",\"temp\":55.0}";
+
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/telemetry")
+                .build());
+
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "temperature".equals(p.getMetricType())
+                        && new java.math.BigDecimal("55.0").equals(p.getValue())
+                        && "°C".equals(p.getUnit())));
+    }
 }

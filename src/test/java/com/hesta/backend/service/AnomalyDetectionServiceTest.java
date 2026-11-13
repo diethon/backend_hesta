@@ -347,4 +347,25 @@ class AnomalyDetectionServiceTest {
         verify(anomalyRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
     }
+
+    @Test
+    void evaluateReading_WhenMetricIsTempAlias_RecognizesHighTemperature() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.HIGH_TEMPERATURE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // 2 consecutive readings with "temp" >= 50 warn limit
+        service.evaluateReading(device, "temp", BigDecimal.valueOf(55.0), now, 701L);
+        service.evaluateReading(device, "temp", BigDecimal.valueOf(56.0), now.plusSeconds(5), 702L);
+
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getAnomalyType()).isEqualTo(AnomalyType.HIGH_TEMPERATURE);
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.HIGH);
+    }
 }

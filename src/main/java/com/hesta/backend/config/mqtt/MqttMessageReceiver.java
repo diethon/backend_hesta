@@ -310,7 +310,8 @@ public class MqttMessageReceiver {
         Object valObj = map.get(metricKey);
         try {
             java.math.BigDecimal val = new java.math.BigDecimal(valObj.toString().trim());
-            TelemetryPayload singlePayload = new TelemetryPayload(nodeCode, deviceIdStr, metricKey, val, unit);
+            String normalizedMetric = "temp".equalsIgnoreCase(metricKey) ? "temperature" : metricKey;
+            TelemetryPayload singlePayload = new TelemetryPayload(nodeCode, deviceIdStr, normalizedMetric, val, unit);
             telemetryService.processTelemetry(topic, singlePayload);
         } catch (Exception ex) {
             log.warn("Could not parse safety metric [{}] value [{}] from flat map: {}", metricKey, valObj, ex.getMessage());
