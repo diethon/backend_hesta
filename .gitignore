@@ -18,6 +18,7 @@ target/
 *.iws
 *.iml
 *.ipr
+/mosquitto/data/mosquitto.db
 
 ### NetBeans ###
 /nbproject/private/
@@ -47,3 +48,31 @@ logs/
 !src/test/resources/.env.properties
 
 /agents
+.tmp/
+
+mosquitto.db
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.pytest_cache/
+.cache/
+client_secret_*.json
+token.json
+.aider*
+hesta-backend-*
+
+### Temporary scripts, diagrams, test reports & weights ###
+diagram*.xml
+*.pt
+*.xlsx
+/scripts/
+/ai_hesta/
+fix_json.py
+fix_sensors.sql
+

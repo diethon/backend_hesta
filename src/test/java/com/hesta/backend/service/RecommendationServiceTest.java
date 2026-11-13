@@ -1,10 +1,10 @@
 package com.hesta.backend.service;
 
 import com.hesta.backend.dto.request.CreateAutomationRuleRequest;
-import com.hesta.backend.dto.request.ScheduleRequest;
 import com.hesta.backend.dto.response.AutomationRuleResponse;
-import com.hesta.backend.dto.response.BehaviorPatternResponse;
-import com.hesta.backend.dto.response.BehaviorPredictionResponse;
+import com.hesta.backend.dto.response.MlModelStatusResponse;
+import com.hesta.backend.dto.response.MlRecommendationProposal;
+import com.hesta.backend.dto.response.RecommendationResponse;
 import com.hesta.backend.entity.AutomationRecommendation;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
@@ -13,14 +13,17 @@ import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.repository.AutomationRecommendationRepository;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.HomeRepository;
 import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.impl.RecommendationServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalTime;
@@ -37,12 +40,15 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class RecommendationServiceTest {
     @Mock HomeAuthorizationService authorization;
-    @Mock BehaviorService behavior;
+    @Mock MlServiceClient mlServiceClient;
+    @Mock BehaviorEventRecorder behaviorEventRecorder;
     @Mock AutomationRecommendationRepository recommendations;
     @Mock DeviceRepository devices;
     @Mock UserRepository users;
+    @Mock HomeRepository homeRepository;
     @Mock AutomationRuleService rules;
-    @Mock ScheduleService schedules;
+    @Mock com.hesta.backend.repository.AutomationRuleRepository ruleRepository;
+    @Mock com.hesta.backend.repository.AutomationScheduleRepository ruleSchedules;
     @InjectMocks RecommendationServiceImpl service;
 
     private final UUID userId = UUID.randomUUID();
@@ -50,95 +56,280 @@ class RecommendationServiceTest {
     private final UUID deviceId = UUID.randomUUID();
     private final UUID recommendationId = UUID.randomUUID();
     private final Home home = Home.builder().id(homeId).build();
+    private final Room room = Room.builder().id(UUID.randomUUID()).home(home).name("Living room").build();
     private final Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-            .room(Room.builder().home(home).build()).name("Living room light").build();
+            .room(room).name("Living room light")
+            .capabilities(Map.of("power", List.of("TURN_ON", "TURN_OFF")))
+            .build();
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(service, "confidenceThreshold", 0.80);
+        ReflectionTestUtils.setField(service, "cooldownHours", 24);
+    }
 
     @Test
-    void generatesOnlyReliableSupportedPatterns() {
-        when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
+    void generatesForSystemWithoutRequiringUserSession() {
+        when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
         when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+
         OffsetDateTime to = OffsetDateTime.now();
-        OffsetDateTime from = to.minusDays(7);
-        when(behavior.detectPatterns(userId, homeId, from, to)).thenReturn(List.of(
-                BehaviorPatternResponse.builder().deviceId(deviceId).patternType("MORNING").action("TURN_ON")
-                        .averageTime(LocalTime.of(7, 15)).occurrences(6).confidence(0.85).build(),
-                BehaviorPatternResponse.builder().deviceId(deviceId).patternType("BEDTIME").action("TURN_OFF")
-                        .averageTime(LocalTime.of(21, 0)).occurrences(1).confidence(0.2).build()));
+        OffsetDateTime from = to.minusDays(14);
+
+        when(mlServiceClient.generateRecommendations(eq(homeId), eq(from), eq(to), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("TURN_ON")
+                        .time("06:30:00")
+                        .confidence(0.91)
+                        .eligible(true)
+                        .reason("Background habit detection")
+                        .engineType("ML")
+                        .modelVersion("rf-v1.0.0")
+                        .build()
+        ));
+
         when(recommendations.save(any())).thenAnswer(invocation -> {
             AutomationRecommendation item = invocation.getArgument(0);
             item.setId(recommendationId);
             return item;
         });
 
-        var result = service.generate(userId, homeId, from, to);
+        List<RecommendationResponse> result = service.generateForSystem(homeId, from, to);
 
         assertThat(result).hasSize(1);
-        assertThat(result.getFirst().getStatus()).isEqualTo("PENDING");
-        assertThat(result.getFirst().getTriggerCondition().get("time")).isEqualTo("07:15");
-        verify(recommendations, times(1)).save(any());
-        verifyNoInteractions(rules, schedules);
+        assertThat(result.get(0).getConfidence()).isEqualTo(0.91);
+        assertThat(result.get(0).getRoomName()).isEqualTo("Living room");
+        verify(recommendations).save(any(AutomationRecommendation.class));
     }
 
     @Test
-    void predictionProducesPendingRecommendationWithoutExecutingRule() {
-        when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
+    void skipsProposalsBelowConfidenceThreshold() {
+        when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
         when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+
         OffsetDateTime to = OffsetDateTime.now();
-        OffsetDateTime from = to.minusDays(7);
-        when(behavior.predict(eq(userId), eq(homeId), eq(from), eq(to), any())).thenReturn(List.of(
-                BehaviorPredictionResponse.builder().deviceId(deviceId).action("TURN_ON")
-                        .predictedTime(LocalTime.of(7, 15)).confidence(0.85).reason("Repeated").build()));
-        when(recommendations.save(any())).thenAnswer(invocation -> {
-            AutomationRecommendation item = invocation.getArgument(0);
-            item.setId(recommendationId);
-            return item;
-        });
+        OffsetDateTime from = to.minusDays(14);
 
-        var result = service.generate(userId, homeId, from, to);
+        when(mlServiceClient.generateRecommendations(eq(homeId), eq(from), eq(to), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("TURN_ON")
+                        .time("06:30:00")
+                        .confidence(0.72) // Below threshold (0.80)
+                        .eligible(false)
+                        .reason("Uncertain habit")
+                        .engineType("ML")
+                        .modelVersion("rf-v1.0.0")
+                        .build()
+        ));
 
-        assertThat(result).hasSize(1);
-        assertThat(result.getFirst().getTriggerCondition().get("patternType")).isEqualTo("PREDICTION");
-        verifyNoInteractions(rules, schedules);
+        List<RecommendationResponse> result = service.generateForSystem(homeId, from, to);
+
+        assertThat(result).isEmpty();
+        verify(recommendations, never()).save(any());
     }
 
     @Test
-    void approvalCreatesOneEnabledScheduledRule() {
-        AutomationRecommendation item = pending();
-        UUID ruleId = UUID.randomUUID();
-        when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(item));
+    void skipsDuplicatePendingRecommendationForSameDeviceAndAction() {
+        when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
+        when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of(pending()));
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+
+        OffsetDateTime to = OffsetDateTime.now();
+        OffsetDateTime from = to.minusDays(14);
+
+        when(mlServiceClient.generateRecommendations(eq(homeId), eq(from), eq(to), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("TURN_ON")
+                        .time("07:15:00")
+                        .confidence(0.92)
+                        .eligible(true)
+                        .reason("Duplicate attempt")
+                        .engineType("ML")
+                        .modelVersion("rf-v1.0.0")
+                        .build()
+        ));
+
+        List<RecommendationResponse> result = service.generateForSystem(homeId, from, to);
+
+        assertThat(result).isEmpty();
+        verify(recommendations, never()).save(any());
+    }
+
+    @Test
+    void skipsProposalsForUnsupportedDeviceActions() {
+        when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
+        when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());
+
+        // Device only has TURN_ON, TURN_OFF capabilities; propose unsupported GATE_OPEN
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+
+        OffsetDateTime to = OffsetDateTime.now();
+        OffsetDateTime from = to.minusDays(14);
+
+        when(mlServiceClient.generateRecommendations(eq(homeId), eq(from), eq(to), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder()
+                        .deviceId(deviceId)
+                        .deviceName(device.getName())
+                        .action("GATE_OPEN") // Invalid action for light
+                        .time("07:15:00")
+                        .confidence(0.95)
+                        .eligible(true)
+                        .engineType("ML")
+                        .modelVersion("rf-v1.0.0")
+                        .build()
+        ));
+
+        List<RecommendationResponse> result = service.generateForSystem(homeId, from, to);
+
+        assertThat(result).isEmpty();
+        verify(recommendations, never()).save(any());
+    }
+
+    @Test
+    void getTopRecommendationReturnsHighestConfidencePending() {
+        when(recommendations.findFirstByHomeIdAndStatusOrderByConfidenceScoreDescCreatedAtDesc(homeId, "PENDING"))
+                .thenReturn(Optional.of(pending()));
+
+        RecommendationResponse top = service.getTopRecommendation(userId, homeId);
+
+        assertThat(top).isNotNull();
+        assertThat(top.getId()).isEqualTo(recommendationId);
+        assertThat(top.getConfidence()).isEqualTo(0.88);
+        assertThat(top.getRoomName()).isEqualTo("Living room");
+        verify(authorization).requireAccess(userId, homeId);
+    }
+
+    @Test
+    void getTopRecommendationReturnsNullWhenNonePending() {
+        when(recommendations.findFirstByHomeIdAndStatusOrderByConfidenceScoreDescCreatedAtDesc(homeId, "PENDING"))
+                .thenReturn(Optional.empty());
+
+        RecommendationResponse top = service.getTopRecommendation(userId, homeId);
+
+        assertThat(top).isNull();
+        verify(authorization).requireAccess(userId, homeId);
+    }
+
+    @Test
+    void getTopRecommendationReturnsNullWhenBelowThreshold() {
+        AutomationRecommendation lowConfPending = pending();
+        lowConfPending.setConfidenceScore(BigDecimal.valueOf(0.75));
+
+        when(recommendations.findFirstByHomeIdAndStatusOrderByConfidenceScoreDescCreatedAtDesc(homeId, "PENDING"))
+                .thenReturn(Optional.of(lowConfPending));
+
+        RecommendationResponse top = service.getTopRecommendation(userId, homeId);
+
+        assertThat(top).isNull();
+        verify(authorization).requireAccess(userId, homeId);
+    }
+
+    @Test
+    void approvalCreatesRuleAndScheduleAndRecordsFeedback() {
+        when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(pending()));
         when(users.findById(userId)).thenReturn(Optional.of(User.builder().id(userId).build()));
-        when(rules.create(eq(userId), eq(homeId), any())).thenReturn(AutomationRuleResponse.builder().id(ruleId).build());
+        when(rules.create(eq(userId), eq(homeId), any())).thenReturn(AutomationRuleResponse.builder().id(UUID.randomUUID()).build());
         when(recommendations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var result = service.approve(userId, homeId, recommendationId);
 
-        assertThat(result.getStatus()).isEqualTo("APPROVED");
-        ArgumentCaptor<CreateAutomationRuleRequest> rule = ArgumentCaptor.forClass(CreateAutomationRuleRequest.class);
-        verify(rules).create(eq(userId), eq(homeId), rule.capture());
-        assertThat(rule.getValue().getTriggerType()).isEqualTo("SCHEDULE");
-        assertThat(rule.getValue().getActions().getFirst().getDeviceId()).isEqualTo(deviceId);
-        ArgumentCaptor<ScheduleRequest> schedule = ArgumentCaptor.forClass(ScheduleRequest.class);
-        verify(schedules).saveRuleSchedule(eq(userId), eq(homeId), eq(ruleId), isNull(), schedule.capture());
-        assertThat(schedule.getValue().getScheduledTime()).isEqualTo(LocalTime.of(7, 15));
+        assertThat(result.getStatus()).isEqualTo("ACCEPTED");
+        // The time travels with the rule so the rule is never saved without one.
+        ArgumentCaptor<CreateAutomationRuleRequest> ruleCaptor = ArgumentCaptor.forClass(CreateAutomationRuleRequest.class);
+        verify(rules).create(eq(userId), eq(homeId), ruleCaptor.capture());
+        assertThat(ruleCaptor.getValue().getSchedules()).singleElement()
+                .satisfies(schedule -> assertThat(schedule.getScheduledTime()).isEqualTo(LocalTime.of(7, 15)));
+
+        // Verify feedback recorded
+        verify(behaviorEventRecorder).recordRecommendationFeedback(
+                eq(home), eq(userId), eq(device), eq(recommendationId), eq("ACCEPTED"), eq("ML"), eq("rf-v1.0.0")
+        );
     }
 
     @Test
-    void rejectionNeverCreatesARule() {
+    void rejectionRecordsFeedbackAndNeverCreatesRule() {
         when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(pending()));
         when(users.findById(userId)).thenReturn(Optional.of(User.builder().id(userId).build()));
         when(recommendations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
         var result = service.reject(userId, homeId, recommendationId);
+
         assertThat(result.getStatus()).isEqualTo("REJECTED");
-        verifyNoInteractions(rules, schedules);
+        verifyNoInteractions(rules);
+        verify(behaviorEventRecorder).recordRecommendationFeedback(
+                eq(home), eq(userId), eq(device), eq(recommendationId), eq("REJECTED"), eq("ML"), eq("rf-v1.0.0")
+        );
+    }
+
+    @Test
+    void dismissRecordsFeedbackAndTransitionsStatus() {
+        when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(pending()));
+        when(users.findById(userId)).thenReturn(Optional.of(User.builder().id(userId).build()));
+        when(recommendations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.dismiss(userId, homeId, recommendationId);
+
+        assertThat(result.getStatus()).isEqualTo("DISMISSED");
+        verifyNoInteractions(rules);
+        verify(behaviorEventRecorder).recordRecommendationFeedback(
+                eq(home), eq(userId), eq(device), eq(recommendationId), eq("DISMISSED"), eq("ML"), eq("rf-v1.0.0")
+        );
+    }
+
+    @Test
+    void getModelStatusDelegatesToMlClient() {
+        when(mlServiceClient.getModelStatus(homeId)).thenReturn(MlModelStatusResponse.builder()
+                .status("READY")
+                .version("rf-v1.0.0")
+                .accuracy(0.85)
+                .confidenceThreshold(0.80)
+                .build());
+
+        var status = service.getModelStatus(userId, homeId);
+
+        assertThat(status.getStatus()).isEqualTo("READY");
+        assertThat(status.getVersion()).isEqualTo("rf-v1.0.0");
+        assertThat(status.getConfidenceThreshold()).isEqualTo(0.80);
+        verify(authorization).requireAccess(userId, homeId);
     }
 
     private AutomationRecommendation pending() {
-        return AutomationRecommendation.builder().id(recommendationId).home(home).device(device)
-                .status("PENDING").confidenceScore(BigDecimal.valueOf(0.8))
+        return AutomationRecommendation.builder()
+                .id(recommendationId)
+                .home(home)
+                .device(device)
+                .status("PENDING")
+                .engineType("ML")
+                .modelVersion("rf-v1.0.0")
+                .confidenceScore(BigDecimal.valueOf(0.88))
                 .triggerCondition(Map.of("type", "SCHEDULE", "time", "07:15", "repeatDays", List.of()))
                 .proposedAction(Map.of("deviceId", deviceId.toString(), "action", "TURN_ON", "parameters", Map.of()))
                 .build();
+    }
+
+    @Test
+    void weekdayRuleDoesNotCoverWeekendHabit() {
+        Short[] weekdays = {1, 2, 3, 4, 5};
+        assertThat(RecommendationServiceImpl.coversDays(weekdays, List.of(6, 7))).isFalse();
+        assertThat(RecommendationServiceImpl.coversDays(weekdays, List.of(1, 2))).isTrue();
+        assertThat(RecommendationServiceImpl.coversDays(new Short[0], List.of(6, 7))).isTrue();
+        assertThat(RecommendationServiceImpl.coversDays(weekdays, List.of())).isFalse();
+    }
+
+    @Test
+    void learnedSettingsAreDroppedForTurnOffAndPowerIsNeverCopied() {
+        AutomationRecommendation rec = new AutomationRecommendation();
+        rec.setProposedAction(Map.of("action", "TURN_ON",
+                "parameters", Map.of("power", "ON", "temperature", 24)));
+        assertThat(RecommendationServiceImpl.proposedParameters(rec, "TURN_ON")).isEqualTo(Map.of("temperature", 24));
+        assertThat(RecommendationServiceImpl.proposedParameters(rec, "TURN_OFF")).isEmpty();
     }
 }

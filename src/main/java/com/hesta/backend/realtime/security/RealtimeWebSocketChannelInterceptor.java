@@ -29,6 +29,8 @@ import java.util.UUID;
 public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
 
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String FALL_USER_DESTINATION =
+            "/user" + com.hesta.backend.falldetection.service.FallIncidentServiceImpl.USER_FALL_DESTINATION;
 
     private final JwtTokenProvider jwtTokenProvider;
     private final CustomUserDetailsService userDetailsService;
@@ -84,6 +86,10 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
 
     private void authorizeSubscription(StompHeaderAccessor accessor) {
         CustomUserDetails userDetails = authenticatedUser(accessor);
+        // Per-user queue: the broker only delivers what was addressed to this session's own user.
+        if (FALL_USER_DESTINATION.equals(accessor.getDestination())) {
+            return;
+        }
         UUID homeId = RealtimeDestinations.extractHomeId(accessor.getDestination())
                 .orElseThrow(() -> new AccessDeniedException("Realtime destination is not allowed"));
 

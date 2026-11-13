@@ -1,0 +1,102 @@
+{
+  "code": 1000,
+  "result": {
+    "homeId": "00000000-0000-4000-8000-000000000001",
+    "name": "My Home",
+    "rooms": [
+      {
+        "roomId": "00000000-0000-4000-8000-000000000011",
+        "homeId": "00000000-0000-4000-8000-000000000001",
+        "name": "Living Room",
+        "icon": "sofa",
+        "devices": [
+          {
+            "deviceId": "00000000-0000-4000-8000-000000000021",
+            "roomId": "00000000-0000-4000-8000-000000000011",
+            "name": "Ceiling light",
+            "deviceType": "LIGHT",
+            "icon": null,
+            "status": "ONLINE",
+            "currentState": {
+              "power": "ON",
+              "brightness": 80
+            },
+            "lastSeen": null,
+            "healthStatus": "OFFLINE"
+          },
+          {
+            "deviceId": "00000000-0000-4000-8000-000000000023",
+            "roomId": "00000000-0000-4000-8000-000000000011",
+            "name": "Motion sensor",
+            "deviceType": "SENSOR",
+            "icon": null,
+            "status": "ONLINE",
+            "currentState": {
+              "motion": true
+            },
+            "lastSeen": null,
+            "healthStatus": "OFFLINE"
+          }
+        ],
+        "sensors": [
+          {
+            "sensorId": "00000000-0000-4000-8000-000000000023:MOTION",
+            "roomId": "00000000-0000-4000-8000-000000000011",
+            "deviceId": "00000000-0000-4000-8000-000000000023",
+            "metricType": "MOTION",
+            "latestValue": 1.0,
+            "unit": "boolean",
+            "observedAt": "2026-09-17T09:00:00Z",
+            "healthStatus": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "roomId": "00000000-0000-4000-8000-000000000012",
+        "homeId": "00000000-0000-4000-8000-000000000001",
+        "name": "Bedroom",
+        "icon": "bed",
+        "devices": [
+          {
+            "deviceId": "00000000-0000-4000-8000-000000000022",
+            "roomId": "00000000-0000-4000-8000-000000000012",
+            "name": "Environment sensor",
+            "deviceType": "SENSOR",
+            "icon": null,
+            "status": "ONLINE",
+            "currentState": {
+              "temperature": 26.4,
+              "humidity": 61
+            },
+            "lastSeen": null,
+            "healthStatus": "OFFLINE"
+          }
+        ],
+        "sensors": [
+          {
+            "sensorId": "00000000-0000-4000-8000-000000000022:HUMIDITY",
+            "roomId": "00000000-0000-4000-8000-000000000012",
+            "deviceId": "00000000-0000-4000-8000-000000000022",
+            "metricType": "HUMIDITY",
+            "latestValue": 61.0,
+            "unit": "%",
+            "observedAt": "2026-09-17T09:00:00Z",
+            "healthStatus": "ACTIVE"
+          },
+          {
+            "sensorId": "00000000-0000-4000-8000-000000000022:TEMPERATURE",
+            "roomId": "00000000-0000-4000-8000-000000000012",
+            "deviceId": "00000000-0000-4000-8000-000000000022",
+            "metricType": "TEMPERATURE",
+            "latestValue": 26.4,
+            "unit": "\u00b0C",
+            "observedAt": "2026-09-17T09:00:00Z",
+            "healthStatus": "ACTIVE"
+          }
+        ]
+      }
+    ],
+    "unassignedDevices": [],
+    "unassignedSensors": []
+  }
+}

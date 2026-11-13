@@ -27,4 +27,9 @@ public class AutomationEventRequest {
 
     @Builder.Default
     boolean test = false;
+
+    // Set only by the MQTT receiver: periodic state reports fire rules on the false→true edge, not on every report.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Builder.Default
+    boolean stateReport = false;
 }

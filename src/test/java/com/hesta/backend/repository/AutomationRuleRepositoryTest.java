@@ -12,9 +12,7 @@ import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.ConditionOperator;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.DeviceStatus;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.enums.LogicalOperator;
 import com.hesta.backend.enums.TriggerType;
 import jakarta.persistence.EntityManager;
@@ -49,7 +47,7 @@ class AutomationRuleRepositoryTest {
         Home home = homeRepository.save(Home.builder().name("Automation Home").createdBy(owner).build());
         Room room = roomRepository.save(Room.builder().home(home).name("Living room").build());
         Device device = deviceRepository.save(Device.builder().room(room).name("Fan")
-                .deviceType(DeviceType.FAN).status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
+                .deviceType("FAN").status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
         UUID firstId = saveRule(home, device, "A rule");
         saveRule(home, device, "B rule");
         entityManager.flush();
@@ -78,7 +76,7 @@ class AutomationRuleRepositoryTest {
         Home home = homeRepository.save(Home.builder().name("Scene Rule Home").createdBy(owner).build());
         Room room = roomRepository.save(Room.builder().home(home).name("Living room").build());
         Device device = deviceRepository.save(Device.builder().room(room).name("Lamp")
-                .deviceType(DeviceType.LIGHT).status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
+                .deviceType("LIGHT").status(DeviceStatus.UNKNOWN).currentState(Map.of()).build());
         Scene scene = Scene.builder().home(home).name("Evening").enabled(true).build();
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
@@ -86,7 +84,7 @@ class AutomationRuleRepositoryTest {
         AutomationRule rule = AutomationRule.builder().home(home).name("Scene trigger")
                 .triggerType(TriggerType.SCHEDULE).enabled(true).build();
         rule.getActions().add(RuleAction.builder().rule(rule).scene(scene)
-                .action(DeviceAction.EXECUTE_SCENE).order(0).build());
+                .action("EXECUTE_SCENE").order(0).build());
         UUID ruleId = ruleRepository.save(rule).getId();
         entityManager.flush();
         entityManager.clear();
@@ -132,7 +130,7 @@ class AutomationRuleRepositoryTest {
                     .expectedValue(JsonNodeFactory.instance.numberNode(30))
                     .logicalOperator(LogicalOperator.AND).order(order).build());
             rule.getActions().add(RuleAction.builder().rule(rule).device(device)
-                    .action(DeviceAction.TURN_ON).parameters(Map.of()).order(order).build());
+                    .action("TURN_ON").parameters(Map.of()).order(order).build());
         }
         return ruleRepository.save(rule).getId();
     }

@@ -12,7 +12,7 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
-import com.hesta.backend.enums.SceneActionType;
+
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -20,7 +20,10 @@ import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.SceneActionRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.service.SceneService;
+import com.hesta.backend.service.execution.DeviceActionValues;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +52,19 @@ public class SceneServiceImpl implements SceneService {
     private final AutomationRuleRepository automationRuleRepository;
 
     @Override
+    @Transactional(readOnly = true)
+    public List<String> getActionTypes(UUID authenticatedUserId, UUID homeId) {
+        homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
+        return deviceRepository.findByHomeId(homeId).stream()
+                .filter(d -> d.getCapabilities() != null)
+                .flatMap(d -> d.getCapabilities().values().stream())
+                .flatMap(java.util.List::stream)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    @Override
     @Transactional
     public SceneResponse createScene(UUID authenticatedUserId, UUID homeId, CreateSceneRequest request) {
         Home home = homeAuthorizationService.requireSceneManagement(authenticatedUserId, homeId);
@@ -74,15 +90,24 @@ public class SceneServiceImpl implements SceneService {
     @Transactional(readOnly = true)
     public List<SceneResponse> getScenesForHome(UUID authenticatedUserId, UUID homeId) {
         homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
-        return sceneRepository.findAllByHomeIdOrderByNameAsc(homeId).stream()
-                .map(this::toResponse)
-                .toList();
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, authenticatedUserId);
+        List<Scene> scenes = sceneRepository.findAllByHomeIdOrderByNameAsc(homeId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            scenes = scenes.stream().filter(s -> homeAuthorizationService.canRunScene(authenticatedUserId, s.getId())).toList();
+        }
+        return scenes.stream().map(this::toResponse).toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public SceneResponse getScene(UUID authenticatedUserId, UUID homeId, UUID sceneId) {
         homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, authenticatedUserId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            if (!homeAuthorizationService.canRunScene(authenticatedUserId, sceneId)) {
+                throw new AppException(ErrorCode.SCENE_NOT_FOUND);
+            }
+        }
         return toResponse(findSceneInHome(sceneId, homeId));
     }
 
@@ -230,14 +255,15 @@ public class SceneServiceImpl implements SceneService {
         if (device == null) {
             throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
         }
-        if (!home.getId().equals(device.getNode().getHome().getId())) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null
+                || !home.getId().equals(device.getRoom().getHome().getId())) {
             throw new AppException(ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
         }
-        SceneActionType actionType = validateActionValue(request.getAction(), request.getValue());
+        String validAction = validateActionValue(request.getAction(), request.getValue(), device);
         return SceneAction.builder()
                 .scene(scene)
                 .targetDevice(device)
-                .action(actionType.name())
+                .action(validAction)
                 .value(normalizeValue(request.getValue()))
                 .order(request.getOrder())
                 .build();
@@ -273,22 +299,16 @@ public class SceneServiceImpl implements SceneService {
         }
     }
 
-    private SceneActionType validateActionValue(String action, JsonNode value) {
-        SceneActionType actionType = SceneActionType.from(action)
-                .orElseThrow(() -> new AppException(ErrorCode.SCENE_ACTION_INVALID));
-        boolean valid = switch (actionType) {
-            case TURN_ON, TURN_OFF -> value == null || value.isNull();
-            case SET_BRIGHTNESS, SET_SPEED -> value != null
-                    && value.isIntegralNumber()
-                    && value.intValue() >= 0
-                    && value.intValue() <= 100;
-            case SET_TEMPERATURE -> value != null && value.isNumber();
-            case SET_STATE -> value != null && value.isObject() && !value.isEmpty();
-        };
-        if (!valid) {
+    /** @return the action in canonical upper case */
+    private String validateActionValue(String action, JsonNode value, Device device) {
+        String normalized = DeviceActionValues.normalize(action);
+        if (normalized.isEmpty() || !device.supportsAction(normalized)) {
+            throw new AppException(ErrorCode.SCENE_ACTION_INVALID);
+        }
+        if (!DeviceActionValues.isValidValue(normalized, value)) {
             throw new AppException(ErrorCode.SCENE_ACTION_VALUE_INVALID);
         }
-        return actionType;
+        return normalized;
     }
 
     private JsonNode normalizeValue(JsonNode value) {
@@ -369,9 +389,9 @@ public class SceneServiceImpl implements SceneService {
 
     private SceneActionResponse toActionResponse(SceneAction action) {
         JsonNode value = action.getValue();
-        if ("TURN_ON".equals(action.getAction()) || "TURN_OFF".equals(action.getAction())
-                || value == null || value.isNull()) {
-            value = null;
+        if (DeviceActionValues.takesNoValue(action.getAction()) || value == null || value.isNull()
+                || (value.isObject() && value.isEmpty())) {
+            value = null; // nothing to show for on/off/open/close
         }
         return SceneActionResponse.builder()
                 .id(action.getId())

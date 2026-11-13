@@ -7,7 +7,6 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.SceneExecution;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.repository.SceneExecutionRepository;
@@ -41,8 +40,14 @@ class SceneExecutionServiceTest {
     @Mock DeviceCommandService commands;
     @Mock BehaviorEventRecorder behaviorEventRecorder;
     @Mock ManualOverrideService manualOverrideService;
-    @org.mockito.Spy ObjectMapper objectMapper = new ObjectMapper();
-    @InjectMocks SceneExecutionServiceImpl service;
+    ObjectMapper objectMapper = new ObjectMapper();
+    SceneExecutionServiceImpl service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        service = new SceneExecutionServiceImpl(authorization, scenes, executions, behaviorEventRecorder, manualOverrideService,
+                new com.hesta.backend.service.execution.CommandBatchRunner(commands, behaviorEventRecorder));
+    }
 
     private final UUID userId = UUID.randomUUID();
     private final UUID homeId = UUID.randomUUID();
@@ -58,9 +63,9 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(commands.sendCommand(device.getId(), DeviceAction.TURN_ON, Map.of(), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
-        when(commands.sendCommand(device.getId(), DeviceAction.SET_SPEED, Map.of("speed", 60), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "SET_SPEED", Map.of("speed", 60, "fan", 60), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(false).status("FAILED").build()));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -74,8 +79,8 @@ class SceneExecutionServiceTest {
         verify(executions).save(saved.capture());
         assertThat(saved.getValue().getTriggerSource()).isEqualTo("MANUAL");
         var order = inOrder(commands);
-        order.verify(commands).sendCommand(eq(device.getId()), eq(DeviceAction.TURN_ON), any(), eq(StateChangeSource.SCENE));
-        order.verify(commands).sendCommand(eq(device.getId()), eq(DeviceAction.SET_SPEED), any(), eq(StateChangeSource.SCENE));
+        order.verify(commands).sendCommand(eq(device.getId()), eq("TURN_ON"), any(), eq(StateChangeSource.SCENE));
+        order.verify(commands).sendCommand(eq(device.getId()), eq("SET_SPEED"), any(), eq(StateChangeSource.SCENE));
     }
 
     @Test
@@ -109,7 +114,7 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(commands.sendCommand(device.getId(), DeviceAction.TURN_ON, Map.of(), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -117,5 +122,37 @@ class SceneExecutionServiceTest {
 
         assertThat(result.getStatus()).isEqualTo("SUCCESS");
         verifyNoInteractions(manualOverrideService);
+    }
+
+    @Test
+    void executesAirConditionerAndGateActionsSuccessfully() {
+        Device acDevice = Device.builder().id(UUID.randomUUID()).build();
+        Device gateDevice = Device.builder().id(UUID.randomUUID()).build();
+
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true)
+                .actions(new ArrayList<>()).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(gateDevice)
+                .action("OPEN").value(null).order(0).build());
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(acDevice)
+                .action("SET_TEMPERATURE").value(objectMapper.valueToTree(24)).order(1).build());
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(acDevice)
+                .action("SET_SWING").value(objectMapper.valueToTree(true)).order(2).build());
+
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(commands.sendCommand(eq(gateDevice.getId()), eq("OPEN"), anyMap(), eq(StateChangeSource.SCENE)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(commands.sendCommand(eq(acDevice.getId()), eq("SET_TEMPERATURE"), anyMap(), eq(StateChangeSource.SCENE)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(commands.sendCommand(eq(acDevice.getId()), eq("SET_SWING"), anyMap(), eq(StateChangeSource.SCENE)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.execute(userId, homeId, sceneId);
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getResultDetail()).hasSize(3);
+        verify(commands).sendCommand(eq(gateDevice.getId()), eq("OPEN"), eq(Map.of()), eq(StateChangeSource.SCENE));
+        verify(commands).sendCommand(eq(acDevice.getId()), eq("SET_TEMPERATURE"), argThat(map -> Integer.valueOf(24).equals(map.get("temperature"))), eq(StateChangeSource.SCENE));
+        verify(commands).sendCommand(eq(acDevice.getId()), eq("SET_SWING"), argThat(map -> Boolean.TRUE.equals(map.get("swing"))), eq(StateChangeSource.SCENE));
     }
 }

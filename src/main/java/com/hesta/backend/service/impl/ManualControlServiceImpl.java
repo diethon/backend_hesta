@@ -4,19 +4,19 @@ import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.response.ManualCommandResponse;
 import com.hesta.backend.dto.response.ManualOverrideResponse;
 import com.hesta.backend.entity.Device;
-import com.hesta.backend.enums.DeviceAction;
+import com.hesta.backend.enums.AccessLevel;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.BehaviorEventRepository;
-import com.hesta.backend.service.BehaviorEventRecorder;
 import com.hesta.backend.service.DeviceCommandService;
 import com.hesta.backend.service.HomeAuthorizationService;
 import com.hesta.backend.service.ManualControlService;
 import com.hesta.backend.service.ManualOverrideService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -30,39 +30,51 @@ public class ManualControlServiceImpl implements ManualControlService {
     private final DeviceRepository devices;
     private final DeviceCommandService commands;
     private final ManualOverrideService overrides;
-    private final BehaviorEventRecorder recorder;
     private final BehaviorEventRepository behaviorEvents;
 
     @Override
     public ManualCommandResponse command(UUID userId, UUID deviceId, String rawAction) {
-        Device device = authorizedDevice(userId, deviceId);
-        DeviceAction action;
+        Device device = authorizedDevice(userId, deviceId, AccessLevel.CONTROL);
+        String action;
         try {
-            action = DeviceAction.valueOf(rawAction.trim().toUpperCase(java.util.Locale.ROOT));
+            action = rawAction.trim().toUpperCase(java.util.Locale.ROOT);
         } catch (RuntimeException exception) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        if (action != DeviceAction.TURN_ON && action != DeviceAction.TURN_OFF) {
+        java.util.Set<String> allowedManualActions = java.util.Set.of(
+                "TURN_ON", "TURN_OFF", "TOGGLE", "POWER_ON", "POWER_OFF", "SET_POWER",
+                "OPEN", "CLOSE", "STOP", "GATE_OPEN", "GATE_CLOSE", "GATE_STOP"
+        );
+        if (!allowedManualActions.contains(action)) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        if (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
-                && device.getCapabilities().stream().noneMatch(cap -> cap.equalsIgnoreCase(action.name()))) {
+        if (!device.supportsAction(action)) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        OffsetDateTime until = overrides.activate(device, userId, "OVERRIDE");
         CommandResult result = commands.sendCommand(deviceId, action, Map.of(), StateChangeSource.MANUAL).join();
-        if (result.isSuccess()) recorder.recordCommand(device, action, StateChangeSource.MANUAL, result);
+        OffsetDateTime until = null;
+        if (result != null && result.isSuccess()) {
+            // The command service records the habit event for every MANUAL command.
+            until = overrides.activate(device, userId, "OVERRIDE");
+        }
         return ManualCommandResponse.builder().command(result).overrideUntil(until).build();
     }
 
     @Override
     public OffsetDateTime cancelAutomation(UUID userId, UUID deviceId) {
-        return overrides.activate(authorizedDevice(userId, deviceId), userId, "CANCEL");
+        return overrides.activate(authorizedDevice(userId, deviceId, AccessLevel.CONTROL), userId, "CANCEL");
     }
 
     @Override
+    public void resumeAutomation(UUID userId, UUID deviceId) {
+        Device device = authorizedDevice(userId, deviceId, AccessLevel.CONTROL);
+        overrides.resumeAutomation(device, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<ManualOverrideResponse> history(UUID userId, UUID deviceId) {
-        authorizedDevice(userId, deviceId);
+        authorizedDevice(userId, deviceId, AccessLevel.VIEW);
         return behaviorEvents.findTop100ByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")
                 .stream().map(event -> ManualOverrideResponse.builder().id(event.getId())
                         .action(event.getAction()).userId(event.getUser() == null ? null : event.getUser().getId())
@@ -70,9 +82,16 @@ public class ManualControlServiceImpl implements ManualControlService {
                 .toList();
     }
 
-    private Device authorizedDevice(UUID userId, UUID deviceId) {
-        Device device = devices.findById(deviceId).orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        authorization.requireAccess(userId, device.getNode().getHome().getId());
+    private Device authorizedDevice(UUID userId, UUID deviceId, AccessLevel minLevel) {
+        Device device = devices.findByIdWithNode(deviceId)
+                .or(() -> devices.findById(deviceId))
+                .filter(d -> !d.isDeleted())
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
+        if (device.getHome() != null) {
+            authorization.requireAccess(userId, device.getHome().getId());
+        }
+        authorization.requireDeviceAccess(userId, deviceId, minLevel);
         return device;
     }
+
 }

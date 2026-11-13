@@ -1,11 +1,12 @@
-# Notification Core Backend
+# Lõi thông báo phía backend
 
 ## 1. Mục tiêu
 
-Notification Core là điểm dùng chung để các module Backend của HESTA tạo và quản lý thông báo.
-Các module như Sensor, Device, Automation, Security, Maintenance hoặc AI chỉ gửi
-`NotificationEvent` vào `NotificationService`; chúng không được tự lưu bảng `notifications` hoặc
-tự publish WebSocket.
+Lõi thông báo (Notification Core) là thành phần dùng chung để các mô-đun
+backend của HESTA tạo và quản lý thông báo. Các mô-đun như cảm biến, thiết
+bị, tự động hóa, bảo mật, bảo trì hoặc AI chỉ gửi `NotificationEvent` vào
+`NotificationService`; chúng không được tự lưu vào bảng `notifications`
+hoặc tự phát sự kiện WebSocket.
 
 ```mermaid
 flowchart LR
@@ -18,32 +19,32 @@ flowchart LR
 
 Phạm vi hiện tại gồm:
 
-- Tạo thông báo từ contract nội bộ.
+- Tạo thông báo từ đặc tả nội bộ.
 - Lưu thông báo vào PostgreSQL.
 - Danh sách có phân trang và bộ lọc.
 - Xem chi tiết, đánh dấu một hoặc tất cả thông báo là đã đọc.
 - Phân quyền theo người nhận và thành viên nhà.
-- Publish `NOTIFICATION_CREATED` sau khi transaction commit.
-- Baseline preference trên bảng `user_preferences`.
+- Phát `NOTIFICATION_CREATED` sau khi giao dịch được xác nhận.
+- Thiết lập tùy chọn cơ bản trên bảng `user_preferences`.
 
-Không thuộc phạm vi: email, SMS, mobile push, lịch gửi, hàng đợi message hoặc WebSocket riêng cho
-Notification.
+Không thuộc phạm vi: email, SMS, thông báo đẩy di động, lịch gửi, hàng đợi
+thông điệp hoặc WebSocket riêng cho thông báo.
 
 ## 2. Thành phần chính
 
 | Thành phần | Vai trò |
 |---|---|
-| `Notification` | JPA entity ánh xạ bảng `notifications`. |
-| `NotificationPreference` | Value object được nhúng trong `UserPreference`. |
-| `NotificationEvent` | Input contract dành cho các module Backend. |
-| `NotificationService` | Entry point dùng chung cho create/list/get/read/read-all. |
-| `NotificationRepository` | Truy vấn persistence và cập nhật read-all có scope. |
+| `Notification` | Thực thể JPA ánh xạ bảng `notifications`. |
+| `NotificationPreference` | Đối tượng giá trị được nhúng trong `UserPreference`. |
+| `NotificationEvent` | Đặc tả đầu vào dành cho các mô-đun backend. |
+| `NotificationService` | Điểm tiếp nhận dùng chung cho tạo/liệt kê/xem/đánh dấu đã đọc/đánh dấu tất cả đã đọc. |
+| `NotificationRepository` | Truy vấn dữ liệu và cập nhật tất cả thành đã đọc trong phạm vi xác định. |
 | `NotificationController` | REST API dành cho người dùng đã xác thực. |
-| `NotificationCreatedEvent` | Internal event được phát trong transaction sau khi lưu. |
-| `NotificationRealtimeListener` | Chuyển internal event thành realtime event sau commit. |
-| `NotificationRealtimePayload` | Payload an toàn trên home topic dùng chung. |
+| `NotificationCreatedEvent` | Sự kiện nội bộ được phát trong giao dịch sau khi lưu. |
+| `NotificationRealtimeListener` | Chuyển sự kiện nội bộ thành sự kiện thời gian thực sau khi xác nhận giao dịch. |
+| `NotificationRealtimePayload` | Dữ liệu an toàn trên topic dùng chung của nhà. |
 
-Các file quan trọng:
+Các tệp quan trọng:
 
 ```text
 src/main/java/com/hesta/backend/
@@ -69,23 +70,25 @@ src/main/java/com/hesta/backend/
 
 ### 3.1 Notification
 
-Entity sử dụng bảng `notifications` đã tồn tại trong thiết kế database của HESTA.
+Thực thể sử dụng bảng `notifications` đã tồn tại trong thiết kế cơ sở dữ
+liệu của HESTA.
 
-| Java | Database | Quy tắc |
+| Java | Cơ sở dữ liệu | Quy tắc |
 |---|---|---|
-| `id` | `id` | UUID primary key. |
-| `recipient` | `recipient_id` | Bắt buộc, foreign key đến `users`. |
-| `home` | `home_id` | Có thể null theo schema gốc. |
+| `id` | `id` | Khóa chính UUID. |
+| `recipient` | `recipient_id` | Bắt buộc, khóa ngoại đến `users`. |
+| `home` | `home_id` | Có thể null theo lược đồ gốc. |
 | `type` | `type` | `NotificationType`, lưu bằng chuỗi. |
 | `title` | `title` | Bắt buộc, tối đa 150 ký tự. |
 | `message` | `message` | Bắt buộc. |
-| `priority` | `priority_level` | `NotificationPriority`, mặc định database là `MEDIUM`. |
+| `priority` | `priority_level` | `NotificationPriority`, mặc định trong cơ sở dữ liệu là `MEDIUM`. |
 | `read` | `is_read` | Thông báo mới luôn là `false`. |
 | `createdAt` | `created_at` | Thời điểm tạo. |
 
-Thiết kế database hiện tại dùng `priority_level`, không dùng cột `severity` cho Notification. Vì
-vậy Notification Core tiếp tục sử dụng `NotificationPriority` để không tạo schema hoặc API contract
-mâu thuẫn với HESTA DB Design.
+Thiết kế cơ sở dữ liệu hiện tại dùng `priority_level`, không dùng cột
+`severity` cho thông báo. Vì vậy lõi thông báo tiếp tục sử dụng
+`NotificationPriority` để không tạo lược đồ hoặc đặc tả API mâu thuẫn với
+tài liệu thiết kế cơ sở dữ liệu HESTA.
 
 Các loại hiện có:
 
@@ -99,13 +102,14 @@ Các mức ưu tiên hiện có:
 HIGH, MEDIUM, LOW
 ```
 
-Khi thêm type hoặc priority mới, phải cập nhật đồng thời Java enum và tạo một migration Supabase
-forward-only để mở rộng check constraint. Không sửa migration đã được áp dụng.
+Khi thêm loại hoặc mức ưu tiên mới, phải cập nhật đồng thời enum Java và
+tạo một migration Supabase mới theo hướng tiến để mở rộng ràng buộc kiểm
+tra. Không sửa migration đã được áp dụng.
 
 ### 3.2 NotificationPreference
 
-Preference không tạo bảng mới. `NotificationPreference` được nhúng vào `UserPreference` và ánh xạ
-ba cột đã có trong `user_preferences`:
+Tùy chọn thông báo không tạo bảng mới. `NotificationPreference` được
+nhúng vào `UserPreference` và ánh xạ ba cột đã có trong `user_preferences`:
 
 | Trường | Cột | Mặc định |
 |---|---|---|
@@ -113,13 +117,14 @@ ba cột đã có trong `user_preferences`:
 | `automationEnabled` | `notify_automation` | `true` |
 | `systemEnabled` | `notify_system` | `true` |
 
-Theo BR-NOT-03, security notification luôn bật. Migration bổ sung database constraint
-`notify_security = true`. Preference baseline hiện chỉ chuẩn bị persistence cho việc lọc trong tương
-lai; Notification Core chưa bỏ qua notification dựa trên `notify_automation` hoặc `notify_system`.
+Theo BR-NOT-03, thông báo bảo mật luôn bật. Migration bổ sung ràng buộc cơ
+sở dữ liệu `notify_security = true`. Phần tùy chọn cơ bản hiện chỉ chuẩn
+bị lưu trữ cho việc lọc sau này; lõi thông báo chưa bỏ qua thông báo dựa
+trên `notify_automation` hoặc `notify_system`.
 
-## 4. Contract dành cho module Backend
+## 4. Đặc tả dành cho mô-đun backend
 
-Các module khác inject `NotificationService`, không inject `NotificationRepository`.
+Các mô-đun khác tiêm `NotificationService`, không tiêm `NotificationRepository`.
 
 Ví dụ tạo thông báo:
 
@@ -145,20 +150,20 @@ String message;
 NotificationPriority priority;
 ```
 
-Contract tạo thông báo hiện yêu cầu cả `userId` và `homeId` vì realtime infrastructure đang route
-theo home. Service kiểm tra:
+Đặc tả tạo thông báo hiện yêu cầu cả `userId` và `homeId` vì hạ tầng thời
+gian thực đang định tuyến theo nhà. Dịch vụ kiểm tra:
 
-1. Event và toàn bộ trường bắt buộc hợp lệ.
+1. Sự kiện và toàn bộ trường bắt buộc hợp lệ.
 2. `title` không rỗng và không dài hơn 150 ký tự.
-3. User tồn tại.
-4. Home tồn tại.
-5. User là `ACTIVE` member của home.
+3. Người dùng tồn tại.
+4. Nhà tồn tại.
+5. Người dùng là thành viên ở trạng thái `ACTIVE` của nhà.
 
-`create(event)` và `receiveEvent(event)` cùng sử dụng một luồng nghiệp vụ. `receiveEvent` là tên nên
-dùng khi một feature module phản ứng với sự kiện nghiệp vụ; `create` phù hợp khi module chủ động tạo
-notification trực tiếp.
+`create(event)` và `receiveEvent(event)` cùng sử dụng một luồng nghiệp vụ.
+Nên dùng `receiveEvent` khi mô-đun chức năng phản ứng với sự kiện nghiệp
+vụ; `create` phù hợp khi mô-đun chủ động tạo thông báo trực tiếp.
 
-## 5. Luồng tạo và realtime sau commit
+## 5. Luồng tạo và phát sự kiện thời gian thực sau khi xác nhận giao dịch
 
 ```mermaid
 sequenceDiagram
@@ -189,25 +194,26 @@ sequenceDiagram
 
 Vì vậy:
 
-- Transaction commit thành công: realtime event được publish.
-- Lưu hoặc commit thất bại: realtime event không được publish.
-- Lỗi realtime sau commit không làm rollback notification đã được lưu.
+- Giao dịch được xác nhận thành công: sự kiện thời gian thực được phát.
+- Lưu hoặc xác nhận giao dịch thất bại: không phát sự kiện thời gian thực.
+- Lỗi thời gian thực sau khi xác nhận giao dịch không hoàn tác thông báo đã lưu.
 
-Notification Core chỉ gọi `RealtimeEventPublisher`. `SimpMessagingTemplate` vẫn chỉ nằm trong shared
-WebSocket transport hiện có.
+Lõi thông báo chỉ gọi `RealtimeEventPublisher`. `SimpMessagingTemplate`
+vẫn chỉ nằm trong kênh truyền WebSocket dùng chung hiện có.
 
-## 6. Realtime payload và bảo mật
+## 6. Dữ liệu thời gian thực và bảo mật
 
-Destination hiện tại là home-scoped:
+Đích nhận hiện tại được giới hạn theo nhà:
 
 ```text
 /topic/homes/{homeId}/events
 ```
 
-Mọi thành viên active trong home có thể subscribe topic này, trong khi một Notification thuộc về một
-recipient cụ thể. Vì vậy payload `NOTIFICATION_CREATED` không broadcast `title` hoặc `message`.
+Mọi thành viên đang hoạt động trong nhà có thể đăng ký topic này, trong
+khi một thông báo thuộc về một người nhận cụ thể. Vì vậy dữ liệu
+`NOTIFICATION_CREATED` không phát rộng rãi `title` hoặc `message`.
 
-Payload gồm:
+Phần dữ liệu gồm:
 
 ```json
 {
@@ -219,18 +225,18 @@ Payload gồm:
 }
 ```
 
-Client nên xử lý theo thứ tự:
+Ứng dụng khách nên xử lý theo thứ tự:
 
 1. Nhận `RealtimeEvent` có `type = NOTIFICATION_CREATED`.
-2. Bỏ qua nếu `recipientId` không phải user hiện tại.
-3. Nếu khớp, gọi API lấy notification hoặc refresh danh sách.
+2. Bỏ qua nếu `recipientId` không phải người dùng hiện tại.
+3. Nếu khớp, gọi API lấy thông báo hoặc tải lại danh sách.
 
-Kiểm tra `recipientId` ở client chỉ là tối ưu UI, không phải authorization. REST API vẫn kiểm tra
-recipient bằng identity từ JWT.
+Kiểm tra `recipientId` ở ứng dụng khách chỉ là tối ưu giao diện, không
+phải phân quyền. REST API vẫn kiểm tra người nhận bằng danh tính từ JWT.
 
 ## 7. REST API
 
-Tất cả endpoint đều yêu cầu Bearer JWT. Response giữ contract chung:
+Tất cả điểm cuối đều yêu cầu Bearer JWT. Phản hồi giữ đặc tả chung:
 
 ```json
 {
@@ -240,17 +246,17 @@ Tất cả endpoint đều yêu cầu Bearer JWT. Response giữ contract chung:
 }
 ```
 
-### 7.1 Danh sách notification
+### 7.1 Danh sách thông báo
 
 ```http
 GET /api/v1/notifications
 ```
 
-Query parameters:
+Tham số truy vấn:
 
 | Tên | Bắt buộc | Mô tả |
 |---|---|---|
-| `homeId` | Không | Chỉ lấy notification của một home. |
+| `homeId` | Không | Chỉ lấy thông báo của một nhà. |
 | `isRead` | Không | `true` hoặc `false`. |
 | `type` | Không | Giá trị `NotificationType`. |
 | `priority` | Không | Giá trị `NotificationPriority`. |
@@ -266,7 +272,7 @@ GET /api/v1/notifications?homeId=6a5edcf2-13ad-4e17-bf41-028434cbdc31&isRead=fal
 Authorization: Bearer <access-token>
 ```
 
-Response:
+Phản hồi:
 
 ```json
 {
@@ -300,16 +306,17 @@ Response:
 GET /api/v1/notifications/{notificationId}
 ```
 
-Chỉ recipient của notification có thể truy cập. ID không tồn tại hoặc thuộc user khác đều trả về
-`NOTIFICATION_NOT_FOUND`, tránh lộ sự tồn tại của dữ liệu người khác.
+Chỉ người nhận thông báo mới có thể truy cập. ID không tồn tại hoặc thuộc
+người dùng khác đều trả về `NOTIFICATION_NOT_FOUND`, tránh lộ sự tồn tại
+của dữ liệu người khác.
 
-### 7.3 Đánh dấu một notification đã đọc
+### 7.3 Đánh dấu một thông báo đã đọc
 
 ```http
 PATCH /api/v1/notifications/{notificationId}/read
 ```
 
-Thao tác idempotent:
+Thao tác có tính lũy đẳng: lặp lại không làm thay đổi kết quả cuối cùng.
 
 ```text
 false -> true
@@ -323,11 +330,12 @@ PATCH /api/v1/notifications/read-all
 PATCH /api/v1/notifications/read-all?homeId={homeId}
 ```
 
-- Không có `homeId`: cập nhật notification chưa đọc của current user trên tất cả home.
-- Có `homeId`: chỉ cập nhật notification của current user trong home đó.
-- Không bao giờ cập nhật notification của user khác.
+- Không có `homeId`: cập nhật thông báo chưa đọc của người dùng hiện tại
+  trên tất cả nhà.
+- Có `homeId`: chỉ cập nhật thông báo của người dùng hiện tại trong nhà đó.
+- Không bao giờ cập nhật thông báo của người dùng khác.
 
-Response:
+Phản hồi:
 
 ```json
 {
@@ -339,23 +347,24 @@ Response:
 }
 ```
 
-Không có REST endpoint public để tạo notification. Việc tạo thuộc về Backend module thông qua
-`NotificationService`.
+Không có điểm cuối REST công khai để tạo thông báo. Việc tạo thuộc về
+mô-đun backend thông qua `NotificationService`.
 
-## 8. Error contract
+## 8. Đặc tả lỗi
 
-Notification Core sử dụng `AppException`, `ErrorCode` và `GlobalExceptionHandler` hiện có.
+Lõi thông báo sử dụng `AppException`, `ErrorCode` và
+`GlobalExceptionHandler` hiện có.
 
 | ErrorCode | HTTP | Khi xảy ra |
 |---|---:|---|
-| `NOTIFICATION_NOT_FOUND` | 404 | Notification không tồn tại hoặc không thuộc current user. |
-| `NOTIFICATION_EVENT_INVALID` | 400 | Internal event thiếu hoặc sai dữ liệu bắt buộc. |
-| `USER_NOT_FOUND` | 404 | Recipient của internal event không tồn tại. |
-| `UNAUTHORIZED` | 403 | Recipient không phải active member của home. |
+| `NOTIFICATION_NOT_FOUND` | 404 | Thông báo không tồn tại hoặc không thuộc người dùng hiện tại. |
+| `NOTIFICATION_EVENT_INVALID` | 400 | Sự kiện nội bộ thiếu hoặc sai dữ liệu bắt buộc. |
+| `USER_NOT_FOUND` | 404 | Người nhận của sự kiện nội bộ không tồn tại. |
+| `UNAUTHORIZED` | 403 | Người nhận không phải thành viên đang hoạt động của nhà. |
 
-## 9. Migration
+## 9. Migration cơ sở dữ liệu
 
-Migration của Notification Core:
+Migration của lõi thông báo:
 
 ```text
 supabase/migrations/20260916120000_harden_notification_core.sql
@@ -363,66 +372,73 @@ supabase/migrations/20260916120000_harden_notification_core.sql
 
 Migration này:
 
-- Thêm check constraint cho `notifications.type`.
-- Thêm check constraint cho `notifications.priority_level`.
-- Thêm partial index cho inbox chưa đọc theo recipient và thời gian.
-- Thêm index cho truy vấn recipient + home + thời gian.
+- Thêm ràng buộc kiểm tra cho `notifications.type`.
+- Thêm ràng buộc kiểm tra cho `notifications.priority_level`.
+- Thêm chỉ mục có điều kiện cho hộp thông báo chưa đọc theo người nhận và
+  thời gian.
+- Thêm chỉ mục cho truy vấn theo người nhận + nhà + thời gian.
 - Khóa `user_preferences.notify_security` ở `true` theo BR-NOT-03.
 
-Không dùng Flyway và không chỉnh sửa migration lịch sử. Kiểm tra migration trên local stack:
+Không dùng Flyway và không chỉnh sửa migration lịch sử. Kiểm tra migration
+trên hệ thống cục bộ:
 
 ```powershell
 npx supabase status
 npx supabase db reset
 ```
 
-Không chạy `supabase db push` lên Cloud nếu không phải release owner.
+Không chạy `supabase db push` lên Cloud nếu không phải người phụ trách
+phát hành cơ sở dữ liệu.
 
 ## 10. Kiểm thử
 
-Các nhóm test:
+Các nhóm kiểm thử:
 
-| Test | Phạm vi |
+| Kiểm thử | Phạm vi |
 |---|---|
-| `NotificationServiceTest` | Validation, persistence call, list/get, read/read-all, ownership và active membership. |
-| `NotificationControllerTest` | REST contract, authenticated identity và error envelope. |
-| `NotificationPreferenceTest` | Giá trị mặc định của preference baseline. |
-| `NotificationRealtimeListenerTest` | Event type, home routing, payload và annotation `AFTER_COMMIT`. |
-| `NotificationRealtimeTransactionTest` | Commit có publish; rollback không publish. |
+| `NotificationServiceTest` | Kiểm tra hợp lệ, gọi lưu trữ, liệt kê/xem, đánh dấu một/tất cả đã đọc, quyền sở hữu và tư cách thành viên đang hoạt động. |
+| `NotificationControllerTest` | Đặc tả REST, danh tính đã xác thực và cấu trúc bao lỗi. |
+| `NotificationPreferenceTest` | Giá trị mặc định của tùy chọn cơ bản. |
+| `NotificationRealtimeListenerTest` | Loại sự kiện, định tuyến theo nhà, dữ liệu và annotation `AFTER_COMMIT`. |
+| `NotificationRealtimeTransactionTest` | Xác nhận giao dịch có phát sự kiện; hoàn tác không phát. |
 
-Chạy test Notification Core:
+Chạy kiểm thử lõi thông báo:
 
 ```powershell
 mvn "-Dtest=NotificationServiceTest,NotificationControllerTest,NotificationPreferenceTest,NotificationRealtimeListenerTest,NotificationRealtimeTransactionTest" test
 ```
 
-Chạy toàn bộ test không phụ thuộc MQTT broker:
+Chạy toàn bộ kiểm thử không phụ thuộc MQTT broker:
 
 ```powershell
 mvn "-Dtest=!MqttSmokeTest" test
 ```
 
-`MqttSmokeTest` yêu cầu một MQTT broker đang lắng nghe tại cấu hình `MQTT_BROKER_URL`.
+`MqttSmokeTest` yêu cầu một MQTT broker đang lắng nghe tại cấu hình
+`MQTT_BROKER_URL`.
 
 ## 11. Quy tắc mở rộng
 
-Khi một module mới cần gửi notification:
+Khi mô-đun mới cần gửi thông báo:
 
-1. Inject `NotificationService`.
-2. Tạo `NotificationEvent` bằng ID từ business context đáng tin cậy.
-3. Không nhận `userId` tùy ý từ public request rồi chuyển thẳng vào event.
-4. Không gọi `NotificationRepository` từ feature module.
-5. Không dùng `SimpMessagingTemplate` hoặc tạo destination mới.
-6. Nếu thêm enum value, cập nhật Java enum, migration constraint và test.
-7. Nếu notification chứa nội dung riêng tư, giữ nội dung trong REST response; không mở rộng home-topic
-   payload để broadcast nội dung đó.
+1. Tiêm `NotificationService`.
+2. Tạo `NotificationEvent` bằng ID từ ngữ cảnh nghiệp vụ đáng tin cậy.
+3. Không nhận `userId` tùy ý từ yêu cầu công khai rồi chuyển thẳng vào sự kiện.
+4. Không gọi `NotificationRepository` từ mô-đun chức năng.
+5. Không dùng `SimpMessagingTemplate` hoặc tạo đích nhận mới.
+6. Nếu thêm giá trị enum, cập nhật enum Java, ràng buộc migration và kiểm thử.
+7. Nếu thông báo chứa nội dung riêng tư, giữ nội dung trong phản hồi REST;
+   không mở rộng dữ liệu topic của nhà để phát rộng rãi nội dung đó.
 
 ## 12. Giới hạn hiện tại
 
-- Preference đã có persistence baseline nhưng chưa tham gia filtering khi tạo notification.
-- Internal creation hiện tạo một notification cho một recipient; chưa có helper broadcast một lần cho
-  toàn bộ thành viên của home.
-- Realtime chỉ gửi tín hiệu metadata; client phải gọi REST để lấy nội dung đầy đủ.
-- Không có email, SMS, mobile push, scheduling hoặc retention job trong Notification Core.
-- Shared STOMP broker vẫn là in-memory và phù hợp với một backend instance; xem thêm
-  [REALTIME.md](REALTIME.md).
+- Tùy chọn thông báo đã có nền tảng lưu trữ nhưng chưa tham gia lọc khi
+  tạo thông báo.
+- Việc tạo nội bộ hiện tạo một thông báo cho một người nhận; chưa có hàm
+  hỗ trợ gửi một lần đến toàn bộ thành viên của nhà.
+- Cập nhật thời gian thực chỉ gửi tín hiệu siêu dữ liệu; ứng dụng khách
+  phải gọi REST để lấy nội dung đầy đủ.
+- Lõi thông báo chưa có email, SMS, thông báo đẩy di động, lập lịch hay
+  tác vụ dọn dữ liệu theo thời hạn lưu giữ.
+- Broker STOMP dùng chung vẫn chạy trong bộ nhớ và phù hợp với một bản
+  chạy backend; xem thêm [REALTIME.md](REALTIME.md).

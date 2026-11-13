@@ -11,4 +11,5 @@ import java.util.UUID;
 public interface HomeInvitationRepository extends JpaRepository<HomeInvitation, UUID> {
     Optional<HomeInvitation> findByInviteCode(String inviteCode);
     Optional<HomeInvitation> findByInviteToken(String inviteToken);
+    java.util.List<HomeInvitation> findByHomeIdAndTargetEmailAndStatus(UUID homeId, String targetEmail, com.hesta.backend.enums.InvitationStatus status);
 }

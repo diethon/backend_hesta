@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.request.AutomationEventRequest;
 import com.hesta.backend.dto.request.TelemetryPayload;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.repository.EdgeNodeRepository;
+import com.hesta.backend.entity.EdgeNode;
+import java.util.List;
 import com.hesta.backend.service.TelemetryService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
 import lombok.RequiredArgsConstructor;
@@ -20,11 +22,14 @@ import org.springframework.stereotype.Service;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class MqttMessageReceiver {
     private final DeviceRepository devices;
     private final AutomationEngine automationEngine;
@@ -32,7 +37,26 @@ public class MqttMessageReceiver {
 
 
     private final TelemetryService telemetryService;
+    private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AutomationDispatcher automationDispatcher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.diagnostics.MqttDlqService dlqService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.ota.OtaCampaignService otaCampaignService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.falldetection.service.FallIncidentService fallIncidentService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.mapper.TwinSnapshotMapper twinSnapshotMapper;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -69,6 +93,10 @@ public class MqttMessageReceiver {
 
         String payload = message.getPayload().toString();
 
+        if (diagnosticsService != null && !topic.isBlank()) {
+            diagnosticsService.recordPacket(topic, "IN", 1, payload);
+        }
+
         log.info(
                 "Received MQTT message. Topic: [{}], Payload: [{}]",
                 topic,
@@ -77,6 +105,16 @@ public class MqttMessageReceiver {
 
         if (topic.isBlank()) {
             log.warn("Received MQTT message without topic");
+            if (dlqService != null) {
+                dlqService.recordDeadLetter("", payload, "MISSING_TOPIC", "UNKNOWN");
+            }
+            return;
+        }
+
+        String nodeCode = extractNodeCodeFromTopic(topic);
+        if (dlqService != null && nodeCode != null && !dlqService.checkRateLimit(nodeCode)) {
+            dlqService.recordDeadLetter(topic, payload, "RATE_LIMIT_EXCEEDED", nodeCode);
+            log.warn("Dropped message from node [{}] due to rate limit violation (>50 msg/s)", nodeCode);
             return;
         }
 
@@ -86,11 +124,14 @@ public class MqttMessageReceiver {
             // 3. TELEMETRY / SENSOR
             // =====================================================
 
-            if (topic.endsWith("/telemetry")
-                    || topic.endsWith("/sensor")) {
-
+            if (topic.endsWith("/catalog")) {
+                handleCatalog(topic, payload);
+            }
+            else if (topic.endsWith("/register") || topic.endsWith("/discovery")) {
+                handleEdgeNodeRegistration(topic, payload);
+            }
+            else if (topic.endsWith("/telemetry") || topic.endsWith("/sensor")) {
                 handleTelemetry(topic, payload);
-
             }
 
             // =====================================================
@@ -100,6 +141,7 @@ public class MqttMessageReceiver {
             else if (topic.endsWith("/state")) {
 
                 handleDeviceState(topic, payload);
+                processSensorAutomation(topic, payload);
 
             }
 
@@ -114,7 +156,37 @@ public class MqttMessageReceiver {
             }
 
             // =====================================================
-            // 6. Unknown topic
+            // 6. DEVICE STATUS
+            // =====================================================
+
+            else if (topic.endsWith("/status")) {
+
+                handleDeviceStatus(topic, payload);
+
+            }
+
+            // =====================================================
+            // 7. OTA STATUS / ACK
+            // =====================================================
+
+            else if (topic.contains("/ota/")) {
+
+                handleOtaMessage(topic, payload);
+
+            }
+
+            // =====================================================
+            // 8. FALL DETECTION / EMERGENCY SOS
+            // =====================================================
+
+            else if (topic.contains("fall-detection") || topic.contains("emergency/fall")) {
+
+                handleFallDetectionEvent(topic, payload);
+
+            }
+
+            // =====================================================
+            // 7. Unknown topic
             // =====================================================
 
             else {
@@ -133,6 +205,10 @@ public class MqttMessageReceiver {
                     payload,
                     e
             );
+
+            if (dlqService != null) {
+                dlqService.recordDeadLetter(topic, payload, e.getClass().getSimpleName() + ": " + e.getMessage(), nodeCode);
+            }
         }
     }
 
@@ -151,19 +227,48 @@ public class MqttMessageReceiver {
                 topic
         );
 
-        TelemetryPayload telemetryPayload =
-                objectMapper.readValue(
-                        payload,
-                        TelemetryPayload.class
-                );
+        TelemetryPayload telemetryPayload = null;
+        try {
+            telemetryPayload = objectMapper.readValue(payload, TelemetryPayload.class);
+        } catch (Exception ignored) {}
 
-        telemetryService.processTelemetry(
-                topic,
-                telemetryPayload
-        );
+        if (telemetryPayload != null && telemetryPayload.getMetricType() != null && telemetryPayload.getValue() != null) {
+            telemetryService.processTelemetry(
+                    topic,
+                    telemetryPayload
+            );
+            processTelemetryAutomation(topic, telemetryPayload);
+        } else {
+            // Full device state telemetry (e.g., Air Conditioner telemetry or composite state)
+            handleDeviceState(topic, payload);
+
+            try {
+                String deviceIdStr = extractDeviceIdFromTopic(topic);
+                if (deviceIdStr != null) {
+                    try {
+                        UUID deviceUuid = UUID.fromString(deviceIdStr);
+                        Map<String, Object> stateMap = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+                        MqttDeviceCommandServiceImpl.completeDeviceCommand(deviceUuid, stateMap);
+                    } catch (IllegalArgumentException ignored) {
+                        String nodeCode = extractNodeCodeFromTopic(topic);
+                        devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr)
+                                .ifPresent(d -> {
+                                    try {
+                                        Map<String, Object> stateMap = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+                                        MqttDeviceCommandServiceImpl.completeDeviceCommand(d.getId(), stateMap);
+                                    } catch (Exception ignoredInner) {}
+                                });
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to check active command resolution from telemetry: {}", e.getMessage());
+            }
+        }
 
         if (topic.endsWith("/sensor")) {
-            processSensorAutomation(topic, payload);
+            if (telemetryPayload == null || telemetryPayload.getMetricType() == null || telemetryPayload.getValue() == null) {
+                processSensorAutomation(topic, payload);
+            }
         }
 
         log.debug(
@@ -172,30 +277,137 @@ public class MqttMessageReceiver {
         );
     }
 
-    private void processSensorAutomation(String topic, String payload) throws Exception {
-        String[] parts = topic.split("/");
-        if (parts.length != 6 || !"hesta".equals(parts[0]) || !"nodes".equals(parts[1])
-                || !"devices".equals(parts[3]) || !"sensor".equals(parts[5])) {
-            return;
-        }
+    private void processTelemetryAutomation(String topic, TelemetryPayload payload) {
+        if (payload == null) return;
+        String topicNodeCode = extractNodeCodeFromTopic(topic);
+        String nodeCode = payload.getNodeId() != null && !payload.getNodeId().isBlank() ? payload.getNodeId() : topicNodeCode;
+        String deviceIdStr = payload.getDeviceId() != null && !payload.getDeviceId().isBlank() ? payload.getDeviceId() : extractDeviceIdFromTopic(topic);
 
-        UUID nodeId;
-        UUID deviceId;
+        java.util.Optional<com.hesta.backend.entity.Device> deviceOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+        deviceOpt.ifPresent(device -> {
+            Map<String, Object> data = new HashMap<>();
+            if (device.getCurrentState() != null) {
+                data.putAll(device.getCurrentState());
+            }
+            if (payload.getMetricType() != null && payload.getValue() != null) {
+                applyMetricAliases(data, payload.getMetricType(), payload.getValue());
+            }
+            triggerAutomation(device, data, "SENSOR");
+        });
+    }
+
+    private void processSensorAutomation(String topic, String payload) {
         try {
-            nodeId = UUID.fromString(parts[2]);
-            deviceId = UUID.fromString(parts[4]);
-        } catch (IllegalArgumentException exception) {
+            String[] parts = topic.split("/");
+            if (parts.length != 6 || !"hesta".equals(parts[0]) || !"nodes".equals(parts[1])
+                    || !"devices".equals(parts[3])) {
+                return;
+            }
+
+            String nodeCode = parts[2];
+            String deviceIdStr = parts[4];
+
+            Map<String, Object> parsedData = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> rawData = parsedData;
+            if (parsedData.containsKey("state") && parsedData.get("state") instanceof Map<?, ?> stateMap) {
+                rawData = (Map<String, Object>) stateMap;
+            }
+
+            java.util.Optional<com.hesta.backend.entity.Device> deviceOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+            if (deviceOpt.isEmpty() && parsedData.get("deviceId") != null) {
+                deviceOpt = resolveDevice(topic, parsedData.get("deviceId").toString(), nodeCode);
+            }
+
+            final Map<String, Object> finalData = rawData;
+            deviceOpt.ifPresent(device -> {
+                Map<String, Object> data = new HashMap<>();
+                if (device.getCurrentState() != null) {
+                    data.putAll(device.getCurrentState());
+                }
+                data.putAll(finalData);
+
+                if (finalData.containsKey("metricType") && finalData.get("metricType") != null && finalData.get("value") != null) {
+                    applyMetricAliases(data, finalData.get("metricType").toString(), finalData.get("value"));
+                }
+
+                String deviceType = device.getDeviceType() != null ? device.getDeviceType().toUpperCase() : "";
+                boolean isSensor = deviceType.endsWith("SENSOR") || deviceType.contains("SENSOR") || "CAMERA_AI".equals(deviceType);
+                String eventType = isSensor ? "SENSOR" : "EVENT";
+
+                triggerAutomation(device, data, eventType);
+            });
+        } catch (Exception e) {
+            log.warn("Could not process automation from MQTT message: {}", e.getMessage());
+        }
+    }
+
+    private void triggerAutomation(com.hesta.backend.entity.Device device, Map<String, Object> data, String eventType) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null) {
             return;
         }
+        UUID homeId = device.getRoom().getHome().getId();
+        UUID deviceId = device.getId();
+        AutomationEventRequest event = AutomationEventRequest.builder()
+                .sourceDeviceId(deviceId)
+                .eventType(eventType)
+                .data(new HashMap<>(data))
+                .stateReport(true)
+                .build();
+        Runnable task = () -> {
+            try {
+                automationEngine.process(homeId, event);
+            } catch (Exception ex) {
+                log.warn("AutomationEngine execution error for device {}: {}", deviceId, ex.getMessage());
+            }
+        };
+        // Async: own transaction (an engine failure can no longer roll back this telemetry write)
+        // and the MQTT thread stays free to deliver the ACKs the engine waits for.
+        if (automationDispatcher != null) automationDispatcher.dispatch(task);
+        else task.run();
+    }
 
-        Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
-        devices.findById(deviceId)
-                .filter(device -> device.getDeviceType() == DeviceType.SENSOR)
-                .filter(device -> device.getNode() != null && nodeId.equals(device.getNode().getId()))
-                .filter(device -> device.getRoom() != null && device.getRoom().getHome() != null)
-                .ifPresent(device -> automationEngine.process(device.getRoom().getHome().getId(),
-                        AutomationEventRequest.builder().sourceDeviceId(deviceId)
-                                .eventType("SENSOR").data(data).build()));
+    private void applyMetricAliases(Map<String, Object> data, String metricType, Object value) {
+        data.put(metricType, value);
+        data.put(metricType.toLowerCase(), value);
+        data.put(metricType.toUpperCase(), value);
+        data.put("value", value);
+
+        if ("temperature".equalsIgnoreCase(metricType) || "temp".equalsIgnoreCase(metricType)) {
+            data.put("temperature", value);
+            data.put("temp", value);
+        } else if ("humidity".equalsIgnoreCase(metricType) || "hum".equalsIgnoreCase(metricType)) {
+            data.put("humidity", value);
+            data.put("hum", value);
+        } else if ("light_sensor".equalsIgnoreCase(metricType) || "light".equalsIgnoreCase(metricType)) {
+            data.put("LIGHT_SENSOR", value);
+            data.put("light", value);
+            data.put("lux", value);
+        } else if ("motion_sensor".equalsIgnoreCase(metricType) || "motion".equalsIgnoreCase(metricType)) {
+            data.put("MOTION_SENSOR", value);
+            data.put("motion", value);
+            data.put("motionDetected", value);
+        }
+    }
+
+    private java.util.Optional<com.hesta.backend.entity.Device> resolveDevice(String topic, String deviceIdStr, String nodeCode) {
+        if (deviceIdStr != null && !deviceIdStr.isBlank()) {
+            try {
+                UUID uuid = UUID.fromString(deviceIdStr);
+                java.util.Optional<com.hesta.backend.entity.Device> byId = devices.findById(uuid);
+                if (byId.isPresent()) return byId;
+            } catch (IllegalArgumentException ignored) {}
+        }
+        if (nodeCode != null && deviceIdStr != null) {
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndLocal = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            if (byNodeAndLocal.isPresent()) return byNodeAndLocal;
+
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndName = devices.findByNodeCodeAndName(nodeCode, deviceIdStr);
+            if (byNodeAndName.isPresent()) return byNodeAndName;
+        }
+        if (topic != null && !topic.isBlank()) {
+            return devices.findByMqttTopic(topic);
+        }
+        return java.util.Optional.empty();
     }
 
 
@@ -274,7 +486,9 @@ public class MqttMessageReceiver {
             Map<String, Object> state =
                     (Map<String, Object>) stateObject;
 
+            String nodeCode = extractNodeCodeFromTopic(topic);
             deviceService.updateDeviceStateFromMqtt(
+                    nodeCode,
                     deviceId,
                     state
             );
@@ -310,7 +524,9 @@ public class MqttMessageReceiver {
 
             if (!data.isEmpty()) {
 
+                String nodeCode = extractNodeCodeFromTopic(topic);
                 deviceService.updateDeviceStateFromMqtt(
+                        nodeCode,
                         deviceId,
                         data
                 );
@@ -321,6 +537,34 @@ public class MqttMessageReceiver {
                         data
                 );
             }
+        }
+
+        try {
+            if (deviceId != null) {
+                Map<String, Object> resolvedState = (stateObject instanceof Map<?, ?>)
+                        ? (Map<String, Object>) stateObject
+                        : data;
+                try {
+                    UUID deviceUuid = UUID.fromString(deviceId);
+                    MqttDeviceCommandServiceImpl.completeDeviceCommand(deviceUuid, resolvedState);
+                    if (deviceShadowService != null) {
+                        Long incomingVersion = (data.get("version") instanceof Number num) ? num.longValue() : null;
+                        deviceShadowService.updateReportedState(deviceUuid, resolvedState, incomingVersion);
+                    }
+                } catch (IllegalArgumentException ignored) {
+                    String nodeCode = extractNodeCodeFromTopic(topic);
+                    devices.findByNodeCodeAndLocalId(nodeCode, deviceId)
+                            .ifPresent(d -> {
+                                MqttDeviceCommandServiceImpl.completeDeviceCommand(d.getId(), resolvedState);
+                                if (deviceShadowService != null) {
+                                    Long incomingVersion = (data.get("version") instanceof Number num) ? num.longValue() : null;
+                                    deviceShadowService.updateReportedState(d.getId(), resolvedState, incomingVersion);
+                                }
+                            });
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check active command resolution from state: {}", e.getMessage());
         }
     }
 
@@ -372,12 +616,9 @@ public class MqttMessageReceiver {
         // Check pending command
         // =========================================================
 
-        if (MqttDeviceCommandServiceImpl.pendingCommands
-                .containsKey(commandId)) {
-
-            CompletableFuture<CommandResult> future =
-                    MqttDeviceCommandServiceImpl.pendingCommands
-                            .remove(commandId);
+        CompletableFuture<CommandResult> future =
+                MqttDeviceCommandServiceImpl.pendingCommands.remove(commandId);
+        if (future != null) {
 
             // -----------------------------------------------------
             // Determine success
@@ -425,6 +666,10 @@ public class MqttMessageReceiver {
                     status,
                     success
             );
+
+            if (success && data.containsKey("state")) {
+                handleLateAckStateReconciliation(data);
+            }
 
         } else {
 
@@ -489,7 +734,10 @@ public class MqttMessageReceiver {
                 state
         );
 
+        // Cannot easily determine nodeCode here without fetching device by UUID
+        // Assuming late ACK deviceId is a UUID since commands are initiated by backend using UUID
         deviceService.updateDeviceStateFromMqtt(
+                null,
                 deviceId,
                 state
         );
@@ -499,6 +747,14 @@ public class MqttMessageReceiver {
     // =============================================================
     // EXTRACT DEVICE ID FROM TOPIC
     // =============================================================
+
+    private String extractNodeCodeFromTopic(String topic) {
+        String[] parts = topic.split("/");
+        if (parts.length >= 6 && "nodes".equals(parts[1])) {
+            return parts[2];
+        }
+        return null;
+    }
 
     private String extractDeviceIdFromTopic(
             String topic
@@ -534,4 +790,200 @@ public class MqttMessageReceiver {
 
         return null;
     }
+    private void handleCatalog(String topic, String payload) {
+        log.info("Processing catalog. Topic: [{}]", topic);
+        try {
+            // Topic format: hesta/nodes/{nodeId}/catalog
+            String[] parts = topic.split("/");
+            if (parts.length >= 4) {
+                String nodeId = parts[2];
+                java.util.Optional<EdgeNode> nodeOpt = edgeNodeRepository.findByNodeCode(nodeId);
+                if (nodeOpt.isPresent()) {
+                    EdgeNode node = nodeOpt.get();
+                    List<Map<String, Object>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, Object>>>() {});
+                    node.setSupportedTypes(supportedTypes);
+                    edgeNodeRepository.save(node);
+                    log.info("Updated catalog for node [{}]: {}", nodeId, supportedTypes);
+                } else {
+                    log.warn("Node not found for catalog update: {}", nodeId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse catalog payload", e);
+        }
+    }
+
+    private void handleEdgeNodeRegistration(String topic, String payload) {
+        log.info("Processing EdgeNode registration. Topic: [{}], Payload: [{}]", topic, payload);
+        try {
+            String nodeCode = null;
+            try {
+                Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+                if (data.containsKey("nodeId") && data.get("nodeId") != null) {
+                    nodeCode = data.get("nodeId").toString();
+                } else if (data.containsKey("nodeCode") && data.get("nodeCode") != null) {
+                    nodeCode = data.get("nodeCode").toString();
+                }
+            } catch (Exception ignored) {}
+
+            if (nodeCode == null || nodeCode.isBlank()) {
+                String[] parts = topic.split("/");
+                if (parts.length >= 3 && "nodes".equals(parts[1])) {
+                    nodeCode = parts[2];
+                }
+            }
+
+            if (nodeCode != null && !nodeCode.isBlank()) {
+                final String finalNodeCode = nodeCode;
+                edgeNodeRepository.findByNodeCode(finalNodeCode).ifPresent(node -> {
+                    node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                    edgeNodeRepository.save(node);
+                    log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
+                    cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
+                });
+            }
+        } catch (Exception e) {
+            log.error("Failed to process EdgeNode registration for topic: {}", topic, e);
+        }
+    }
+
+    private void handleDeviceStatus(String topic, String payload) {
+        log.info("Processing status. Topic: [{}], Status: [{}]", topic, payload);
+        try {
+            String[] parts = topic.split("/");
+            if (parts.length == 4 && "nodes".equals(parts[1]) && "status".equals(parts[3])) {
+                String nodeCode = parts[2];
+                String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
+                com.hesta.backend.enums.EdgeNodeStatus nodeStatus = "ONLINE".equals(statusStr)
+                        ? com.hesta.backend.enums.EdgeNodeStatus.ONLINE
+                        : com.hesta.backend.enums.EdgeNodeStatus.OFFLINE;
+                com.hesta.backend.enums.DeviceStatus nodeDevStatus = "ONLINE".equals(statusStr)
+                        ? com.hesta.backend.enums.DeviceStatus.ONLINE
+                        : com.hesta.backend.enums.DeviceStatus.OFFLINE;
+                edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
+                    n.setStatus(nodeStatus);
+                    edgeNodeRepository.save(n);
+                    log.info("Updated node {} status to {}", nodeCode, nodeStatus);
+                    cascadeNodeStatusToDevices(n, nodeDevStatus);
+                });
+                return;
+            }
+
+            String deviceIdStr = extractDeviceIdFromTopic(topic);
+            String nodeCode = extractNodeCodeFromTopic(topic);
+            if (deviceIdStr == null) return;
+
+            String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
+            com.hesta.backend.enums.DeviceStatus devStatus = "ONLINE".equals(statusStr)
+                    ? com.hesta.backend.enums.DeviceStatus.ONLINE
+                    : com.hesta.backend.enums.DeviceStatus.OFFLINE;
+
+            java.util.Optional<com.hesta.backend.entity.Device> devOpt;
+            try {
+                devOpt = devices.findById(UUID.fromString(deviceIdStr));
+            } catch (IllegalArgumentException e) {
+                devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            }
+
+            devOpt.ifPresent(device -> {
+                device.setStatus(devStatus);
+                device.setLastSeen(java.time.OffsetDateTime.now());
+                devices.save(device);
+                log.info("Updated device {} status to {}", device.getId(), devStatus);
+                publishDeviceStateChanged(device);
+
+                if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
+                    EdgeNode node = device.getNode();
+                    if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                        node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                        edgeNodeRepository.save(node);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            log.error("Failed to process status from topic: {}", topic, e);
+        }
+    }
+
+    private void handleOtaMessage(String topic, String payload) {
+        if (otaCampaignService == null) return;
+        try {
+            String nodeCode = extractNodeCodeFromTopic(topic);
+            Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            String version = data.getOrDefault("version", "").toString();
+            String status = data.getOrDefault("status", "").toString();
+            boolean success = "SUCCESS".equalsIgnoreCase(status) || "OK".equalsIgnoreCase(status);
+            String error = data.getOrDefault("error", "").toString();
+            otaCampaignService.handleNodeOtaResult(nodeCode, version, success, error);
+            log.info("Processed OTA status for node [{}]: success={}, version={}", nodeCode, success, version);
+        } catch (Exception e) {
+            log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
+        }
+    }
+
+    private void handleFallDetectionEvent(String topic, String payload) {
+        log.info("Processing Fall Detection MQTT event from topic: {}", topic);
+        if (fallIncidentService != null) {
+            try {
+                com.hesta.backend.falldetection.dto.FallIncidentEventDTO event =
+                        objectMapper.readValue(payload, com.hesta.backend.falldetection.dto.FallIncidentEventDTO.class);
+                fallIncidentService.processIncomingFallEvent(event);
+            } catch (Exception e) {
+                log.error("Failed to parse or process fall incident payload: {}", payload, e);
+            }
+        } else {
+            log.warn("FallIncidentService is not available to process fall event");
+        }
+    }
+
+    private void cascadeNodeStatusToDevices(EdgeNode node, com.hesta.backend.enums.DeviceStatus newStatus) {
+        if (devices == null || node == null) return;
+        try {
+            List<com.hesta.backend.entity.Device> devList = devices.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
+            for (com.hesta.backend.entity.Device dev : devList) {
+                if (dev.getStatus() != newStatus) {
+                    dev.setStatus(newStatus);
+                    dev.setLastSeen(java.time.OffsetDateTime.now());
+                    devices.save(dev);
+                    log.info("Cascaded status {} to device {} ({}) for node {}", newStatus, dev.getName(), dev.getId(), node.getNodeCode());
+                    publishDeviceStateChanged(dev);
+                }
+            }
+        } catch (Exception ex) {
+            log.error("Failed to cascade status {} to devices of node {}: {}", newStatus, node.getNodeCode(), ex.getMessage());
+        }
+    }
+
+    private void publishDeviceStateChanged(com.hesta.backend.entity.Device dev) {
+        UUID homeId = dev.getHome() != null ? dev.getHome().getId() : null;
+        if (homeId == null) return;
+
+        if (applicationEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    applicationEventPublisher.publishEvent(new com.hesta.backend.dto.command.DeviceStateChangedEvent(homeId, snapshot));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+
+        if (realtimeEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    realtimeEventPublisher.publish(com.hesta.backend.realtime.model.RealtimeEvent.create(
+                            com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED,
+                            homeId,
+                            dev.getId(),
+                            snapshot
+                    ));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish realtime websocket event for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+    }
+
 }

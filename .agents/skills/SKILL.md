@@ -56,7 +56,7 @@ When compatible with the repository, use these responsibility boundaries:
 * Mapper: DTO/entity conversion when the project already uses mappers.
 
 Rules:
-
+* Do not create a trigger for database
 * Do not put significant business logic in controllers.
 * Do not put business orchestration in repositories.
 * Prefer constructor injection.
