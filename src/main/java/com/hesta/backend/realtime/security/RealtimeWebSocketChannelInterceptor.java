@@ -29,6 +29,8 @@ import java.util.UUID;
 public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
 
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String FALL_USER_DESTINATION =
+            "/user" + com.hesta.backend.falldetection.service.FallIncidentServiceImpl.USER_FALL_DESTINATION;
 
     private final JwtTokenProvider jwtTokenProvider;
     private final CustomUserDetailsService userDetailsService;
@@ -55,12 +57,7 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
     private void authenticate(StompHeaderAccessor accessor) {
         String authorization = accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION);
         if (!StringUtils.hasText(authorization) || !authorization.startsWith(BEARER_PREFIX)) {
-            // Allow anonymous connection for public emergency monitors/kiosks
-            accessor.setUser(new org.springframework.security.authentication.AnonymousAuthenticationToken(
-                    "anonymousKey", "anonymousEmergencyUser",
-                    java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ANONYMOUS"))
-            ));
-            return;
+            throw new BadCredentialsException("WebSocket authentication failed");
         }
 
         String token = authorization.substring(BEARER_PREFIX.length());
@@ -88,12 +85,11 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
     }
 
     private void authorizeSubscription(StompHeaderAccessor accessor) {
-        String destination = accessor.getDestination();
-        if (destination != null && (destination.startsWith("/topic/emergency") || destination.contains("/fall"))) {
-            return; // Allow emergency topic for all clients
-        }
-
         CustomUserDetails userDetails = authenticatedUser(accessor);
+        // Per-user queue: the broker only delivers what was addressed to this session's own user.
+        if (FALL_USER_DESTINATION.equals(accessor.getDestination())) {
+            return;
+        }
         UUID homeId = RealtimeDestinations.extractHomeId(accessor.getDestination())
                 .orElseThrow(() -> new AccessDeniedException("Realtime destination is not allowed"));
 

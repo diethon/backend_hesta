@@ -31,6 +31,12 @@ public class FallIncidentServiceImpl implements FallIncidentService {
     @Autowired(required = false)
     private com.hesta.backend.config.mqtt.MqttGateway mqttGateway;
 
+    @Autowired(required = false)
+    private com.hesta.backend.repository.HomeMemberRepository homeMemberRepository;
+
+    /** Per-user destination; clients subscribe to "/user" + this. */
+    public static final String USER_FALL_DESTINATION = "/topic/fall";
+
     // In-memory active incidents store & countdown scheduler
     private final Map<UUID, FallIncidentResponseDTO> activeIncidents = new ConcurrentHashMap<>();
     private final Map<String, Long> dedupCache = new ConcurrentHashMap<>();
@@ -216,10 +222,15 @@ public class FallIncidentServiceImpl implements FallIncidentService {
 
     private void broadcastRealtime(FallIncidentResponseDTO incident) {
         messagingTemplate.ifPresent(template -> {
+            if (homeMemberRepository == null) return;
             try {
-                template.convertAndSend("/topic/emergency/fall", incident);
-                template.convertAndSend("/topic/home/" + incident.getHomeId() + "/fall", incident);
-                log.info("[STOMP WS] Đã broadcast sự kiện té ngã tới /topic/emergency/fall");
+                // Only active members of the incident's home receive it (STOMP principal name = email).
+                List<String> recipients = homeMemberRepository.findByHomeIdWithUser(incident.getHomeId()).stream()
+                        .filter(m -> m.getStatus() == com.hesta.backend.enums.MemberStatus.ACTIVE)
+                        .map(m -> m.getUser().getEmail())
+                        .toList();
+                recipients.forEach(email -> template.convertAndSendToUser(email, USER_FALL_DESTINATION, incident));
+                log.info("[STOMP WS] Đã gửi sự kiện té ngã tới {} thành viên của nhà {}", recipients.size(), incident.getHomeId());
             } catch (Exception e) {
                 log.warn("[STOMP WS] Không thể broadcast sự kiện: {}", e.getMessage());
             }
