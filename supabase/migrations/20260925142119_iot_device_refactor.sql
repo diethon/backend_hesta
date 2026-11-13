@@ -14,6 +14,11 @@ ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_home_id_fkey;
 -- Drop unique constraint on node_id and gpio_pin
 ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_node_id_gpio_pin_key;
 
+-- Drop dependent trigger, function, and index before dropping devices.home_id
+DROP TRIGGER IF EXISTS trg_devices_preserve_action_home ON devices;
+DROP FUNCTION IF EXISTS prevent_device_home_mismatch();
+DROP INDEX IF EXISTS idx_devices_home;
+
 -- Drop columns
 ALTER TABLE devices DROP COLUMN IF EXISTS home_id;
 ALTER TABLE devices DROP COLUMN IF EXISTS gpio_pin;
