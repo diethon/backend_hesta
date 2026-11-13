@@ -134,11 +134,7 @@ public class ParentalGuardianServiceImpl implements ParentalGuardianService {
         authorization.requireSceneManagement(userId, homeId);
         ParentalGuardianRule rule = findRule(homeId, ruleId);
         rule.setEnabled(enabled);
-        if (!enabled && rule.getStatus() == GuardianStatus.LOCKED_OUT) {
-            rule.setStatus(GuardianStatus.IDLE);
-            rule.setSessionStartedAt(null);
-            rule.setSessionExpiresAt(null);
-        }
+        if (!enabled) endSession(rule);
         ParentalGuardianRule saved = ruleRepository.save(rule);
         recordLog(saved, enabled ? "ENABLED" : "DISABLED",
                 enabled ? "Đã bật quy tắc Giám hộ con trẻ." : "Đã tắt quy tắc Giám hộ con trẻ.");
@@ -161,12 +157,8 @@ public class ParentalGuardianServiceImpl implements ParentalGuardianService {
         rule.setParentAway(parentAway);
 
         if (!parentAway) {
-            // Phụ huynh về nhà -> reset trạng thái khóa để con dùng bình thường
-            if (rule.getStatus() == GuardianStatus.LOCKED_OUT) {
-                rule.setStatus(GuardianStatus.IDLE);
-                rule.setSessionStartedAt(null);
-                rule.setSessionExpiresAt(null);
-            }
+            // Phụ huynh về nhà -> dừng đếm giờ và mở khóa để con dùng bình thường
+            endSession(rule);
             recordLog(rule, "DISARMED", "Phụ huynh đã về nhà. Chế độ Giám hộ con trẻ tạm thời tắt kích hoạt.");
             notifyParents(rule, "Chế độ Giám hộ: Phụ huynh về nhà",
                     "Đã tắt chế độ giới hạn màn hình cho " + rule.getTargetDevice().getName() + ".",
@@ -359,7 +351,9 @@ public class ParentalGuardianServiceImpl implements ParentalGuardianService {
         }
     }
 
+    // AFTER_COMMIT runs after the publisher's transaction ended: without a new one, saves here would never be committed.
     @org.springframework.transaction.event.TransactionalEventListener(phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void onDeviceStateChangedEvent(com.hesta.backend.dto.command.DeviceStateChangedEvent event) {
         if (event == null || event.payload() == null || event.payload().deviceId() == null) return;
         Map<String, Object> state = new HashMap<>();
@@ -388,11 +382,7 @@ public class ParentalGuardianServiceImpl implements ParentalGuardianService {
                         NotificationPriority.MEDIUM);
             } else if (norm.contains("ARRIVAL") || norm.contains("PARENT_RETURNED") || norm.contains("HOME")) {
                 rule.setParentAway(false);
-                if (rule.getStatus() == GuardianStatus.LOCKED_OUT) {
-                    rule.setStatus(GuardianStatus.IDLE);
-                    rule.setSessionStartedAt(null);
-                    rule.setSessionExpiresAt(null);
-                }
+                endSession(rule);
                 ruleRepository.save(rule);
                 recordLog(rule, "CAMERA_TRIGGER", "Camera AI phát hiện phụ huynh đã về nhà. Tạm dừng chế độ Giám hộ.");
                 notifyParents(rule, "Camera AI: Phụ huynh đã về nhà",
@@ -446,6 +436,13 @@ public class ParentalGuardianServiceImpl implements ParentalGuardianService {
                 }
             }
         }
+    }
+
+    /** Stops any countdown or lockout so the device can be used freely again. */
+    private void endSession(ParentalGuardianRule rule) {
+        rule.setStatus(GuardianStatus.IDLE);
+        rule.setSessionStartedAt(null);
+        rule.setSessionExpiresAt(null);
     }
 
     private boolean isPowerOn(Map<String, Object> state) {

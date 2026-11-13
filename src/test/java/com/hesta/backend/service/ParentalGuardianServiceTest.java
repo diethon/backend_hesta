@@ -125,6 +125,23 @@ class ParentalGuardianServiceTest {
     }
 
     @Test
+    @DisplayName("Phụ huynh về nhà giữa phiên -> dừng đếm giờ, không ngắt điện sau đó")
+    void testParentReturnStopsCountdown() {
+        rule.setParentAway(true);
+        rule.setStatus(GuardianStatus.COUNTDOWN);
+        rule.setSessionStartedAt(java.time.OffsetDateTime.now());
+        rule.setSessionExpiresAt(java.time.OffsetDateTime.now().plusMinutes(10));
+        when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(ruleRepository.findByIdAndHomeId(ruleId, homeId)).thenReturn(Optional.of(rule));
+        when(ruleRepository.save(any(ParentalGuardianRule.class))).thenAnswer(i -> i.getArgument(0));
+
+        ParentalGuardianResponse response = service.setParentAway(userId, homeId, ruleId, false);
+
+        assertThat(response.getStatus()).isEqualTo(GuardianStatus.IDLE);
+        assertThat(rule.getSessionExpiresAt()).isNull();
+    }
+
+    @Test
     @DisplayName("Khi phụ huynh vắng nhà và con bật TV -> Bắt đầu đếm ngược thời gian cho phép")
     void testOnDeviceStateChanged_StartsCountdown() {
         rule.setParentAway(true);
