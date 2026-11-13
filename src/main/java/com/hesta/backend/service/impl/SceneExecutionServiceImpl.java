@@ -14,6 +14,8 @@ import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.SceneExecutionRepository;
 import com.hesta.backend.repository.SceneRepository;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.service.BehaviorEventRecorder;
 import com.hesta.backend.service.HomeAuthorizationService;
 import com.hesta.backend.service.ManualOverrideService;
@@ -50,6 +52,12 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     @Transactional
     public SceneExecutionResponse execute(UUID userId, UUID homeId, UUID sceneId) {
         homeAuthorizationService.requireAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            if (!homeAuthorizationService.canRunScene(userId, sceneId)) {
+                throw new AppException(ErrorCode.UNAUTHORIZED);
+            }
+        }
         return runAndRecord(find(homeId, sceneId), userId, "MANUAL", StateChangeSource.SCENE);
     }
 
@@ -69,6 +77,12 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     @Transactional(readOnly = true)
     public List<SceneExecutionResponse> history(UUID userId, UUID homeId, UUID sceneId) {
         homeAuthorizationService.requireAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            if (!homeAuthorizationService.canRunScene(userId, sceneId)) {
+                throw new AppException(ErrorCode.SCENE_NOT_FOUND);
+            }
+        }
         find(homeId, sceneId);
         return executionRepository.findTop100BySceneIdOrderByStartedAtDesc(sceneId).stream()
                 .map(this::toResponse).toList();

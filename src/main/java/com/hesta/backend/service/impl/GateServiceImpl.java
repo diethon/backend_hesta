@@ -4,6 +4,7 @@ import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.request.GateCommandRequest;
 import com.hesta.backend.dto.response.GateStateResponse;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.enums.AccessLevel;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
@@ -45,7 +46,7 @@ public class GateServiceImpl implements GateService {
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID userId, UUID deviceId, GateCommandRequest request) {
         validateRequest(request);
-        Device device = authorizeDevice(userId, deviceId);
+        Device device = authorizeDevice(userId, deviceId, AccessLevel.CONTROL);
 
         String action = normalizeAction(request.getAction());
         Map<String, Object> parameters = request.toParameters();
@@ -76,7 +77,7 @@ public class GateServiceImpl implements GateService {
 
     @Override
     public GateStateResponse getState(UUID userId, UUID deviceId) {
-        Device device = authorizeDevice(userId, deviceId);
+        Device device = authorizeDevice(userId, deviceId, AccessLevel.VIEW);
         if (device == null || device.getCurrentState() == null) {
             return GateStateResponse.builder()
                     .deviceId(deviceId)
@@ -94,7 +95,7 @@ public class GateServiceImpl implements GateService {
                 .build();
     }
 
-    private Device authorizeDevice(UUID userId, UUID deviceId) {
+    private Device authorizeDevice(UUID userId, UUID deviceId, AccessLevel minLevel) {
         Device device = deviceRepository.findById(deviceId).orElse(null);
         if (device == null) {
             if (userId != null) {
@@ -106,6 +107,9 @@ public class GateServiceImpl implements GateService {
 
         if (userId != null && device.getHome() != null) {
             homeAuthorizationService.requireAccess(userId, device.getHome().getId());
+            if (minLevel != null) {
+                homeAuthorizationService.requireDeviceAccess(userId, deviceId, minLevel);
+            }
         }
         return device;
     }

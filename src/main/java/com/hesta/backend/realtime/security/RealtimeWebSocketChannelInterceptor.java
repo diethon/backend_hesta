@@ -55,7 +55,12 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
     private void authenticate(StompHeaderAccessor accessor) {
         String authorization = accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION);
         if (!StringUtils.hasText(authorization) || !authorization.startsWith(BEARER_PREFIX)) {
-            throw new BadCredentialsException("WebSocket authentication failed");
+            // Allow anonymous connection for public emergency monitors/kiosks
+            accessor.setUser(new org.springframework.security.authentication.AnonymousAuthenticationToken(
+                    "anonymousKey", "anonymousEmergencyUser",
+                    java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ANONYMOUS"))
+            ));
+            return;
         }
 
         String token = authorization.substring(BEARER_PREFIX.length());
@@ -83,6 +88,11 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
     }
 
     private void authorizeSubscription(StompHeaderAccessor accessor) {
+        String destination = accessor.getDestination();
+        if (destination != null && (destination.startsWith("/topic/emergency") || destination.contains("/fall"))) {
+            return; // Allow emergency topic for all clients
+        }
+
         CustomUserDetails userDetails = authenticatedUser(accessor);
         UUID homeId = RealtimeDestinations.extractHomeId(accessor.getDestination())
                 .orElseThrow(() -> new AccessDeniedException("Realtime destination is not allowed"));

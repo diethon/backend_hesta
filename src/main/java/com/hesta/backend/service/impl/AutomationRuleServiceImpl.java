@@ -14,6 +14,8 @@ import com.hesta.backend.service.ScheduleService;
 import com.hesta.backend.service.automation.RuleMatcher;
 import com.hesta.backend.service.automation.RuleTriggerGate;
 import com.hesta.backend.service.execution.DeviceActionValues;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,9 +35,18 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     private final ObjectMapper objectMapper;
     private final ScheduleService scheduleService;
 
+    private void checkAutomationAccess(UUID userId, UUID homeId) {
+        homeAuthorizationService.requireAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
+    }
+
     @Override
     @Transactional
     public AutomationRuleResponse create(UUID userId, UUID homeId, CreateAutomationRuleRequest request) {
+        checkAutomationAccess(userId, homeId);
         Home home = homeAuthorizationService.requireSceneManagement(userId, homeId);
         validateName(request.getName(), homeId, null);
         TriggerType triggerType = parseTrigger(request.getTriggerType());
@@ -51,7 +62,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     @Transactional(readOnly = true)
     public List<AutomationRuleResponse> getAll(UUID userId, UUID homeId) {
-        homeAuthorizationService.requireAccess(userId, homeId);
+        checkAutomationAccess(userId, homeId);
         List<AutomationRule> rules = ruleRepository.findAllByHomeIdOrderByNameAsc(homeId);
         fetchActions(rules);
         return rules.stream().map(this::toResponse).toList();
@@ -60,13 +71,14 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     @Transactional(readOnly = true)
     public AutomationRuleResponse get(UUID userId, UUID homeId, UUID ruleId) {
-        homeAuthorizationService.requireAccess(userId, homeId);
+        checkAutomationAccess(userId, homeId);
         return toResponse(find(ruleId, homeId));
     }
 
     @Override
     @Transactional
     public AutomationRuleResponse update(UUID userId, UUID homeId, UUID ruleId, UpdateAutomationRuleRequest request) {
+        checkAutomationAccess(userId, homeId);
         Home home = homeAuthorizationService.requireSceneManagement(userId, homeId);
         AutomationRule rule = find(ruleId, homeId);
         validateName(request.getName(), homeId, ruleId);
@@ -88,6 +100,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     @Transactional
     public AutomationRuleResponse setEnabled(UUID userId, UUID homeId, UUID ruleId, boolean enabled) {
+        checkAutomationAccess(userId, homeId);
         homeAuthorizationService.requireSceneManagement(userId, homeId);
         AutomationRule rule = find(ruleId, homeId);
         rule.setEnabled(enabled);
@@ -98,6 +111,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     @Transactional
     public void delete(UUID userId, UUID homeId, UUID ruleId) {
+        checkAutomationAccess(userId, homeId);
         homeAuthorizationService.requireSceneManagement(userId, homeId);
         ruleRepository.delete(find(ruleId, homeId));
         triggerGate.forget(ruleId);
@@ -106,7 +120,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     @Transactional(readOnly = true)
     public List<AutomationExecutionResponse> getExecutions(UUID userId, UUID homeId, UUID ruleId) {
-        homeAuthorizationService.requireAccess(userId, homeId);
+        checkAutomationAccess(userId, homeId);
         AutomationRule rule = find(ruleId, homeId);
         return executionRepository.findTop100ByRuleIdOrderByMatchedAtDesc(rule.getId()).stream()
                 .map(AutomationRuleServiceImpl::toExecutionResponse).toList();

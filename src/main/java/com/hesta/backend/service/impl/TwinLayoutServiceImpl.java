@@ -24,6 +24,8 @@ import com.hesta.backend.repository.TwinLayoutRepository;
 import com.hesta.backend.repository.TwinNodeLayoutRepository;
 import com.hesta.backend.repository.TwinRoomLayoutRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.service.TwinLayoutService;
 import com.hesta.backend.service.TwinArchitectureValidation;
 import lombok.RequiredArgsConstructor;
@@ -55,7 +57,7 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
     public TwinLayoutResponse getLayout(UUID userId, UUID homeId) {
         authorizationService.requireAccess(userId, homeId);
         return layoutRepository.findByHomeId(homeId)
-                .map(this::toResponse)
+                .map(layout -> toResponse(layout, userId))
                 .orElseGet(() -> new TwinLayoutResponse(homeId, 0L, List.of(), List.of()));
     }
 
@@ -213,6 +215,11 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
     }
 
     private TwinLayoutResponse toResponse(TwinLayout layout) {
+        return toResponse(layout, null);
+    }
+
+    private TwinLayoutResponse toResponse(TwinLayout layout, UUID userId) {
+        MemberAccessContext ctx = userId != null ? authorizationService.loadAccessContext(layout.getHomeId(), userId) : null;
         List<TwinRoomLayout> storedRooms = roomLayoutRepository.findByLayoutIdOrderByRoomId(layout.getId());
         Map<UUID, Room> liveRooms = new HashMap<>();
         roomRepository.findAllById(storedRooms.stream().map(TwinRoomLayout::getRoomId).toList()).forEach(room -> {
@@ -223,7 +230,7 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
                 .map(row -> new TwinRoomLayoutResponse(row.getRoomId(), row.getFloor(), row.getX(), row.getY(), row.getWidth(), row.getHeight()))
                 .toList();
         List<TwinNodeLayoutResponse> nodes = nodeLayoutRepository.findByLayoutIdOrderByNodeTypeAscNodeIdAsc(layout.getId()).stream()
-                .filter(row -> isLiveNode(layout.getHomeId(), row))
+                .filter(row -> isAccessibleNode(layout.getHomeId(), row, ctx))
                 .map(row -> new TwinNodeLayoutResponse(row.getNodeType(), row.getNodeId(),
                         row.getRoomId() == null || liveRooms.containsKey(row.getRoomId()) ? row.getRoomId() : null,
                         row.getX(), row.getY()))
@@ -233,6 +240,32 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
                         rooms.stream().map(TwinRoomLayoutResponse::roomId).collect(java.util.stream.Collectors.toSet()),
                         nodes.stream().map(n -> n.nodeType() + ":" + n.nodeId()).collect(java.util.stream.Collectors.toSet()),
                         rooms.stream().map(r -> (int) r.floor()).collect(java.util.stream.Collectors.toSet())));
+    }
+
+    private boolean isAccessibleNode(UUID homeId, TwinNodeLayout row, MemberAccessContext ctx) {
+        if (!isLiveNode(homeId, row)) {
+            return false;
+        }
+        if (ctx == null || ctx.isOwner() || ctx.scope() == AccessScope.ALL) {
+            return true;
+        }
+        UUID deviceId = null;
+        if (row.getNodeType() == TwinNodeType.DEVICE) {
+            try {
+                deviceId = UUID.fromString(row.getNodeId());
+            } catch (IllegalArgumentException ignored) {}
+        } else if (row.getNodeType() == TwinNodeType.SENSOR) {
+            int separator = row.getNodeId().indexOf(':');
+            if (separator > 0) {
+                try {
+                    deviceId = UUID.fromString(row.getNodeId().substring(0, separator));
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+        if (deviceId == null) return false;
+        Device device = deviceRepository.findById(deviceId).orElse(null);
+        if (device == null || device.isDeleted()) return false;
+        return authorizationService.effectiveLevel(ctx, device).canView();
     }
 
     private boolean isLiveNode(UUID homeId, TwinNodeLayout row) {

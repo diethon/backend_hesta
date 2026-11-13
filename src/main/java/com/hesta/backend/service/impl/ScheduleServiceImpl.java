@@ -14,6 +14,8 @@ import com.hesta.backend.repository.AutomationScheduleRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.repository.SceneScheduleRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.service.ScheduleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -81,6 +83,10 @@ public class ScheduleServiceImpl implements ScheduleService {
     @Transactional(readOnly = true)
     public List<ScheduleResponse> ruleSchedules(UUID userId, UUID homeId, UUID ruleId) {
         authorization.requireAccess(userId, homeId);
+        MemberAccessContext ctx = authorization.loadAccessContext(homeId, userId);
+        if (!ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
         rule(homeId, ruleId);
         return ruleSchedules.findAllByRuleIdOrderByScheduledTimeAsc(ruleId).stream()
                 .map(this::response).toList();
@@ -90,6 +96,10 @@ public class ScheduleServiceImpl implements ScheduleService {
     @Transactional
     public ScheduleResponse saveRuleSchedule(UUID userId, UUID homeId, UUID ruleId, UUID scheduleId, ScheduleRequest request) {
         authorization.requireSceneManagement(userId, homeId);
+        MemberAccessContext ctx = authorization.loadAccessContext(homeId, userId);
+        if (!ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
         AutomationRule rule = rule(homeId, ruleId);
         if (rule.getTriggerType() != TriggerType.SCHEDULE) throw new AppException(ErrorCode.AUTOMATION_TRIGGER_INVALID);
         Short[] days = validate(request);
@@ -107,6 +117,10 @@ public class ScheduleServiceImpl implements ScheduleService {
     @Transactional
     public void deleteRuleSchedule(UUID userId, UUID homeId, UUID ruleId, UUID scheduleId) {
         authorization.requireSceneManagement(userId, homeId);
+        MemberAccessContext ctx = authorization.loadAccessContext(homeId, userId);
+        if (!ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
         rule(homeId, ruleId);
         AutomationSchedule schedule = ruleSchedules.findById(scheduleId)
                 .filter(item -> item.getRule().getId().equals(ruleId))

@@ -4,6 +4,7 @@ import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.dto.response.ManualCommandResponse;
 import com.hesta.backend.dto.response.ManualOverrideResponse;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.enums.AccessLevel;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
@@ -33,7 +34,7 @@ public class ManualControlServiceImpl implements ManualControlService {
 
     @Override
     public ManualCommandResponse command(UUID userId, UUID deviceId, String rawAction) {
-        Device device = authorizedDevice(userId, deviceId);
+        Device device = authorizedDevice(userId, deviceId, AccessLevel.CONTROL);
         String action;
         try {
             action = rawAction.trim().toUpperCase(java.util.Locale.ROOT);
@@ -61,19 +62,19 @@ public class ManualControlServiceImpl implements ManualControlService {
 
     @Override
     public OffsetDateTime cancelAutomation(UUID userId, UUID deviceId) {
-        return overrides.activate(authorizedDevice(userId, deviceId), userId, "CANCEL");
+        return overrides.activate(authorizedDevice(userId, deviceId, AccessLevel.CONTROL), userId, "CANCEL");
     }
 
     @Override
     public void resumeAutomation(UUID userId, UUID deviceId) {
-        Device device = authorizedDevice(userId, deviceId);
+        Device device = authorizedDevice(userId, deviceId, AccessLevel.CONTROL);
         overrides.resumeAutomation(device, userId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ManualOverrideResponse> history(UUID userId, UUID deviceId) {
-        authorizedDevice(userId, deviceId);
+        authorizedDevice(userId, deviceId, AccessLevel.VIEW);
         return behaviorEvents.findTop100ByDeviceIdAndEventTypeOrderByOccurredAtDesc(deviceId, "MANUAL_OVERRIDE")
                 .stream().map(event -> ManualOverrideResponse.builder().id(event.getId())
                         .action(event.getAction()).userId(event.getUser() == null ? null : event.getUser().getId())
@@ -81,15 +82,15 @@ public class ManualControlServiceImpl implements ManualControlService {
                 .toList();
     }
 
-    private Device authorizedDevice(UUID userId, UUID deviceId) {
+    private Device authorizedDevice(UUID userId, UUID deviceId, AccessLevel minLevel) {
         Device device = devices.findByIdWithNode(deviceId)
                 .or(() -> devices.findById(deviceId))
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        var home = device.getHome();
-        if (home == null || home.getId() == null) {
-            throw new AppException(ErrorCode.HOME_NOT_FOUND);
+        if (device.getHome() != null) {
+            authorization.requireAccess(userId, device.getHome().getId());
         }
-        authorization.requireAccess(userId, home.getId());
+        authorization.requireDeviceAccess(userId, deviceId, minLevel);
         return device;
     }
 

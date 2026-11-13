@@ -116,4 +116,127 @@ class HomeServiceTest {
 
         verify(homeRepository, never()).save(any());
     }
+
+    @Test
+    void removeMember_ThrowsUnauthorized_WhenCallerIsNotOwner() {
+        UUID targetId = UUID.randomUUID();
+        HomeMember normalMember = HomeMember.builder().home(home).role(HomeRole.MEMBER).build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(normalMember));
+
+        assertThatThrownBy(() -> homeService.removeMember(userId, homeId, targetId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHORIZED);
+
+        verify(homeMemberRepository, never()).delete(any());
+    }
+
+    @Test
+    void removeMember_ThrowsCannotRemoveSelf_WhenTargetIsCaller() {
+        HomeMember ownerMember = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(ownerMember));
+
+        assertThatThrownBy(() -> homeService.removeMember(userId, homeId, userId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_REMOVE_SELF);
+
+        verify(homeMemberRepository, never()).delete(any());
+    }
+
+    @Test
+    void removeMember_ThrowsCannotRemoveOwner_WhenTargetIsOwner() {
+        UUID targetOwnerId = UUID.randomUUID();
+        HomeMember callerOwner = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+        HomeMember targetOwner = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(callerOwner));
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, targetOwnerId))
+                .thenReturn(Optional.of(targetOwner));
+
+        assertThatThrownBy(() -> homeService.removeMember(userId, homeId, targetOwnerId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_REMOVE_OWNER);
+
+        verify(homeMemberRepository, never()).delete(any());
+    }
+
+    @Test
+    void removeMember_Success_WhenTargetIsNormalMember() {
+        UUID targetMemberId = UUID.randomUUID();
+        HomeMember callerOwner = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+        HomeMember targetMember = HomeMember.builder().home(home).role(HomeRole.MEMBER).build();
+
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(callerOwner));
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, targetMemberId))
+                .thenReturn(Optional.of(targetMember));
+
+        homeService.removeMember(userId, homeId, targetMemberId);
+
+        verify(homeMemberRepository).delete(targetMember);
+    }
+
+    @Test
+    void updateMemberRole_ThrowsUnauthorized_WhenCallerIsNotOwner() {
+        UUID targetId = UUID.randomUUID();
+        HomeMember normalMember = HomeMember.builder().home(home).role(HomeRole.MEMBER).build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(normalMember));
+
+        assertThatThrownBy(() -> homeService.updateMemberRole(userId, homeId, targetId, HomeRole.OWNER))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHORIZED);
+
+        verify(homeMemberRepository, never()).save(any());
+    }
+
+    @Test
+    void updateMemberRole_ThrowsCannotChangeOwnerRole_WhenTargetIsCaller() {
+        HomeMember ownerMember = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(ownerMember));
+
+        assertThatThrownBy(() -> homeService.updateMemberRole(userId, homeId, userId, HomeRole.MEMBER))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_CHANGE_OWNER_ROLE);
+
+        verify(homeMemberRepository, never()).save(any());
+    }
+
+    @Test
+    void updateMemberRole_ThrowsCannotChangeOwnerRole_WhenTargetIsOwner() {
+        UUID targetOwnerId = UUID.randomUUID();
+        HomeMember callerOwner = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+        HomeMember targetOwner = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(callerOwner));
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, targetOwnerId))
+                .thenReturn(Optional.of(targetOwner));
+
+        assertThatThrownBy(() -> homeService.updateMemberRole(userId, homeId, targetOwnerId, HomeRole.MEMBER))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_CHANGE_OWNER_ROLE);
+
+        verify(homeMemberRepository, never()).save(any());
+    }
+
+    @Test
+    void updateMemberRole_Success_PromotingMemberToOwner() {
+        UUID targetMemberId = UUID.randomUUID();
+        HomeMember callerOwner = HomeMember.builder().home(home).role(HomeRole.OWNER).build();
+        HomeMember targetMember = HomeMember.builder().home(home).role(HomeRole.MEMBER).build();
+
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(callerOwner));
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, targetMemberId))
+                .thenReturn(Optional.of(targetMember));
+
+        homeService.updateMemberRole(userId, homeId, targetMemberId, HomeRole.OWNER);
+
+        assertThat(targetMember.getRole()).isEqualTo(HomeRole.OWNER);
+        verify(homeMemberRepository).save(targetMember);
+    }
 }

@@ -20,6 +20,9 @@ import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.AutomationRuleService;
 import com.hesta.backend.service.BehaviorEventRecorder;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessLevel;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.service.MlServiceClient;
 import com.hesta.backend.service.RecommendationService;
 import lombok.RequiredArgsConstructor;
@@ -220,7 +223,12 @@ public class RecommendationServiceImpl implements RecommendationService {
     @Transactional(readOnly = true)
     public List<RecommendationResponse> list(UUID userId, UUID homeId) {
         authorization.requireAccess(userId, homeId);
-        return recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId).stream()
+        MemberAccessContext ctx = authorization.loadAccessContext(homeId, userId);
+        var stream = recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId).stream();
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            stream = stream.filter(r -> r.getDevice() != null && authorization.effectiveLevel(ctx, r.getDevice()) == AccessLevel.CONTROL);
+        }
+        return stream
                 .sorted(Comparator.comparing((AutomationRecommendation item) -> !"PENDING".equals(item.getStatus())))
                 .map(this::response)
                 .toList();
@@ -230,8 +238,13 @@ public class RecommendationServiceImpl implements RecommendationService {
     @Transactional(readOnly = true)
     public RecommendationResponse getTopRecommendation(UUID userId, UUID homeId) {
         authorization.requireAccess(userId, homeId);
+        MemberAccessContext ctx = authorization.loadAccessContext(homeId, userId);
         return recommendations.findFirstByHomeIdAndStatusOrderByConfidenceScoreDescCreatedAtDesc(homeId, "PENDING")
                 .filter(rec -> rec.getConfidenceScore() != null && rec.getConfidenceScore().doubleValue() >= confidenceThreshold)
+                .filter(rec -> {
+                    if (ctx == null || ctx.isOwner() || ctx.scope() == AccessScope.ALL) return true;
+                    return rec.getDevice() != null && authorization.effectiveLevel(ctx, rec.getDevice()) == AccessLevel.CONTROL;
+                })
                 .map(this::response)
                 .orElse(null);
     }

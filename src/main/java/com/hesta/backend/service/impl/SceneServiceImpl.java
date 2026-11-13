@@ -20,6 +20,8 @@ import com.hesta.backend.repository.AutomationRuleRepository;
 import com.hesta.backend.repository.SceneActionRepository;
 import com.hesta.backend.repository.SceneRepository;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.service.SceneService;
 import com.hesta.backend.service.execution.DeviceActionValues;
 import lombok.RequiredArgsConstructor;
@@ -88,15 +90,24 @@ public class SceneServiceImpl implements SceneService {
     @Transactional(readOnly = true)
     public List<SceneResponse> getScenesForHome(UUID authenticatedUserId, UUID homeId) {
         homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
-        return sceneRepository.findAllByHomeIdOrderByNameAsc(homeId).stream()
-                .map(this::toResponse)
-                .toList();
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, authenticatedUserId);
+        List<Scene> scenes = sceneRepository.findAllByHomeIdOrderByNameAsc(homeId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            scenes = scenes.stream().filter(s -> homeAuthorizationService.canRunScene(authenticatedUserId, s.getId())).toList();
+        }
+        return scenes.stream().map(this::toResponse).toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public SceneResponse getScene(UUID authenticatedUserId, UUID homeId, UUID sceneId) {
         homeAuthorizationService.requireAccess(authenticatedUserId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, authenticatedUserId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            if (!homeAuthorizationService.canRunScene(authenticatedUserId, sceneId)) {
+                throw new AppException(ErrorCode.SCENE_NOT_FOUND);
+            }
+        }
         return toResponse(findSceneInHome(sceneId, homeId));
     }
 

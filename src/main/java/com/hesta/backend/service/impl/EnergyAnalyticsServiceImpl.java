@@ -1,23 +1,31 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.response.*;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.DeviceStateHistory;
+import com.hesta.backend.enums.DeviceStatus;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.DeviceStateHistoryRepository;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.service.EnergyAnalyticsService;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessLevel;
+import com.hesta.backend.enums.AccessScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -43,22 +51,74 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     private static final long PRICE_TIER_5 = 3197;
     private static final long PRICE_TIER_6 = 3302;
 
+    // Fast In-Memory TTL Cache (30 seconds)
+    private static final long CACHE_TTL_MILLIS = 30_000L;
+
+    private record CacheEntry<T>(T value, long expiresAt) {
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiresAt;
+        }
+    }
+
+    private final Map<String, CacheEntry<EnergyAnalyticsResponse>> homeAnalyticsCache = new ConcurrentHashMap<>();
+    private final Map<String, CacheEntry<DeviceEnergyBreakdown>> deviceAnalyticsCache = new ConcurrentHashMap<>();
+
+    @Override
+    public void evictHomeAndDeviceCache(UUID homeId, UUID deviceId) {
+        if (homeId != null) {
+            String homePrefix = homeId.toString() + ":";
+            homeAnalyticsCache.keySet().removeIf(k -> k.startsWith(homePrefix));
+        }
+        if (deviceId != null) {
+            String devicePrefix = deviceId.toString() + ":";
+            deviceAnalyticsCache.keySet().removeIf(k -> k.startsWith(devicePrefix));
+        }
+    }
+
+    @EventListener
+    public void onDeviceStateChanged(DeviceStateChangedEvent event) {
+        if (event == null) return;
+        UUID homeId = event.homeId();
+        UUID deviceId = (event.payload() != null) ? event.payload().deviceId() : null;
+        evictHomeAndDeviceCache(homeId, deviceId);
+    }
+
     @Override
     @Transactional(readOnly = true)
     public EnergyAnalyticsResponse getHomeEnergyAnalytics(UUID userId, UUID homeId, String period) {
         homeAuthorizationService.requireAccess(userId, homeId);
 
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+
         String normPeriod = period == null ? "30D" : period.trim().toUpperCase();
+        String cacheKey = (homeId != null ? homeId.toString() : "null") + ":" + normPeriod;
+
+        CacheEntry<EnergyAnalyticsResponse> cached = homeAnalyticsCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            return cached.value();
+        }
+
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = resolveStartTime(now, normPeriod);
 
-        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
+        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId).stream()
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .toList();
         if (devices.isEmpty()) {
-            return EnergyAnalyticsResponse.builder()
+            EnergyAnalyticsResponse emptyResponse = EnergyAnalyticsResponse.builder()
                     .summary(EnergySummaryResponse.builder().period(normPeriod).build())
                     .timeSeries(Collections.emptyList())
                     .breakdown(Collections.emptyList())
                     .build();
+            homeAnalyticsCache.put(cacheKey, new CacheEntry<>(emptyResponse, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+            return emptyResponse;
         }
 
         List<UUID> deviceIds = devices.stream().map(Device::getId).collect(Collectors.toList());
@@ -103,13 +163,14 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
         long estimatedCost = calculateEvnTariffCost(totalHomeKwh);
 
-        // Projected monthly consumption (30 days extrapolation)
-        double daysInPeriod = Math.max(1.0, Duration.between(from, now).toSeconds() / 86400.0);
-        double projectedMonthKwh = (totalHomeKwh / daysInPeriod) * 30.0;
+        // Projected monthly consumption (extrapolated to full current calendar month)
+        double daysInPeriod = Math.max(0.25, Duration.between(from, now).toSeconds() / 86400.0);
+        int daysInCurrentMonth = now.toLocalDate().lengthOfMonth();
+        double projectedMonthKwh = (totalHomeKwh / daysInPeriod) * daysInCurrentMonth;
         long projectedMonthCost = calculateEvnTariffCost(projectedMonthKwh);
 
-        // Bậc EVN sinh hoạt được quy chuẩn theo tháng (30 ngày)
-        int currentTier = determineEvnTier("30D".equalsIgnoreCase(normPeriod) ? totalHomeKwh : projectedMonthKwh);
+        // Bậc EVN hiện tại tính trên sản lượng thực tế tích lũy trong kỳ đang xét (đặc biệt là từ ngày 01 đầu tháng)
+        int currentTier = determineEvnTier(totalHomeKwh);
 
         Duration window = Duration.between(from, now);
         OffsetDateTime prevFrom = from.minus(window);
@@ -139,26 +200,38 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
         List<EnergyTimeSeriesPoint> timeSeries = buildTimeSeries(normPeriod, from, now, allHomeSegments, totalHomeKwh, estimatedCost);
 
-        return EnergyAnalyticsResponse.builder()
+        EnergyAnalyticsResponse response = EnergyAnalyticsResponse.builder()
                 .summary(summary)
                 .timeSeries(timeSeries)
                 .breakdown(breakdownList)
                 .build();
+
+        homeAnalyticsCache.put(cacheKey, new CacheEntry<>(response, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        return response;
     }
 
     @Override
     @Transactional(readOnly = true)
     public DeviceEnergyBreakdown getDeviceEnergy(UUID userId, UUID deviceId, String period) {
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-
-        if (device.getHome() != null) {
-            homeAuthorizationService.requireAccess(userId, device.getHome().getId());
-        } else {
-            throw new AppException(ErrorCode.DEVICE_NOT_FOUND);
+        UUID homeId = (device.getRoom() != null && device.getRoom().getHome() != null)
+                ? device.getRoom().getHome().getId()
+                : (device.getNode() != null && device.getNode().getHome() != null ? device.getNode().getHome().getId() : null);
+        if (homeId != null) {
+            homeAuthorizationService.requireAccess(userId, homeId);
         }
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
         String normPeriod = period == null ? "30D" : period.trim().toUpperCase();
+        String cacheKey = (deviceId != null ? deviceId.toString() : "null") + ":" + normPeriod;
+
+        CacheEntry<DeviceEnergyBreakdown> cached = deviceAnalyticsCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            return cached.value();
+        }
+
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = resolveStartTime(now, normPeriod);
 
@@ -167,7 +240,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
         DeviceEnergyResult result = calculateDeviceEnergy(device, histories, from, now);
 
-        return DeviceEnergyBreakdown.builder()
+        DeviceEnergyBreakdown breakdown = DeviceEnergyBreakdown.builder()
                 .deviceId(device.getId())
                 .deviceName(device.getName())
                 .deviceType(device.getDeviceType())
@@ -178,6 +251,9 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 .totalOnHours(Math.round(result.totalOnHours * 10.0) / 10.0)
                 .wattage(result.baseWattage)
                 .build();
+
+        deviceAnalyticsCache.put(cacheKey, new CacheEntry<>(breakdown, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        return breakdown;
     }
 
     @Override
@@ -244,9 +320,9 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     private OffsetDateTime resolveStartTime(OffsetDateTime now, String period) {
         return switch (period) {
             case "24H", "DAY", "DAILY" -> now.minusHours(24);
-            case "7D", "WEEK", "WEEKLY" -> now.minusDays(7);
-            case "MONTH", "MONTHLY" -> now.minusDays(30);
-            default -> now.minusDays(30);
+            case "7D", "WEEK", "WEEKLY" -> now.truncatedTo(ChronoUnit.DAYS).minusDays(6);
+            case "30D", "MONTH", "MONTHLY" -> now.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
+            default -> now.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
         };
     }
 
@@ -266,8 +342,16 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     private DeviceEnergyResult calculateDeviceEnergy(Device device, List<DeviceStateHistory> histories,
                                                      OffsetDateTime startTime, OffsetDateTime endTime) {
         int baseWattage = resolveDeviceWattage(device);
-        boolean isCurrentlyOn = isStateOn(device.getCurrentState());
+        boolean isOffline = device.getStatus() == DeviceStatus.OFFLINE
+                || device.getStatus() == DeviceStatus.UNKNOWN;
+        boolean isCurrentlyOn = !isOffline && isStateOn(device.getCurrentState());
         OffsetDateTime activeUntil = endTime.isAfter(OffsetDateTime.now()) ? OffsetDateTime.now() : endTime;
+        if (isOffline) {
+            OffsetDateTime lastSeen = device.getLastSeen();
+            if (lastSeen != null && lastSeen.isBefore(activeUntil)) {
+                activeUntil = lastSeen;
+            }
+        }
 
         if (histories.isEmpty()) {
             if (isCurrentlyOn) {
@@ -346,8 +430,8 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             currentStateIsOn = isStateOn(currentActiveState);
         }
 
-        // Đoạn cuối cùng từ bản ghi cuối đến thời điểm hiện tại
-        if (currentStateIsOn && cursorTime.isBefore(activeUntil)) {
+        // Đoạn cuối cùng từ bản ghi cuối đến thời điểm hiện tại (không cộng dồn vô hạn nếu thiết bị đang OFFLINE)
+        if (currentStateIsOn && !isOffline && cursorTime.isBefore(activeUntil)) {
             double tailHours = Math.max(0.0, Duration.between(cursorTime, activeUntil).toSeconds() / 3600.0);
             double effectiveWattage = resolveEffectiveWattage(device, baseWattage, currentActiveState);
             totalHoursOn += tailHours;
@@ -436,7 +520,15 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             String period, OffsetDateTime from, OffsetDateTime to, List<ActiveEnergySegment> allSegments,
             double totalHomeKwh, long estimatedCost) {
         List<EnergyTimeSeriesPoint> points = new ArrayList<>();
-        int count = "24H".equalsIgnoreCase(period) ? 24 : "7D".equalsIgnoreCase(period) ? 7 : 30;
+        int count;
+        if ("24H".equalsIgnoreCase(period)) {
+            count = 24;
+        } else if ("7D".equalsIgnoreCase(period)) {
+            count = 7;
+        } else {
+            // Hiển thị các ngày từ ngày 01 đầu tháng hiện tại đến ngày hôm nay
+            count = Math.max(1, to.getDayOfMonth());
+        }
 
         DateTimeFormatter hourFmt = DateTimeFormatter.ofPattern("HH:00");
         DateTimeFormatter dayFmt = DateTimeFormatter.ofPattern("dd/MM");

@@ -3,6 +3,7 @@ package com.hesta.backend.dto.response;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
+import com.hesta.backend.enums.AccessLevel;
 import lombok.Builder;
 import lombok.Data;
 
@@ -39,8 +40,10 @@ public class DeviceResponse {
     private BigDecimal digitalTwinZ;
     private OffsetDateTime manualOverrideUntil;
     private Boolean manualOverrideActive;
+    private AccessLevel accessLevel;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    private OffsetDateTime lastSeen;
 
     public static DeviceResponse fromEntity(Device device) {
         if (device == null) {
@@ -74,6 +77,7 @@ public class DeviceResponse {
                 .digitalTwinZ(device.getDigitalTwinZ())
                 .createdAt(device.getCreatedAt())
                 .updatedAt(device.getUpdatedAt())
+                .lastSeen(device.getLastSeen() != null ? device.getLastSeen() : device.getUpdatedAt())
                 .build();
     }
 

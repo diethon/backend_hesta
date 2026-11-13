@@ -15,6 +15,9 @@ import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.entity.DeviceStateHistory;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessLevel;
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.mapper.TwinSnapshotMapper;
 import lombok.RequiredArgsConstructor;
 import com.hesta.backend.exception.AppException;
@@ -49,6 +52,17 @@ public class DeviceServiceImpl implements DeviceService {
     private com.hesta.backend.service.ManualOverrideService manualOverrideService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.DeviceHealthService deviceHealthService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.EnergyAnalyticsService energyAnalyticsService;
+
+    private static final long HISTORY_CACHE_TTL_MILLIS = 15_000L;
+    private final Map<UUID, CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>> historyCache = new ConcurrentHashMap<>();
+
+    private record CacheEntry<T>(T value, long expiresAt) {
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiresAt;
+        }
+    }
 
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
     /** A state report this soon after one of our commands is the command's echo, not a wall switch. */
@@ -78,22 +92,40 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public List<DeviceResponse> getDevicesByHome(UUID userId, UUID homeId) {
         checkHomeAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
         List<Device> deviceList = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
         if (deviceList.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<UUID> deviceIds = deviceList.stream().map(Device::getId).collect(Collectors.toList());
+        List<Device> visibleDevices = deviceList.stream()
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+
+        if (visibleDevices.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<UUID> deviceIds = visibleDevices.stream().map(Device::getId).collect(Collectors.toList());
         Map<UUID, OffsetDateTime> overrides = (manualOverrideService != null)
                 ? manualOverrideService.getOverridesUntil(deviceIds)
                 : Collections.emptyMap();
 
-        return deviceList.stream().map(device -> {
+        return visibleDevices.stream().map(device -> {
             DeviceResponse res = DeviceResponse.fromEntity(device);
             if (res != null) {
                 OffsetDateTime until = overrides.get(device.getId());
                 res.setManualOverrideUntil(until);
                 res.setManualOverrideActive(until != null);
+                AccessLevel level = (ctx != null) ? homeAuthorizationService.effectiveLevel(ctx, device) : null;
+                res.setAccessLevel(level != null ? level : AccessLevel.CONTROL);
             }
             return res;
         }).collect(Collectors.toList());
@@ -104,10 +136,27 @@ public class DeviceServiceImpl implements DeviceService {
     public List<DeviceResponse> getDevicesByRoom(UUID userId, UUID roomId) {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new AppException(ErrorCode.ROOM_NOT_FOUND));
-        checkHomeAccess(userId, room.getHome().getId());
+        UUID homeId = room.getHome().getId();
+        checkHomeAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
 
         return deviceRepository.findByRoomId(roomId).stream()
-                .map(this::mapWithOverride)
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .map(d -> {
+                    DeviceResponse res = mapWithOverride(d);
+                    if (res != null) {
+                        AccessLevel level = (ctx != null) ? homeAuthorizationService.effectiveLevel(ctx, d) : null;
+                        res.setAccessLevel(level != null ? level : AccessLevel.CONTROL);
+                    }
+                    return res;
+                })
                 .collect(Collectors.toList());
     }
 
@@ -130,9 +179,18 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public DeviceResponse getDeviceDetail(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
-        return mapWithOverride(device);
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
+
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(getHomeId(device), userId);
+        DeviceResponse res = mapWithOverride(device);
+        if (res != null) {
+            AccessLevel level = (ctx != null) ? homeAuthorizationService.effectiveLevel(ctx, device) : null;
+            res.setAccessLevel(level != null ? level : AccessLevel.CONTROL);
+        }
+        return res;
     }
 
     @Override
@@ -254,6 +312,7 @@ public class DeviceServiceImpl implements DeviceService {
                 }
             }
 
+            historyCache.remove(device.getId());
             if (device.getHome() != null && device.getHome().getId() != null) {
                 applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
                         device.getHome().getId(), twinSnapshotMapper.device(device)));
@@ -305,6 +364,10 @@ public class DeviceServiceImpl implements DeviceService {
         }
 
         Device saved = deviceRepository.save(device);
+        historyCache.remove(deviceId);
+        if (energyAnalyticsService != null && getHomeId(device) != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        }
         return DeviceResponse.fromEntity(saved);
     }
 
@@ -319,27 +382,60 @@ public class DeviceServiceImpl implements DeviceService {
         deviceReferenceCleaner.detach(deviceId);
         device.setDeleted(true);
         deviceRepository.save(device);
+        historyCache.remove(deviceId);
+        if (energyAnalyticsService != null && getHomeId(device) != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        }
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
-        return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
+        CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>> cached = historyCache.get(deviceId);
+        if (cached != null && !cached.isExpired()) {
+            return cached.value();
+        }
+
+        List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> result = deviceStateHistoryRepository
+                .findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()
                 .map(com.hesta.backend.dto.response.DeviceStateHistoryResponse::fromEntity)
                 .collect(Collectors.toList());
+
+        historyCache.put(deviceId, new CacheEntry<>(result, System.currentTimeMillis() + HISTORY_CACHE_TTL_MILLIS));
+        return result;
+    }
+
+    @Override
+    public void evictDeviceHistoryCache(UUID deviceId) {
+        if (deviceId != null) {
+            historyCache.remove(deviceId);
+        } else {
+            historyCache.clear();
+        }
+    }
+
+    @org.springframework.context.event.EventListener
+    public void onDeviceStateChanged(DeviceStateChangedEvent event) {
+        if (event != null && event.payload() != null && event.payload().deviceId() != null) {
+            evictDeviceHistoryCache(event.payload().deviceId());
+        }
     }
 
     @Override
     @Transactional(readOnly = true)
     public byte[] exportDeviceHistoryCsv(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
         List<DeviceStateHistory> histories = deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
         return buildCsv(histories);
@@ -349,9 +445,20 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public byte[] exportHomeHistoryCsv(UUID userId, UUID homeId) {
         checkHomeAccess(userId, homeId);
-        List<Device> devices = deviceRepository.findByHomeId(homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        List<Device> devices = deviceRepository.findByHomeId(homeId).stream()
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .toList();
         List<UUID> deviceIds = devices.stream().map(Device::getId).toList();
-        List<DeviceStateHistory> histories = deviceStateHistoryRepository.findByDeviceIdInOrderByChangedAtDesc(deviceIds);
+        List<DeviceStateHistory> histories = deviceIds.isEmpty() ? Collections.emptyList()
+                : deviceStateHistoryRepository.findByDeviceIdInOrderByChangedAtDesc(deviceIds);
         return buildCsv(histories);
     }
 
@@ -401,8 +508,10 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public byte[] exportDeviceHistoryExcel(UUID userId, UUID deviceId, OffsetDateTime from, OffsetDateTime to) {
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
         List<DeviceStateHistory> histories;
         if (from != null && to != null) {
@@ -754,7 +863,17 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public com.hesta.backend.dto.response.HomeCapabilitiesResponse getHomeCapabilities(UUID userId, UUID homeId) {
         checkHomeAccess(userId, homeId);
-        List<Device> devices = deviceRepository.findByHomeId(homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        List<Device> devices = deviceRepository.findByHomeId(homeId).stream()
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .toList();
         List<com.hesta.backend.dto.response.DeviceCapabilityInfoResponse> deviceInfos = devices.stream()
                 .map(DeviceServiceImpl::toDeviceCapabilityInfo)
                 .collect(Collectors.toList());
@@ -863,8 +982,10 @@ public class DeviceServiceImpl implements DeviceService {
     @Transactional(readOnly = true)
     public com.hesta.backend.dto.response.DeviceCapabilityInfoResponse getDeviceCapabilities(UUID userId, UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new com.hesta.backend.exception.AppException(com.hesta.backend.exception.ErrorCode.DEVICE_NOT_FOUND));
+                .filter(d -> !d.isDeleted())
+                .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         checkHomeAccess(userId, getHomeId(device));
+        homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
         return toDeviceCapabilityInfo(device);
     }
 }
