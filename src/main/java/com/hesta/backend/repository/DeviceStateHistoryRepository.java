@@ -14,9 +14,11 @@ import java.util.UUID;
 
 @Repository
 public interface DeviceStateHistoryRepository extends JpaRepository<DeviceStateHistory, UUID> {
-    List<DeviceStateHistory> findByDeviceIdOrderByChangedAtDesc(UUID deviceId);
+    @Query("SELECT h FROM DeviceStateHistory h WHERE h.device.id = :deviceId ORDER BY h.changedAt DESC LIMIT 200")
+    List<DeviceStateHistory> findByDeviceIdOrderByChangedAtDesc(@Param("deviceId") UUID deviceId);
 
-    List<DeviceStateHistory> findByDeviceIdInOrderByChangedAtDesc(List<UUID> deviceIds);
+    @Query("SELECT h FROM DeviceStateHistory h WHERE h.device.id IN :deviceIds ORDER BY h.changedAt DESC LIMIT 500")
+    List<DeviceStateHistory> findByDeviceIdInOrderByChangedAtDesc(@Param("deviceIds") List<UUID> deviceIds);
 
     List<DeviceStateHistory> findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(
             UUID deviceId, OffsetDateTime from, OffsetDateTime to);

@@ -31,6 +31,18 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     private final EdgeNodeRepository edgeNodeRepository;
 
     @Autowired(required = false)
+    private com.hesta.backend.repository.DeviceRepository deviceRepository;
+
+    @Autowired(required = false)
+    private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
+
+    @Autowired(required = false)
+    private com.hesta.backend.mapper.TwinSnapshotMapper twinSnapshotMapper;
+
+    @Autowired(required = false)
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
+
+    @Autowired(required = false)
     private SimpMessagingTemplate messagingTemplate;
 
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
@@ -181,11 +193,12 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public NodeDiagnosticsResponse tripCircuitBreaker(String nodeCode) {
-        EdgeNode node = edgeNodeRepository.findByNodeCode(nodeCode).orElse(null);
+        EdgeNode node = edgeNodeRepository.findByNodeCodeWithHome(nodeCode).orElse(null);
         if (node == null) {
             try {
-                node = edgeNodeRepository.findById(UUID.fromString(nodeCode)).orElse(null);
+                node = edgeNodeRepository.findByIdWithHome(UUID.fromString(nodeCode)).orElse(null);
                 if (node != null) {
                     nodeCode = node.getNodeCode();
                 }
@@ -200,12 +213,23 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
         long[] stats = calculateLatencyStats(tracker.nodeRttBuffer.isEmpty() ? globalRttBuffer : tracker.nodeRttBuffer);
 
+        String homeName = "N/A";
+        UUID homeId = null;
+        if (node != null && node.getHome() != null) {
+            try {
+                homeId = node.getHome().getId();
+                homeName = node.getHome().getName();
+            } catch (Exception e) {
+                log.debug("Lazy load home failed: {}", e.getMessage());
+            }
+        }
+
         return NodeDiagnosticsResponse.builder()
                 .nodeId(node != null ? node.getId() : null)
                 .nodeCode(nodeCode)
                 .status(node != null && node.getStatus() != null ? node.getStatus().name() : "OFFLINE")
-                .homeId(node != null && node.getHome() != null ? node.getHome().getId() : null)
-                .homeName(node != null && node.getHome() != null ? node.getHome().getName() : "N/A")
+                .homeId(homeId)
+                .homeName(homeName)
                 .circuitState(CircuitState.OPEN)
                 .consecutiveFailures(tracker.consecutiveFailures.get())
                 .totalCommands(tracker.totalCommands.get())
@@ -221,8 +245,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public NodeDiagnosticsResponse tripCircuitBreaker(UUID nodeId) {
-        EdgeNode node = edgeNodeRepository.findById(nodeId)
+        EdgeNode node = edgeNodeRepository.findByIdWithHome(nodeId)
+                .or(() -> edgeNodeRepository.findById(nodeId))
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         return tripCircuitBreaker(node.getNodeCode());
     }
@@ -305,6 +331,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                         }
                         if (matchedNode != null && matchedNode.getStatus() != EdgeNodeStatus.ONLINE) {
                             matchedNode.setStatus(EdgeNodeStatus.ONLINE);
+                            cascadeNodeStatusToDevices(matchedNode, com.hesta.backend.enums.DeviceStatus.ONLINE);
                             edgeNodeRepository.save(matchedNode);
                             log.info("[PHO-038 Dead Man's Snitch] Node {} revived to ONLINE via received packet on topic {}", 
                                     matchedNode.getNodeCode(), topic);
@@ -339,6 +366,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     node.setStatus(EdgeNodeStatus.OFFLINE);
                     edgeNodeRepository.save(node);
                     t.isOnline.set(false);
+                    cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
                     log.warn("[PHO-038 Dead Man's Snitch] Node {} timed out (>60s without heartbeat, last seen {}s ago). Status marked OFFLINE.",
                             node.getNodeCode(), elapsedSeconds);
                 }
@@ -347,13 +375,66 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 node.setStatus(EdgeNodeStatus.OFFLINE);
                 edgeNodeRepository.save(node);
                 t.isOnline.set(false);
+                cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
                 log.warn("[PHO-038 Dead Man's Snitch] Node {} has had no heartbeat since server boot (>60s). Marking OFFLINE.",
                         node.getNodeCode());
+            } else if (node.getStatus() == EdgeNodeStatus.OFFLINE) {
+                // Node đang OFFLINE: Đảm bảo toàn bộ thiết bị phụ thuộc vào Node cũng phải là OFFLINE
+                cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
             }
         }
     }
 
-    @Override
+    private void cascadeNodeStatusToDevices(EdgeNode node, com.hesta.backend.enums.DeviceStatus newStatus) {
+        if (deviceRepository == null || node == null) return;
+        try {
+            List<com.hesta.backend.entity.Device> devices = deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
+            for (com.hesta.backend.entity.Device dev : devices) {
+                if (dev.getStatus() != newStatus) {
+                    dev.setStatus(newStatus);
+                    dev.setLastSeen(OffsetDateTime.now());
+                    deviceRepository.save(dev);
+                    log.info("Cascaded status {} to device {} ({}) for node {}", newStatus, dev.getName(), dev.getId(), node.getNodeCode());
+                    publishDeviceStateChanged(dev);
+                }
+            }
+        } catch (Exception ex) {
+            log.error("Failed to cascade status {} to devices of node {}: {}", newStatus, node.getNodeCode(), ex.getMessage());
+        }
+    }
+
+    private void publishDeviceStateChanged(com.hesta.backend.entity.Device dev) {
+        UUID homeId = dev.getHome() != null ? dev.getHome().getId() : null;
+        if (homeId == null) return;
+
+        if (applicationEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    applicationEventPublisher.publishEvent(new com.hesta.backend.dto.command.DeviceStateChangedEvent(homeId, snapshot));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+
+        if (realtimeEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    realtimeEventPublisher.publish(com.hesta.backend.realtime.model.RealtimeEvent.create(
+                            com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED,
+                            homeId,
+                            dev.getId(),
+                            snapshot
+                    ));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish realtime websocket event for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+    }
+
     public java.util.List<MqttPacketDto> getSnifferPackets() {
         return new java.util.ArrayList<>(snifferBuffer);
     }

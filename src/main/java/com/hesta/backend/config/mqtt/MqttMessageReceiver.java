@@ -47,6 +47,14 @@ public class MqttMessageReceiver {
     private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.ota.OtaCampaignService otaCampaignService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.falldetection.service.FallIncidentService fallIncidentService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.mapper.TwinSnapshotMapper twinSnapshotMapper;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -162,6 +170,16 @@ public class MqttMessageReceiver {
             else if (topic.contains("/ota/")) {
 
                 handleOtaMessage(topic, payload);
+
+            }
+
+            // =====================================================
+            // 8. FALL DETECTION / EMERGENCY SOS
+            // =====================================================
+
+            else if (topic.contains("fall-detection") || topic.contains("emergency/fall")) {
+
+                handleFallDetectionEvent(topic, payload);
 
             }
 
@@ -812,6 +830,7 @@ public class MqttMessageReceiver {
                     node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
                     edgeNodeRepository.save(node);
                     log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
+                    cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
                 });
             }
         } catch (Exception e) {
@@ -829,10 +848,14 @@ public class MqttMessageReceiver {
                 com.hesta.backend.enums.EdgeNodeStatus nodeStatus = "ONLINE".equals(statusStr)
                         ? com.hesta.backend.enums.EdgeNodeStatus.ONLINE
                         : com.hesta.backend.enums.EdgeNodeStatus.OFFLINE;
+                com.hesta.backend.enums.DeviceStatus nodeDevStatus = "ONLINE".equals(statusStr)
+                        ? com.hesta.backend.enums.DeviceStatus.ONLINE
+                        : com.hesta.backend.enums.DeviceStatus.OFFLINE;
                 edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
                     n.setStatus(nodeStatus);
                     edgeNodeRepository.save(n);
                     log.info("Updated node {} status to {}", nodeCode, nodeStatus);
+                    cascadeNodeStatusToDevices(n, nodeDevStatus);
                 });
                 return;
             }
@@ -858,6 +881,7 @@ public class MqttMessageReceiver {
                 device.setLastSeen(java.time.OffsetDateTime.now());
                 devices.save(device);
                 log.info("Updated device {} status to {}", device.getId(), devStatus);
+                publishDeviceStateChanged(device);
 
                 if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
                     EdgeNode node = device.getNode();
@@ -887,6 +911,70 @@ public class MqttMessageReceiver {
             log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
         }
     }
+
+    private void handleFallDetectionEvent(String topic, String payload) {
+        log.info("Processing Fall Detection MQTT event from topic: {}", topic);
+        if (fallIncidentService != null) {
+            try {
+                com.hesta.backend.falldetection.dto.FallIncidentEventDTO event =
+                        objectMapper.readValue(payload, com.hesta.backend.falldetection.dto.FallIncidentEventDTO.class);
+                fallIncidentService.processIncomingFallEvent(event);
+            } catch (Exception e) {
+                log.error("Failed to parse or process fall incident payload: {}", payload, e);
+            }
+        } else {
+            log.warn("FallIncidentService is not available to process fall event");
+        }
+    }
+
+    private void cascadeNodeStatusToDevices(EdgeNode node, com.hesta.backend.enums.DeviceStatus newStatus) {
+        if (devices == null || node == null) return;
+        try {
+            List<com.hesta.backend.entity.Device> devList = devices.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
+            for (com.hesta.backend.entity.Device dev : devList) {
+                if (dev.getStatus() != newStatus) {
+                    dev.setStatus(newStatus);
+                    dev.setLastSeen(java.time.OffsetDateTime.now());
+                    devices.save(dev);
+                    log.info("Cascaded status {} to device {} ({}) for node {}", newStatus, dev.getName(), dev.getId(), node.getNodeCode());
+                    publishDeviceStateChanged(dev);
+                }
+            }
+        } catch (Exception ex) {
+            log.error("Failed to cascade status {} to devices of node {}: {}", newStatus, node.getNodeCode(), ex.getMessage());
+        }
+    }
+
+    private void publishDeviceStateChanged(com.hesta.backend.entity.Device dev) {
+        UUID homeId = dev.getHome() != null ? dev.getHome().getId() : null;
+        if (homeId == null) return;
+
+        if (applicationEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    applicationEventPublisher.publishEvent(new com.hesta.backend.dto.command.DeviceStateChangedEvent(homeId, snapshot));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+
+        if (realtimeEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    realtimeEventPublisher.publish(com.hesta.backend.realtime.model.RealtimeEvent.create(
+                            com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED,
+                            homeId,
+                            dev.getId(),
+                            snapshot
+                    ));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish realtime websocket event for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+    }
+
 }
-
-

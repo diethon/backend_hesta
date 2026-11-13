@@ -101,7 +101,11 @@ public class MqttConfig {
                 topicPrefix + "/+/catalog",
                 topicPrefix + "/+/status",
                 "hesta/device/+/ack",
-                "hesta/device/+/state"
+                "hesta/device/+/state",
+                "hesta/sensor/fall-detection/#",
+                "hesta/sensor/camera/#",
+                "hesta/sensor/radar/+/event",
+                "hesta/emergency/#"
         };
 
         MqttPahoMessageDrivenChannelAdapter adapter =
