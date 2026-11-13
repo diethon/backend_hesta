@@ -32,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class MqttMessageReceiver {
     private final DeviceRepository devices;
     private final AutomationEngine automationEngine;
