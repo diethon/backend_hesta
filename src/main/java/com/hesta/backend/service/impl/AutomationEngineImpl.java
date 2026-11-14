@@ -6,8 +6,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.hesta.backend.dto.request.AutomationEventRequest;
 import com.hesta.backend.dto.response.AutomationEngineResponse;
 import com.hesta.backend.dto.response.AutomationExecutionResponse;
-import com.hesta.backend.dto.response.AutomationTestResponse;
-import com.hesta.backend.dto.response.RuleActionResponse;
 import com.hesta.backend.dto.response.SceneExecutionResponse;
 import com.hesta.backend.entity.AutomationExecution;
 import com.hesta.backend.entity.AutomationRule;
@@ -99,30 +97,6 @@ public class AutomationEngineImpl implements AutomationEngine {
         }
         return AutomationEngineResponse.builder().evaluatedRules(rules.size()).matchedRules(executions.size())
                 .executions(executions).build();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public AutomationTestResponse testRule(UUID homeId, UUID ruleId, AutomationEventRequest event) {
-        requireSourceDeviceInHome(homeId, event);
-        AutomationRule rule = findRule(homeId, ruleId);
-        if (rule.getTriggerType() == TriggerType.SCHEDULE && !rule.getConditions().isEmpty()) {
-            log.warn("testRule {}: SCHEDULE rule has {} condition(s), data integrity error", ruleId, rule.getConditions().size());
-            throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
-        }
-        ruleRepository.fetchActionsByIdIn(List.of(ruleId));
-        List<RuleActionResponse> preview = rule.getActions().stream()
-                .sorted(Comparator.comparingInt(RuleAction::getOrder))
-                .map(action -> RuleActionResponse.builder().id(action.getId())
-                        .deviceId(action.getDevice() == null ? null : action.getDevice().getId())
-                        .deviceName(action.getDevice() == null ? null : action.getDevice().getName())
-                        .sceneId(action.getScene() == null ? null : action.getScene().getId())
-                        .sceneName(action.getScene() == null ? null : action.getScene().getName())
-                        .action(action.getAction())
-                        .parameters(action.getParameters()).order(action.getOrder()).build())
-                .toList();
-        boolean matched = rule.getTriggerType() == TriggerType.SCHEDULE || ruleMatcher.matches(rule, event);
-        return AutomationTestResponse.builder().ruleId(ruleId).matched(matched).proposedActions(preview).build();
     }
 
     @Override
