@@ -1,6 +1,7 @@
 package com.hesta.backend.realtime.security;
 
 import com.hesta.backend.realtime.transport.RealtimeDestinations;
+import com.hesta.backend.realtime.transport.WebSocketSessionManager;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.security.CustomUserDetailsService;
 import com.hesta.backend.security.JwtTokenProvider;
@@ -35,6 +36,7 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
     private final JwtTokenProvider jwtTokenProvider;
     private final CustomUserDetailsService userDetailsService;
     private final RealtimeSubscriptionService subscriptionService;
+    private final WebSocketSessionManager webSocketSessionManager;
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
@@ -77,23 +79,31 @@ public class RealtimeWebSocketChannelInterceptor implements ChannelInterceptor {
             throw new DisabledException("User account is disabled");
         }
 
-        accessor.setUser(UsernamePasswordAuthenticationToken.authenticated(
+        accessor.setUser(new UsernamePasswordAuthenticationToken(
                 userDetails,
                 null,
                 userDetails.getAuthorities()
-        ));
+        ) {
+            @Override
+            public String getName() {
+                return userDetails.getId().toString();
+            }
+        });
+
+        webSocketSessionManager.registerUserSession(userDetails.getId(), accessor.getSessionId());
     }
 
     private void authorizeSubscription(StompHeaderAccessor accessor) {
         CustomUserDetails userDetails = authenticatedUser(accessor);
+        String destination = accessor.getDestination();
         // Per-user queue: the broker only delivers what was addressed to this session's own user.
-        if (FALL_USER_DESTINATION.equals(accessor.getDestination())) {
+        if (FALL_USER_DESTINATION.equals(destination)) {
             return;
         }
-        UUID homeId = RealtimeDestinations.extractHomeId(accessor.getDestination())
+        UUID homeId = RealtimeDestinations.extractHomeId(destination)
                 .orElseThrow(() -> new AccessDeniedException("Realtime destination is not allowed"));
 
-        subscriptionService.authorizeSubscription(userDetails.getId(), homeId);
+        subscriptionService.authorizeSubscription(userDetails.getId(), homeId, destination);
     }
 
     private CustomUserDetails authenticatedUser(StompHeaderAccessor accessor) {

@@ -60,15 +60,21 @@ def _get_pipeline():
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     pipeline = _get_pipeline()
-    # Tự động trích xuất danh sách phòng & thiết bị thực tế từ DB để sinh ma trận câu thoại
+
+    # 1. Nạp danh sách phòng & thiết bị thực tế từ Backend đồng bộ ngay khi khởi động
+    try:
+        if pipeline and pipeline.device_directory:
+            pipeline.device_directory.refresh(home_id=pipeline.home_id)
+            logger.info("✅ Initial device directory refreshed on startup")
+    except Exception as e:
+        logger.warning("Could not do initial device directory refresh: %s", e)
+
+    # 2. Tự động trích xuất danh sách phòng & thiết bị thực tế từ DB để sinh ma trận câu thoại
     extra_phrases = []
     try:
         from app.matrix_generator import generate_matrix_phrases
 
-        custom_rooms = []
-        if pipeline and hasattr(pipeline, "_get_custom_rooms"):
-            custom_rooms = pipeline._get_custom_rooms()
-
+        custom_rooms = pipeline.device_directory.get_known_rooms(pipeline.home_id) if pipeline else []
         raw_devs = getattr(pipeline.device_directory, "_raw_devices", []) if pipeline and pipeline.device_directory else []
         for dev in raw_devs:
             name = dev.get("name")
@@ -76,8 +82,17 @@ async def lifespan(app: FastAPI):
                 extra_phrases.extend([
                     f"Đã bật {name}",
                     f"Đã tắt {name}",
-                    f"Không thể bật {name} — tất cả thiết bị đều lỗi",
-                    f"Không thể tắt {name} — tất cả thiết bị đều lỗi",
+                    f"Đã mở {name}",
+                    f"Đã đóng {name}",
+                    f"Bạn không có quyền điều khiển {name}.",
+                    f"{name.capitalize()} hiện đang ngoại tuyến hoặc chưa kết nối.",
+                    f"{name.capitalize()} hiện đang mất kết nối.",
+                    f"Không thể kết nối đến Gateway để điều khiển {name}.",
+                    f"{name.capitalize()} không phản hồi.",
+                    f"Không thể bật {name} — thiết bị không phản hồi.",
+                    f"Không thể tắt {name} — thiết bị không phản hồi.",
+                    f"Không thể mở {name} — thiết bị không phản hồi.",
+                    f"Không thể đóng {name} — thiết bị không phản hồi.",
                 ])
 
         matrix_phrases = generate_matrix_phrases(rooms=custom_rooms, include_compounds=True)
@@ -141,6 +156,7 @@ def _verify_api_key(x_api_key: str | None):
 class VoiceCommandRequest(BaseModel):
     text: str
     homeId: str = ""
+    userId: str = ""
 
 
 class VoiceCommandResponse(BaseModel):
@@ -150,6 +166,8 @@ class VoiceCommandResponse(BaseModel):
     action: str | None = None
     room: str | None = None
     deviceType: str | None = None
+    errorCode: str | None = None
+    status: str | None = None
     totalDurationMs: float = 0.0
     stepDurations: dict[str, float] = {}
     audioUrl: str | None = None
@@ -221,12 +239,13 @@ async def get_voice_tts(
 async def process_voice_command(
     request: VoiceCommandRequest,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
 ):
     """
     Xử lý lệnh voice dạng text.
 
     Frontend gửi text (đã chuyển từ speech qua Web Speech API)
-    + homeId → pipeline xử lý → trả kết quả kèm audio MP3 tức thì nếu có sẵn trong cache.
+    + homeId + userId → pipeline xử lý → trả kết quả kèm audio MP3 tức thì nếu có sẵn trong cache.
     """
     _verify_api_key(x_api_key)
 
@@ -240,28 +259,35 @@ async def process_voice_command(
     if request.homeId:
         pipeline.home_id = request.homeId
 
-    logger.info("Processing command: '%s' (homeId=%s)", text, pipeline.home_id)
+    user_id = request.userId or (x_user_id or "")
+
+    logger.info("Processing command: '%s' (homeId=%s, userId=%s)", text, pipeline.home_id, user_id or "anonymous")
 
     try:
-        result = pipeline.process_text(text)
+        result = pipeline.process_text(text, user_id=user_id)
     except Exception as e:
         logger.exception("Pipeline error")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Tối ưu hóa phản hồi giọng nói
+    # Tối ưu hóa phản hồi giọng nói (Ưu tiên Base64 trả thẳng để phát tức thì < 5ms)
     audio_url = None
     audio_data = None
     if result.message:
         clean_msg = clean_tts_text(result.message)
         audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
 
-        # Kiểm tra nhanh trong cache: nếu đã có, gửi kèm Base64 để Frontend phát NGAY LẬP TỨC (< 10ms)
+        # 1. Kiểm tra nhanh trong cache (RAM/Disk/Bundled)
         cached_bytes = tts_manager.get_cached_audio(clean_msg)
         if cached_bytes:
             audio_data = f"data:audio/mpeg;base64,{base64.b64encode(cached_bytes).decode('ascii')}"
         else:
-            # Nếu chưa có, kích hoạt sinh ngầm ngay để sẵn sàng khi Frontend gọi /api/voice/tts
-            asyncio.create_task(tts_manager.synthesize(clean_msg))
+            # 2. Nếu chưa có, cố gắng sinh nhanh trong 1.8s để đính kèm luôn Base64 cho Frontend phát tức thì
+            try:
+                synthesized_bytes = await tts_manager.synthesize(clean_msg, timeout_sec=1.8)
+                if synthesized_bytes:
+                    audio_data = f"data:audio/mpeg;base64,{base64.b64encode(synthesized_bytes).decode('ascii')}"
+            except Exception as e:
+                logger.debug("Inline TTS synthesize skipped/timeout: %s", e)
 
     sub_commands_data = []
     for sub in getattr(result, "sub_results", []):
@@ -271,6 +297,8 @@ async def process_voice_command(
             "action": sub.intent.action if sub.intent else None,
             "room": sub.intent.room if sub.intent else None,
             "deviceType": sub.intent.device_type if sub.intent else None,
+            "errorCode": getattr(sub, "error_code", None),
+            "status": getattr(sub, "status", None),
         })
 
     return VoiceCommandResponse(
@@ -280,6 +308,8 @@ async def process_voice_command(
         action=result.intent.action if result.intent else None,
         room=result.intent.room if result.intent else None,
         deviceType=result.intent.device_type if result.intent else None,
+        errorCode=getattr(result, "error_code", None),
+        status=getattr(result, "status", None),
         totalDurationMs=result.total_duration_ms,
         stepDurations=result.step_durations,
         audioUrl=audio_url,

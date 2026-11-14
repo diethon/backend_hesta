@@ -331,3 +331,27 @@ class TestDispatchBatchResultMessages:
         )
         msg_fans = batch_fans.summary_message("TURN_OFF", "fan", None, pattern="tắt tất cả quạt")
         assert "tất cả 2 quạt trong nhà" in msg_fans
+
+    def test_summary_access_denied(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=0, failed_count=1,
+            results=[DispatchResult(device_id="d-1", success=False, status_code=403, error_code="ACCESS_DENIED")]
+        )
+        msg = batch.summary_message("TURN_ON", "light", "phòng ngủ")
+        assert "Bạn không có quyền bật đèn phòng ngủ." in msg
+
+    def test_summary_device_offline(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=0, failed_count=1,
+            results=[DispatchResult(device_id="d-1", success=False, status_code=200, error_code="DEVICE_OFFLINE")]
+        )
+        msg = batch.summary_message("TURN_ON", "light", "phòng ngủ")
+        assert "hiện đang ngoại tuyến hoặc chưa kết nối" in msg
+
+    def test_summary_gateway_disconnected(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=0, failed_count=1,
+            results=[DispatchResult(device_id="d-1", success=False, status_code=200, error_code="GATEWAY_DISCONNECTED")]
+        )
+        msg = batch.summary_message("TURN_ON", "fan", "phòng khách")
+        assert "Không thể kết nối đến Gateway" in msg

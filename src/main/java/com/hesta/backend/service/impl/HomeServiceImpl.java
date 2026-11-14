@@ -20,6 +20,8 @@ import com.hesta.backend.service.HomeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import com.hesta.backend.event.MemberAccessChangedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -59,7 +61,9 @@ public class HomeServiceImpl implements HomeService {
 
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
-    @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:false}")
+    private final ApplicationEventPublisher applicationEventPublisher;
+
+    @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:true}")
     private boolean customScopeEnabled;
 
 
@@ -101,10 +105,11 @@ public class HomeServiceImpl implements HomeService {
             }
             List<HomeInvitation> pendingInvites = homeInvitationRepository.findByHomeIdAndTargetEmailAndStatus(
                     homeId, targetEmail, InvitationStatus.PENDING);
-            boolean hasActiveInvite = pendingInvites.stream()
-                    .anyMatch(inv -> inv.getExpiresAt().isAfter(OffsetDateTime.now()));
-            if (hasActiveInvite) {
-                throw new AppException(ErrorCode.INVITATION_ALREADY_EXISTS);
+            if (!pendingInvites.isEmpty()) {
+                for (HomeInvitation oldInvite : pendingInvites) {
+                    oldInvite.setStatus(InvitationStatus.CANCELLED);
+                }
+                homeInvitationRepository.saveAll(pendingInvites);
             }
         }
 
@@ -462,15 +467,12 @@ public class HomeServiceImpl implements HomeService {
 
         for (HomeMember m : memberships) {
 
-            result.add(Map.of(
-
-                    "homeId", m.getHome().getId(),
-
-                    "homeName", m.getHome().getName(),
-
-                    "role", m.getRole().name()
-
-            ));
+            Map<String, Object> homeItem = new HashMap<>();
+            homeItem.put("homeId", m.getHome().getId());
+            homeItem.put("homeName", m.getHome().getName());
+            homeItem.put("role", m.getRole().name());
+            homeItem.put("accessScope", m.getAccessScope() != null ? m.getAccessScope().name() : "ALL");
+            result.add(homeItem);
 
         }
 
@@ -509,6 +511,9 @@ public class HomeServiceImpl implements HomeService {
             memberDeviceAccessRepository.flush();
         }
         homeMemberRepository.save(target);
+        if (applicationEventPublisher != null) {
+            applicationEventPublisher.publishEvent(new MemberAccessChangedEvent(homeId, memberId));
+        }
     }
 
     @Override
@@ -536,6 +541,9 @@ public class HomeServiceImpl implements HomeService {
         memberRoomAccessRepository.flush();
         memberDeviceAccessRepository.flush();
         homeMemberRepository.delete(target);
+        if (applicationEventPublisher != null) {
+            applicationEventPublisher.publishEvent(new MemberAccessChangedEvent(homeId, memberId));
+        }
     }
 
 
