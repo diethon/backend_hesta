@@ -26,7 +26,7 @@ class DispatchConfig:
     base_url: str = "http://localhost:8080"
     action_endpoint_template: str = "/internal/devices/{device_id}/actions"
     api_key_env: str = "INTERNAL_API_KEY"
-    request_timeout_seconds: float = 3.0
+    request_timeout_seconds: float = 4.0
     max_workers: int = 10
     max_connections: int = 50
     max_keepalive_connections: int = 20

@@ -68,6 +68,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
 
     public static final ConcurrentHashMap<String, CompletableFuture<CommandResult>> pendingCommands = new ConcurrentHashMap<>();
+    public static final ConcurrentHashMap<String, UUID> commandDeviceMap = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> commandStartTimes = new ConcurrentHashMap<>();
 
@@ -99,11 +100,13 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
         return dispatch(device, deviceId, action, parameters, source).thenApply(result -> {
             if (result != null && result.isSuccess() && !"SUPERSEDED".equals(result.getStatus())) {
-                try {
-                    behaviorEventRecorder.recordUserCommand(deviceId, action, parameters, before, source);
-                } catch (Exception ex) {
-                    log.warn("Could not record user command for device {}: {}", deviceId, ex.getMessage());
-                }
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        behaviorEventRecorder.recordUserCommand(deviceId, action, parameters, before, source);
+                    } catch (Exception ex) {
+                        log.warn("Could not record user command for device {}: {}", deviceId, ex.getMessage());
+                    }
+                });
             }
             return result;
         });
@@ -404,6 +407,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             
             String jsonPayload = objectMapper.writeValueAsString(payload);
             pendingCommands.put(commandId, future);
+            commandDeviceMap.put(commandId, deviceId);
             
             // 1. Dispatch MQTT command immediately to broker (sub-second physical response)
             for (String targetTopic : targetTopics) {
@@ -984,6 +988,16 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                     deviceRepository.findByIdWithNode(deviceId).ifPresent(device -> {
                         if (!optimistic.equals(device.getCurrentState())) return;
+                        boolean isActuator = device.getDeviceType() != null &&
+                                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()));
+                        if (isActuator) {
+                            Object optState = optimistic.get("state");
+                            if ("OPENING".equalsIgnoreCase(String.valueOf(optState)) || "CLOSING".equalsIgnoreCase(String.valueOf(optState))) {
+                                log.info("Device {} is an actuator in transition (state={}); skipping premature revert on timeout",
+                                        deviceId, optState);
+                                return;
+                            }
+                        }
                         device.setCurrentState(new HashMap<>(previous));
                         deviceRepository.save(device);
                         log.info("Reverted unconfirmed state of device {} to {}", deviceId, previous);

@@ -149,7 +149,7 @@ public class MqttMessageReceiver {
             // 5. COMMAND ACK
             // =====================================================
 
-            else if (topic.endsWith("/ack")) {
+            else if (topic.endsWith("/ack") || topic.endsWith("/response")) {
 
                 handleCommandAck(payload);
 
@@ -627,18 +627,17 @@ public class MqttMessageReceiver {
 
         CompletableFuture<CommandResult> future =
                 MqttDeviceCommandServiceImpl.pendingCommands.remove(commandId);
+
+        UUID mappedDeviceId = MqttDeviceCommandServiceImpl.commandDeviceMap.get(commandId);
+        if (data.get("deviceId") == null && mappedDeviceId != null) {
+            data.put("deviceId", mappedDeviceId.toString());
+        }
+
         if (future != null) {
 
             // -----------------------------------------------------
             // Determine success
             // -----------------------------------------------------
-
-            boolean success =
-                    "SUCCESS".equalsIgnoreCase(
-                            String.valueOf(
-                                    data.get("status")
-                            )
-                    );
 
             String status =
                     data.get("status") != null
@@ -649,6 +648,31 @@ public class MqttMessageReceiver {
                     data.get("errorCode") != null
                             ? data.get("errorCode").toString()
                             : null;
+
+            String statusUpper = status.trim().toUpperCase(java.util.Locale.ROOT);
+            Object successObj = data.get("success");
+            boolean success = false;
+            if (successObj instanceof Boolean) {
+                success = (Boolean) successObj;
+            } else if (successObj != null && ("true".equalsIgnoreCase(successObj.toString()) || "1".equals(successObj.toString()))) {
+                success = true;
+            } else {
+                success = "SUCCESS".equals(statusUpper)
+                        || "OK".equals(statusUpper)
+                        || "ACCEPTED".equals(statusUpper)
+                        || "ACK".equals(statusUpper)
+                        || "DONE".equals(statusUpper)
+                        || "CLOSING".equals(statusUpper)
+                        || "OPENING".equals(statusUpper)
+                        || "CLOSED".equals(statusUpper)
+                        || "OPEN".equals(statusUpper);
+            }
+
+            if (errorCode != null && !errorCode.isBlank() && !"NONE".equalsIgnoreCase(errorCode) && !"0".equals(errorCode)) {
+                if (!"SUCCESS".equals(statusUpper) && !"OK".equals(statusUpper) && !"ACCEPTED".equals(statusUpper)) {
+                    success = false;
+                }
+            }
 
             // -----------------------------------------------------
             // Build command result
@@ -709,6 +733,21 @@ public class MqttMessageReceiver {
                 data.get("deviceId") != null
                         ? data.get("deviceId").toString()
                         : null;
+
+        String commandId =
+                data.get("commandId") != null
+                        ? data.get("commandId").toString()
+                        : null;
+
+        if ((deviceId == null || deviceId.isBlank()) && commandId != null) {
+            UUID mapped = MqttDeviceCommandServiceImpl.commandDeviceMap.remove(commandId);
+            if (mapped != null) {
+                deviceId = mapped.toString();
+                data.put("deviceId", deviceId);
+            }
+        } else if (commandId != null) {
+            MqttDeviceCommandServiceImpl.commandDeviceMap.remove(commandId);
+        }
 
         if (deviceId == null || deviceId.isBlank()) {
 

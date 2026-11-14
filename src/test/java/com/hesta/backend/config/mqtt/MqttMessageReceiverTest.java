@@ -132,4 +132,53 @@ class MqttMessageReceiverTest {
                         && new java.math.BigDecimal("32.5").equals(event.getData().get("temp"))
                         && new java.math.BigDecimal("32.5").equals(event.getData().get("value"))));
     }
+
+    @Test
+    void commandAckWithStatusOkCompletesPendingCommandSuccessfully() {
+        String commandId = UUID.randomUUID().toString();
+        java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult> future = new java.util.concurrent.CompletableFuture<>();
+        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.pendingCommands.put(commandId, future);
+
+        String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"OK\"}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/response")
+                .build());
+
+        org.junit.jupiter.api.Assertions.assertTrue(future.isDone());
+        com.hesta.backend.dto.command.CommandResult result = future.join();
+        org.junit.jupiter.api.Assertions.assertTrue(result.isSuccess());
+        org.junit.jupiter.api.Assertions.assertEquals("OK", result.getStatus());
+    }
+
+    @Test
+    void commandAckWithStatusClosingCompletesPendingCommandSuccessfully() {
+        String commandId = UUID.randomUUID().toString();
+        java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult> future = new java.util.concurrent.CompletableFuture<>();
+        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.pendingCommands.put(commandId, future);
+
+        String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"CLOSING\"}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/response")
+                .build());
+
+        org.junit.jupiter.api.Assertions.assertTrue(future.isDone());
+        com.hesta.backend.dto.command.CommandResult result = future.join();
+        org.junit.jupiter.api.Assertions.assertTrue(result.isSuccess());
+        org.junit.jupiter.api.Assertions.assertEquals("CLOSING", result.getStatus());
+    }
+
+    @Test
+    void lateAckResolvesDeviceIdFromCommandDeviceMap() {
+        String commandId = UUID.randomUUID().toString();
+        UUID deviceId = UUID.randomUUID();
+        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.commandDeviceMap.put(commandId, deviceId);
+
+        String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"CLOSED\",\"state\":{\"state\":\"CLOSED\"}}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/response")
+                .build());
+
+        verify(deviceService).updateDeviceStateFromMqtt(isNull(), eq(deviceId.toString()), anyMap());
+        org.junit.jupiter.api.Assertions.assertFalse(com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.commandDeviceMap.containsKey(commandId));
+    }
 }

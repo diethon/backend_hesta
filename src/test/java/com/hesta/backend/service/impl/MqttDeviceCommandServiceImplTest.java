@@ -45,6 +45,7 @@ class MqttDeviceCommandServiceImplTest {
     @BeforeEach
     void setUp() {
         MqttDeviceCommandServiceImpl.pendingCommands.clear();
+        MqttDeviceCommandServiceImpl.commandDeviceMap.clear();
         java.lang.reflect.Field f = org.springframework.util.ReflectionUtils.findField(MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
         if (f != null) {
             f.setAccessible(true);
@@ -421,6 +422,25 @@ class MqttDeviceCommandServiceImplTest {
         assertNotNull(result2);
         assertTrue(result2.isSuccess());
         assertEquals("SUCCESS", result2.getStatus());
+    }
+
+    @Test
+    @DisplayName("Gate: sendCommand registers commandId in commandDeviceMap")
+    void testSendCommand_Gate_PopulatesCommandDeviceMap() {
+        Device gateDevice = Device.builder()
+                .id(deviceId)
+                .name("Main Gate")
+                .deviceType("GATE")
+                .localId("gate_1")
+                .node(EdgeNode.builder().id(UUID.randomUUID()).nodeCode("HESTA-GATE-01").build())
+                .currentState(new HashMap<>())
+                .build();
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(gateDevice));
+
+        commandService.sendCommand(deviceId, "CLOSE", new HashMap<>(), StateChangeSource.VOICE);
+
+        assertFalse(MqttDeviceCommandServiceImpl.commandDeviceMap.isEmpty());
+        assertTrue(MqttDeviceCommandServiceImpl.commandDeviceMap.containsValue(deviceId));
     }
 }
 
