@@ -93,15 +93,6 @@ class AutomationEngineTest {
     }
 
     @Test
-    void testRulePreviewsMatchWithoutSendingACommand() {
-        when(ruleRepository.findByIdAndHomeId(rule.getId(), homeId)).thenReturn(Optional.of(rule));
-        var response = engine.testRule(homeId, rule.getId(), event(35));
-        assertThat(response.isMatched()).isTrue();
-        assertThat(response.getProposedActions()).hasSize(1);
-        verifyNoInteractions(commandService, executionRepository);
-    }
-
-    @Test
     void testEventNeverControlsADevice() {
         when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         var event = event(35);

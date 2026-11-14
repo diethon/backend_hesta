@@ -34,6 +34,9 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     private com.hesta.backend.repository.DeviceRepository deviceRepository;
 
     @Autowired(required = false)
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Autowired(required = false)
     private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
 
     @Autowired(required = false)
@@ -388,15 +391,25 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     private void cascadeNodeStatusToDevices(EdgeNode node, com.hesta.backend.enums.DeviceStatus newStatus) {
         if (deviceRepository == null || node == null) return;
         try {
-            List<com.hesta.backend.entity.Device> devices = deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
-            for (com.hesta.backend.entity.Device dev : devices) {
-                if (dev.getStatus() != newStatus) {
-                    dev.setStatus(newStatus);
-                    dev.setLastSeen(OffsetDateTime.now());
-                    deviceRepository.save(dev);
-                    log.info("Cascaded status {} to device {} ({}) for node {}", newStatus, dev.getName(), dev.getId(), node.getNodeCode());
-                    publishDeviceStateChanged(dev);
+            Runnable cascade = () -> {
+                List<com.hesta.backend.entity.Device> devices = deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
+                for (com.hesta.backend.entity.Device dev : devices) {
+                    if (dev.getStatus() != newStatus) {
+                        dev.setStatus(newStatus);
+                        dev.setLastSeen(OffsetDateTime.now());
+                        deviceRepository.save(dev);
+                        log.info("Cascaded status {} to device {} ({}) for node {}", newStatus, dev.getName(), dev.getId(), node.getNodeCode());
+                        publishDeviceStateChanged(dev);
+                    }
                 }
+            };
+            // The watchdog runs on a scheduler thread: without a transaction the lazy room/home of each device
+            // cannot load, the broadcast fails and the loop stops after the first device.
+            if (transactionManager != null) {
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                        .executeWithoutResult(status -> cascade.run());
+            } else {
+                cascade.run();
             }
         } catch (Exception ex) {
             log.error("Failed to cascade status {} to devices of node {}: {}", newStatus, node.getNodeCode(), ex.getMessage());
@@ -407,7 +420,9 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         UUID homeId = dev.getHome() != null ? dev.getHome().getId() : null;
         if (homeId == null) return;
 
-        if (applicationEventPublisher != null) {
+        // One broadcast per change: inside a transaction the AFTER_COMMIT listener sends it, otherwise we do.
+        boolean inTransaction = org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive();
+        if (inTransaction && applicationEventPublisher != null) {
             try {
                 var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
                 if (snapshot != null) {
@@ -416,6 +431,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             } catch (Exception ex) {
                 log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
             }
+            return;
         }
 
         if (realtimeEventPublisher != null) {

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
+@jakarta.persistence.EntityListeners(com.hesta.backend.realtime.publisher.HomeDataChangeListener.class)
 @Table(name = "automation_rules", uniqueConstraints =
         @UniqueConstraint(name = "uq_automation_rules_home_name", columnNames = {"home_id", "name"}))
 @Getter

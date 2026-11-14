@@ -84,6 +84,47 @@ class SceneExecutionServiceTest {
     }
 
     @Test
+    void asyncRunStartsPendingThenPushesProgressAndFinalResult() {
+        Device device = Device.builder().id(UUID.randomUUID()).build();
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true)
+                .actions(new ArrayList<>()).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build()));
+        UUID executionId = UUID.randomUUID();
+        SceneExecution[] stored = new SceneExecution[1];
+        when(executions.save(any())).thenAnswer(invocation -> {
+            SceneExecution execution = invocation.getArgument(0);
+            assertThat(execution.getCompletedAt()).as("completed_at is NOT NULL in the DB").isNotNull();
+            if (execution.getId() == null) execution.setId(executionId);
+            return stored[0] = execution;
+        });
+        when(executions.findById(executionId)).thenAnswer(invocation -> Optional.of(stored[0]));
+        var publisher = mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeEventPublisher", publisher);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sceneRunner",
+                (java.util.concurrent.Executor) Runnable::run);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "transactionManager",
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+
+        service.executeAsync(userId, homeId, sceneId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<com.hesta.backend.realtime.model.RealtimeEvent<?>> events =
+                ArgumentCaptor.forClass(com.hesta.backend.realtime.model.RealtimeEvent.class);
+        verify(publisher, times(2)).publish(events.capture());
+        var progress = (com.hesta.backend.dto.response.SceneExecutionResponse) events.getAllValues().get(0).data();
+        var finalResult = (com.hesta.backend.dto.response.SceneExecutionResponse) events.getAllValues().get(1).data();
+        assertThat(progress.getStatus()).isEqualTo("PENDING");
+        assertThat(finalResult.getStatus()).isEqualTo("SUCCESS");
+        assertThat(finalResult.getId()).isEqualTo(executionId);
+        assertThat(events.getAllValues()).allMatch(event ->
+                event.type() == com.hesta.backend.realtime.model.RealtimeEventType.SCENE_EXECUTION_UPDATED
+                        && event.homeId().equals(homeId));
+    }
+
+    @Test
     void refusesDisabledSceneWithoutSendingCommands() {
         Scene scene = Scene.builder().id(sceneId).enabled(false).build();
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
