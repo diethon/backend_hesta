@@ -30,6 +30,8 @@ def clean_tts_text(text: str) -> str:
     cleaned = re.sub(r"[✅⚠️❌⚡📝🔒🔓💡🔌🌀❄️☀️🌡️🔊🔇]", "", text)
     # Xóa markdown bold/italic/code
     cleaned = re.sub(r"[\*_`~#]", "", cleaned)
+    # Thay dấu gạch ngang dài — hoặc – bằng dấu phẩy để giọng đọc ngắt nghỉ tự nhiên
+    cleaned = re.sub(r"\s*[—–]\s*", ", ", cleaned)
     # Xóa nhiều khoảng trắng
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
@@ -48,7 +50,7 @@ class TTSManager:
         self.bundled_dir = bundled_dir
         self.default_voice = default_voice
         self._memory_cache: dict[str, bytes] = {}
-        self._lock = asyncio.Lock()
+        self._key_locks: dict[str, asyncio.Lock] = {}
         self._warmup_task: asyncio.Task | None = None
 
         # Đảm bảo thư mục cache tồn tại
@@ -57,6 +59,12 @@ class TTSManager:
             self.bundled_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.warning("Could not create TTS cache dir: %s", e)
+
+    def _get_key_lock(self, key: str) -> asyncio.Lock:
+        """Khóa lock riêng cho từng key để các câu thoại khác nhau có thể sinh đồng thời."""
+        if key not in self._key_locks:
+            self._key_locks[key] = asyncio.Lock()
+        return self._key_locks[key]
 
     def _get_cache_key(self, text: str, voice: str) -> str:
         clean = clean_tts_text(text).lower()
@@ -134,8 +142,9 @@ class TTSManager:
         if cached:
             return cached
 
-        # 2. Gọi Edge TTS qua mạng với khóa chống trùng lặp
-        async with self._lock:
+        # 2. Gọi Edge TTS qua mạng với khóa chống trùng lặp theo từng key
+        key = self._get_cache_key(clean, voice)
+        async with self._get_key_lock(key):
             # Re-check sau khi acquire lock
             cached = self.get_cached_audio(clean, voice)
             if cached:
@@ -216,26 +225,34 @@ class TTSManager:
         self.add_warmup_phrases(phrases)
 
     async def _warmup_worker(self) -> None:
-        """Tải trước các câu thoại trong hàng đợi vào bộ nhớ đệm."""
+        """Tải trước các câu thoại trong hàng đợi vào bộ nhớ đệm (đa luồng bất đồng bộ)."""
         if not hasattr(self, "_pending_warmup"):
             self._pending_warmup = set()
 
-        count = 0
         total_initially = len(self._pending_warmup)
         logger.info("Starting TTS background pre-warming for %d phrases...", total_initially)
 
-        while self._pending_warmup:
-            phrase = self._pending_warmup.pop()
-            if not self.get_cached_audio(phrase, self.default_voice):
+        async def _worker():
+            count = 0
+            while self._pending_warmup:
                 try:
-                    await self.synthesize(phrase, self.default_voice)
-                    count += 1
-                    # Nghỉ 0.15s giữa các câu để hoàn toàn không chiếm dụng CPU và không dồn request
-                    await asyncio.sleep(0.15)
-                except Exception as e:
-                    logger.debug("Warmup error for '%s': %s", phrase, e)
+                    phrase = self._pending_warmup.pop()
+                except KeyError:
+                    break
+                if not self.get_cached_audio(phrase, self.default_voice):
+                    try:
+                        await self.synthesize(phrase, self.default_voice, timeout_sec=5.0)
+                        count += 1
+                        await asyncio.sleep(0.05)
+                    except Exception as e:
+                        logger.debug("Warmup error for '%s': %s", phrase, e)
+            return count
 
-        logger.info("TTS pre-warming finished. %d new phrases cached.", count)
+        # Chạy 3 workers song song để tăng tốc độ pre-warming lên gấp 3 lần
+        tasks = [asyncio.create_task(_worker()) for _ in range(3)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        total_cached = sum(r for r in results if isinstance(r, int))
+        logger.info("TTS pre-warming finished. %d new phrases cached.", total_cached)
 
 
 # Singleton instance

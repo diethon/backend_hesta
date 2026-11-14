@@ -420,6 +420,9 @@ class VoicePipeline:
             elif "GATEWAY_DISCONNECTED" in err_codes:
                 err_code = "GATEWAY_DISCONNECTED"
                 status = "GATEWAY_DISCONNECTED"
+            elif "CONNECTION_ERROR" in err_codes or any("timed out" in (r.error_message or "").lower() for r in dispatch_result.results):
+                err_code = "TIMEOUT"
+                status = "TIMEOUT"
             else:
                 err_code = "FAILED"
                 status = "FAILED"
@@ -458,7 +461,9 @@ class VoicePipeline:
             res.total_duration_ms = round((time.perf_counter() - t_start) * 1000, 1)
             return res
 
-        # Xử lý chuỗi câu lệnh kép (compound commands)
+        # Xử lý chuỗi câu lệnh kép (compound commands) chạy song song qua ThreadPoolExecutor
+        import concurrent.futures
+
         sub_results: list[PipelineResult] = []
         combined_durations: dict[str, float] = {
             "intent_ms": 0.0,
@@ -466,11 +471,17 @@ class VoicePipeline:
             "dispatch_ms": 0.0,
         }
 
-        for sub_cmd in sub_commands:
-            r = self._execute_single_command(sub_cmd, custom_rooms=known_rooms, user_id=user_id)
-            sub_results.append(r)
-            for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
-                combined_durations[k] += r.step_durations.get(k, 0.0)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(sub_commands))) as executor:
+            future_to_idx = {
+                executor.submit(self._execute_single_command, sub_cmd, custom_rooms=known_rooms, user_id=user_id): idx
+                for idx, sub_cmd in enumerate(sub_commands)
+            }
+            ordered_futures = sorted(future_to_idx.keys(), key=lambda f: future_to_idx[f])
+            for fut in ordered_futures:
+                r = fut.result()
+                sub_results.append(r)
+                for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
+                    combined_durations[k] = max(combined_durations[k], r.step_durations.get(k, 0.0))
 
         # Gộp thông báo xác nhận tự nhiên
         combined_message = combine_command_messages([(r.success, r.message) for r in sub_results])
