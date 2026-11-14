@@ -1,5 +1,6 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.response.DeviceUptimeResponse;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.DeviceStateHistory;
@@ -10,6 +11,7 @@ import com.hesta.backend.repository.DeviceStateHistoryRepository;
 import com.hesta.backend.service.DeviceProfilingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -30,13 +33,51 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
     private final DeviceRepository deviceRepository;
     private final DeviceStateHistoryRepository historyRepository;
 
+    private static final long CACHE_TTL_MILLIS = 30_000L;
+
+    private record CacheEntry<T>(T value, long expiresAt) {
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiresAt;
+        }
+    }
+
+    private final Map<String, CacheEntry<DeviceUptimeResponse>> uptimeCache = new ConcurrentHashMap<>();
+
+    @Override
+    public void evictDeviceUptimeCache(UUID deviceId) {
+        if (deviceId != null) {
+            String prefix = deviceId.toString() + ":";
+            uptimeCache.keySet().removeIf(k -> k.startsWith(prefix));
+        } else {
+            uptimeCache.clear();
+        }
+    }
+
+    @EventListener
+    public void onDeviceStateChanged(DeviceStateChangedEvent event) {
+        if (event == null) return;
+        UUID deviceId = (event.payload() != null) ? event.payload().deviceId() : null;
+        if (deviceId != null) {
+            evictDeviceUptimeCache(deviceId);
+        } else {
+            uptimeCache.clear();
+        }
+    }
+
     @Override
     @Transactional(readOnly = true)
     public DeviceUptimeResponse getDeviceUptime(UUID deviceId, int days) {
+        int effectiveDays = days > 0 ? days : 7;
+        String cacheKey = (deviceId != null ? deviceId.toString() : "null") + ":" + effectiveDays;
+
+        CacheEntry<DeviceUptimeResponse> cached = uptimeCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            return cached.value();
+        }
+
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
-        int effectiveDays = days > 0 ? days : 7;
         OffsetDateTime to = OffsetDateTime.now();
         OffsetDateTime from = to.minusDays(effectiveDays);
 
@@ -112,13 +153,16 @@ public class DeviceProfilingServiceImpl implements DeviceProfilingService {
         List<DeviceUptimeResponse.TimelinePoint> timelinePoints = build24HourTimeline(
                 allHistories, todayStart, initialQueryState, to);
 
-        return DeviceUptimeResponse.builder()
+        DeviceUptimeResponse response = DeviceUptimeResponse.builder()
                 .uptimePercent(uptimePercent)
                 .totalHours(totalHours)
                 .onHours(onHours)
                 .offHours(offHours)
                 .timelinePoints(timelinePoints)
                 .build();
+
+        uptimeCache.put(cacheKey, new CacheEntry<>(response, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        return response;
     }
 
     private boolean resolveStateAt(UUID deviceId, Device device, OffsetDateTime pointInTime, List<DeviceStateHistory> histories) {

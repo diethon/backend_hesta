@@ -18,14 +18,14 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("""
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, null as referenceTime
+                   null as metricType, device.updatedAt as referenceTime
             from Device device where device.isDeleted = false
             """)
     List<TwinHealthReference> findHealthReferences();
 
     @Query("""
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, null as referenceTime
+                   null as metricType, device.updatedAt as referenceTime
             from Device device where device.id = :id and device.isDeleted = false
             """)
     Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);
@@ -66,6 +66,9 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.localId = :localId")
     Optional<Device> findByNodeCodeAndLocalId(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
+
+    @Query("SELECT d FROM Device d LEFT JOIN d.node n WHERE (n IS NOT NULL AND (n.id = :nodeId OR n.nodeCode = :nodeCode)) OR (d.mqttTopic LIKE CONCAT('%/nodes/', :nodeCode, '/%'))")
+    List<Device> findByNodeIdOrNodeCode(@Param("nodeId") UUID nodeId, @Param("nodeCode") String nodeCode);
 
     Optional<Device> findByMqttTopic(String mqttTopic);
 

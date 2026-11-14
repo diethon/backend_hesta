@@ -31,4 +31,8 @@ public class UpdateAutomationRuleRequest {
     @Valid
     @NotEmpty(message = "AUTOMATION_ACTION_INVALID")
     List<RuleActionRequest> actions;
+
+    /** All times of a SCHEDULE rule, saved with it (null on update keeps the stored ones). At least one must be active. */
+    @Valid
+    List<ScheduleRequest> schedules;
 }

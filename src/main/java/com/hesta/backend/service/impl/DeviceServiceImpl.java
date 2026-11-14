@@ -47,12 +47,28 @@ public class DeviceServiceImpl implements DeviceService {
     private final DeviceStateHistoryRepository deviceStateHistoryRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final TwinSnapshotMapper twinSnapshotMapper;
+    private final com.hesta.backend.service.automation.DeviceReferenceCleaner deviceReferenceCleaner;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.ManualOverrideService manualOverrideService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.DeviceHealthService deviceHealthService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.EnergyAnalyticsService energyAnalyticsService;
+
+    private static final long HISTORY_CACHE_TTL_MILLIS = 15_000L;
+    private final Map<UUID, CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>> historyCache = new ConcurrentHashMap<>();
+
+    private record CacheEntry<T>(T value, long expiresAt) {
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiresAt;
+        }
+    }
 
     private static final ConcurrentHashMap<UUID, OffsetDateTime> lastSensorSaveTime = new ConcurrentHashMap<>();
+    /** A state report this soon after one of our commands is the command's echo, not a wall switch. */
+    private static final long PHYSICAL_SWITCH_GRACE_MS = 15_000;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.BehaviorEventRecorder behaviorEventRecorder;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
         homeAuthorizationService.requireAccess(userId, homeId);
@@ -285,8 +301,18 @@ public class DeviceServiceImpl implements DeviceService {
                         deviceHealthService.recordSwitch(device.getId());
                     } catch (Exception ignored) {}
                 }
+                // Power flipped without any command from us (wall switch, IR remote): still a habit of the user.
+                if (behaviorEventRecorder != null && !isSensor && powerToggled && source == StateChangeSource.MANUAL
+                        && !MqttDeviceCommandServiceImpl.commandedWithin(device.getId(), PHYSICAL_SWITCH_GRACE_MS)) {
+                    try {
+                        behaviorEventRecorder.recordPhysicalToggle(device, prevState, newState);
+                    } catch (Exception ex) {
+                        System.err.println("Could not record physical switch for device " + device.getId() + ": " + ex.getMessage());
+                    }
+                }
             }
 
+            historyCache.remove(device.getId());
             if (device.getHome() != null && device.getHome().getId() != null) {
                 applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
                         device.getHome().getId(), twinSnapshotMapper.device(device)));
@@ -338,6 +364,10 @@ public class DeviceServiceImpl implements DeviceService {
         }
 
         Device saved = deviceRepository.save(device);
+        historyCache.remove(deviceId);
+        if (energyAnalyticsService != null && getHomeId(device) != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        }
         return DeviceResponse.fromEntity(saved);
     }
 
@@ -349,8 +379,13 @@ public class DeviceServiceImpl implements DeviceService {
 
         checkHomeOwner(userId, getHomeId(device));
 
+        deviceReferenceCleaner.detach(deviceId);
         device.setDeleted(true);
         deviceRepository.save(device);
+        historyCache.remove(deviceId);
+        if (energyAnalyticsService != null && getHomeId(device) != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        }
     }
 
     @Override
@@ -362,10 +397,35 @@ public class DeviceServiceImpl implements DeviceService {
         checkHomeAccess(userId, getHomeId(device));
         homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
-        return deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)
+        CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>> cached = historyCache.get(deviceId);
+        if (cached != null && !cached.isExpired()) {
+            return cached.value();
+        }
+
+        List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> result = deviceStateHistoryRepository
+                .findByDeviceIdOrderByChangedAtDesc(deviceId)
                 .stream()
                 .map(com.hesta.backend.dto.response.DeviceStateHistoryResponse::fromEntity)
                 .collect(Collectors.toList());
+
+        historyCache.put(deviceId, new CacheEntry<>(result, System.currentTimeMillis() + HISTORY_CACHE_TTL_MILLIS));
+        return result;
+    }
+
+    @Override
+    public void evictDeviceHistoryCache(UUID deviceId) {
+        if (deviceId != null) {
+            historyCache.remove(deviceId);
+        } else {
+            historyCache.clear();
+        }
+    }
+
+    @org.springframework.context.event.EventListener
+    public void onDeviceStateChanged(DeviceStateChangedEvent event) {
+        if (event != null && event.payload() != null && event.payload().deviceId() != null) {
+            evictDeviceHistoryCache(event.payload().deviceId());
+        }
     }
 
     @Override

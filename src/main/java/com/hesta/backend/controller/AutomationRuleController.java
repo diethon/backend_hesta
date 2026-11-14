@@ -103,7 +103,8 @@ public class AutomationRuleController {
     public ResponseEntity<ApiResponse<AutomationEngineResponse>> processEvent(
             @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
             @Valid @RequestBody AutomationEventRequest request) {
-        homeAuthorizationService.requireAccess(user.getId(), homeId);
+        // Injected events can carry emergency flags that bypass manual override and cooldown.
+        homeAuthorizationService.requireSceneManagement(user.getId(), homeId);
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, user.getId());
         if (!ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
             throw new AppException(ErrorCode.UNAUTHORIZED);

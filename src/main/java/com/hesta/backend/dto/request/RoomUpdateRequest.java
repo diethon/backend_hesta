@@ -20,4 +20,4 @@ public class RoomUpdateRequest {
 
     private BigDecimal layoutX;
     private BigDecimal layoutY;
-}
+}
