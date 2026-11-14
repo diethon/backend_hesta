@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.integration.annotation.IntegrationComponentScan;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.channel.DirectChannel;
+import org.springframework.integration.channel.PartitionedChannel;
+import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.integration.core.MessageProducer;
 import org.springframework.integration.mqtt.core.DefaultMqttPahoClientFactory;
 import org.springframework.integration.mqtt.core.MqttPahoClientFactory;
@@ -82,9 +84,18 @@ public class MqttConfig {
     // ===============================================
     // INBOUND (Subscribe from MQTT Broker)
     // ===============================================
+    /**
+     * Inbound messages are handled on {@code partitions} threads instead of Paho's single callback thread,
+     * so one device's slow DB write never delays another device's ACK. The partition key is the topic without
+     * its last segment (.../devices/{id}), so /state, /telemetry and /ack of one device stay in order.
+     */
     @Bean
-    public MessageChannel mqttInputChannel() {
-        return new DirectChannel();
+    public MessageChannel mqttInputChannel(@Value("${mqtt.inbound.partitions:4}") int partitions) {
+        return new PartitionedChannel(partitions, message -> {
+            String topic = String.valueOf(message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC));
+            int lastSlash = topic.lastIndexOf('/');
+            return lastSlash > 0 ? topic.substring(0, lastSlash) : topic;
+        });
     }
 
     @Bean
@@ -113,7 +124,7 @@ public class MqttConfig {
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
-        adapter.setOutputChannel(mqttInputChannel());
+        adapter.setOutputChannelName("mqttInputChannel");
         adapter.setAutoStartup(inboundAutoStartup);
         return adapter;
     }

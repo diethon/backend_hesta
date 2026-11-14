@@ -11,6 +11,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
+@jakarta.persistence.EntityListeners(com.hesta.backend.realtime.publisher.HomeDataChangeListener.class)
 @Table(name = "scene_schedules")
 @Getter
 @Setter

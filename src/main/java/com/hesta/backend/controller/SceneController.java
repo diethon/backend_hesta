@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -85,10 +86,15 @@ public class SceneController {
     @PostMapping("/{sceneId}/execute")
     public ResponseEntity<ApiResponse<SceneExecutionResponse>> executeScene(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID homeId, @PathVariable UUID sceneId) {
+            @PathVariable UUID homeId, @PathVariable UUID sceneId,
+            @RequestParam(defaultValue = "false") boolean async) {
+        // async=true (web): returns PENDING now, results come over the realtime socket. Default stays blocking for the mobile app.
+        SceneExecutionResponse result = async
+                ? sceneExecutionService.executeAsync(userDetails.getId(), homeId, sceneId)
+                : sceneExecutionService.execute(userDetails.getId(), homeId, sceneId);
         return ResponseEntity.ok(ApiResponse.<SceneExecutionResponse>builder().code(1000)
-                .message("Đã chạy kịch bản")
-                .result(sceneExecutionService.execute(userDetails.getId(), homeId, sceneId)).build());
+                .message(async ? "Đang chạy kịch bản" : "Đã chạy kịch bản")
+                .result(result).build());
     }
 
     @GetMapping("/{sceneId}/executions")

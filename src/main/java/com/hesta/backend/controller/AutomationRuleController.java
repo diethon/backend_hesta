@@ -112,18 +112,6 @@ public class AutomationRuleController {
         return ok("Đã xử lý sự kiện tự động hóa", automationEngine.process(homeId, request));
     }
 
-    @PostMapping("/{ruleId}/test")
-    public ResponseEntity<ApiResponse<AutomationTestResponse>> testRule(
-            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
-            @PathVariable UUID ruleId, @Valid @RequestBody AutomationEventRequest request) {
-        homeAuthorizationService.requireSceneManagement(user.getId(), homeId);
-        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, user.getId());
-        if (!ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
-            throw new AppException(ErrorCode.UNAUTHORIZED);
-        }
-        return ok("Đã chạy thử quy tắc", automationEngine.testRule(homeId, ruleId, request));
-    }
-
     private <T> ResponseEntity<ApiResponse<T>> ok(String message, T result) {
         return ResponseEntity.ok(ApiResponse.<T>builder().code(1000).message(message).result(result).build());
     }
