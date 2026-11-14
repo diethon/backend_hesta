@@ -16,6 +16,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
+@jakarta.persistence.EntityListeners(com.hesta.backend.realtime.publisher.HomeDataChangeListener.class)
 @Table(name = "scene_actions", uniqueConstraints = {
         @UniqueConstraint(name = "uq_scene_actions_scene_order", columnNames = {"scene_id", "order_index"})
 })
