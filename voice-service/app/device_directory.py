@@ -314,32 +314,6 @@ class DeviceDirectory:
                 self._last_refresh_time = time.time()
 
             logger.info("Device cache refreshed: %d thiết bị, %d nhóm", len(devices), len(new_cache))
-
-            # Tự động nạp trước (warmup) câu thoại cho các phòng & thiết bị thực tế vừa khám phá được
-            try:
-                from app.tts_manager import tts_manager
-                from app.matrix_generator import generate_matrix_phrases
-                known_rooms = self.get_known_rooms(home_id=home_id)
-                phrases = generate_matrix_phrases(rooms=known_rooms, custom_devices=None, include_compounds=True)
-                for dev in devices:
-                    name = dev.get("name")
-                    if name:
-                        phrases.extend([
-                            f"Đã bật {name}",
-                            f"Đã tắt {name}",
-                            f"Đã mở {name}",
-                            f"Đã đóng {name}",
-                            f"Bạn không có quyền điều khiển {name}.",
-                            f"{name.capitalize()} hiện đang ngoại tuyến hoặc chưa kết nối.",
-                            f"Không thể kết nối đến Gateway để điều khiển {name}.",
-                            f"{name.capitalize()} không phản hồi.",
-                            f"Không thể bật {name} — thiết bị không phản hồi.",
-                            f"Không thể tắt {name} — thiết bị không phản hồi.",
-                        ])
-                tts_manager.add_warmup_phrases(phrases)
-            except Exception as e:
-                logger.debug("Automatic warmup trigger in refresh skipped: %s", e)
-
             return True
 
         except httpx.HTTPStatusError as e:

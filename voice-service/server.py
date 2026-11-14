@@ -69,39 +69,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not do initial device directory refresh: %s", e)
 
-    # 2. Tự động trích xuất danh sách phòng & thiết bị thực tế từ DB để sinh ma trận câu thoại
-    extra_phrases = []
+    # 2. Nạp toàn bộ file giọng nói có sẵn từ disk cache và assets vào RAM (0ms latency, 0 network calls)
     try:
-        from app.matrix_generator import generate_matrix_phrases
-
-        custom_rooms = pipeline.device_directory.get_known_rooms(pipeline.home_id) if pipeline else []
-        raw_devs = getattr(pipeline.device_directory, "_raw_devices", []) if pipeline and pipeline.device_directory else []
-        for dev in raw_devs:
-            name = dev.get("name")
-            if name:
-                extra_phrases.extend([
-                    f"Đã bật {name}",
-                    f"Đã tắt {name}",
-                    f"Đã mở {name}",
-                    f"Đã đóng {name}",
-                    f"Bạn không có quyền điều khiển {name}.",
-                    f"{name.capitalize()} hiện đang ngoại tuyến hoặc chưa kết nối.",
-                    f"{name.capitalize()} hiện đang mất kết nối.",
-                    f"Không thể kết nối đến Gateway để điều khiển {name}.",
-                    f"{name.capitalize()} không phản hồi.",
-                    f"Không thể bật {name} — thiết bị không phản hồi.",
-                    f"Không thể tắt {name} — thiết bị không phản hồi.",
-                    f"Không thể mở {name} — thiết bị không phản hồi.",
-                    f"Không thể đóng {name} — thiết bị không phản hồi.",
-                ])
-
-        matrix_phrases = generate_matrix_phrases(rooms=custom_rooms, include_compounds=True)
-        extra_phrases.extend(matrix_phrases)
+        tts_manager.preload_disk_cache()
     except Exception as e:
-        logger.debug("Could not generate matrix phrases on startup: %s", e)
-
-    # Khởi động pre-warming giọng nói thông dụng ngầm trong background
-    tts_manager.start_warmup(extra_phrases)
+        logger.debug("Could not preload disk cache on startup: %s", e)
 
     # Pre-warm kết nối HTTP Keep-Alive tới Backend & Database pool (chống khựng lệnh đầu tiên)
     try:
