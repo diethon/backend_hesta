@@ -18,6 +18,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Sends the device commands of one scene or automation run and writes each result into its JSON detail row.
@@ -33,29 +36,39 @@ public class CommandBatchRunner {
     /** One command to send; {@code detail} is its row in the execution result and gets filled in. */
     public record PlannedCommand(Device device, String action, Map<String, Object> parameters, ObjectNode detail) {}
 
+    // Each device's send does its own DB round trips before publishing; one thread per device lets them overlap.
+    private static final Executor DEVICE_RUNNER = Executors.newVirtualThreadPerTaskExecutor();
+
     /**
-     * Different devices run in parallel; commands for the same device keep their order
-     * (round k sends the k-th command of every device, then waits for all of them).
+     * Each device runs on its own thread: its commands go one after another (next one after the ACK),
+     * and no device waits for another device.
      *
      * @return how many commands succeeded
      */
     public int run(List<PlannedCommand> commands, StateChangeSource source) {
+        return run(commands, source, null);
+    }
+
+    /** Same as {@link #run(List, StateChangeSource)}; {@code afterEachCommand} (nullable) runs once each command's result is written. */
+    public int run(List<PlannedCommand> commands, StateChangeSource source, Runnable afterEachCommand) {
         Map<UUID, List<PlannedCommand>> byDevice = new LinkedHashMap<>();
         for (PlannedCommand command : commands) {
             byDevice.computeIfAbsent(command.device().getId(), ignored -> new ArrayList<>()).add(command);
         }
-        int succeeded = 0;
-        for (int round = 0; ; round++) {
-            List<PlannedCommand> batch = new ArrayList<>();
-            for (List<PlannedCommand> deviceCommands : byDevice.values()) {
-                if (round < deviceCommands.size()) batch.add(deviceCommands.get(round));
+        AtomicInteger succeeded = new AtomicInteger();
+        Object resultLock = new Object(); // detail rows share one JSON array that afterEachCommand serializes
+        CompletableFuture<?>[] devices = byDevice.values().stream().map(deviceCommands -> CompletableFuture.runAsync(() -> {
+            for (PlannedCommand command : deviceCommands) {
+                CompletableFuture<CommandResult> result = send(command, source);
+                result.handle((ignored, failure) -> null).join(); // wait for the ACK outside the lock
+                synchronized (resultLock) {
+                    if (record(command, result, source)) succeeded.incrementAndGet();
+                    if (afterEachCommand != null) afterEachCommand.run();
+                }
             }
-            if (batch.isEmpty()) return succeeded;
-            List<CompletableFuture<CommandResult>> results = batch.stream().map(command -> send(command, source)).toList();
-            for (int index = 0; index < batch.size(); index++) {
-                if (record(batch.get(index), results.get(index), source)) succeeded++;
-            }
-        }
+        }, DEVICE_RUNNER)).toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(devices).join();
+        return succeeded.get();
     }
 
     /** SKIPPED when nothing was tried, SUCCESS only when every result row succeeded. */
