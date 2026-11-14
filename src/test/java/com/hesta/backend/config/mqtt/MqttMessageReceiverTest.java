@@ -74,6 +74,27 @@ class MqttMessageReceiverTest {
     }
 
     @Test
+    void stateMessageReleasesWaitingCommandBeforeTheDbWrite() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        var waiting = new java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>();
+        var active = (java.util.Map<UUID, java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>>)
+                org.springframework.test.util.ReflectionTestUtils.getField(
+                        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
+        active.put(deviceId, waiting);
+        // The DB write sees the command already done, i.e. the ACK did not wait for it.
+        doAnswer(inv -> { org.junit.jupiter.api.Assertions.assertTrue(waiting.isDone()); return null; })
+                .when(deviceService).updateDeviceStateFromMqtt(any(), any(), any());
+
+        receiver.handleMessage(MessageBuilder.withPayload("{\"state\":\"opening\"}")
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/state")
+                .build());
+
+        verify(deviceService).updateDeviceStateFromMqtt(any(), any(), any());
+        org.junit.jupiter.api.Assertions.assertTrue(waiting.join().isSuccess());
+    }
+
+    @Test
     void deviceStatusOnlineUpdatesStatus() {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();

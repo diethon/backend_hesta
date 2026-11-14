@@ -480,6 +480,15 @@ public class MqttMessageReceiver {
 
         Object stateObject = data.get("state");
 
+        // Release the waiting command before the slow remote-DB writes below, so the ACK is not late.
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> ackState = stateObject instanceof Map<?, ?> ? (Map<String, Object>) stateObject : data;
+            MqttDeviceCommandServiceImpl.completeDeviceCommand(UUID.fromString(deviceId), ackState);
+        } catch (IllegalArgumentException localId) {
+            // Not a UUID: resolved by node + localId lookup at the end of this method.
+        }
+
         if (stateObject instanceof Map<?, ?>) {
 
             @SuppressWarnings("unchecked")
@@ -886,11 +895,16 @@ public class MqttMessageReceiver {
             }
 
             devOpt.ifPresent(device -> {
+                boolean statusChanged = device.getStatus() != devStatus;
                 device.setStatus(devStatus);
                 device.setLastSeen(java.time.OffsetDateTime.now());
                 devices.save(device);
-                log.info("Updated device {} status to {}", device.getId(), devStatus);
-                publishDeviceStateChanged(device);
+                // A heartbeat that changes nothing must not broadcast: its snapshot can be older than a command
+                // committed meanwhile and would flip other screens back. Freshness is handled by twin health.
+                if (statusChanged) {
+                    log.info("Updated device {} status to {}", device.getId(), devStatus);
+                    publishDeviceStateChanged(device);
+                }
 
                 if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
                     EdgeNode node = device.getNode();
@@ -958,7 +972,9 @@ public class MqttMessageReceiver {
         UUID homeId = dev.getHome() != null ? dev.getHome().getId() : null;
         if (homeId == null) return;
 
-        if (applicationEventPublisher != null) {
+        // One broadcast per change: inside a transaction the AFTER_COMMIT listener sends it, otherwise we do.
+        boolean inTransaction = org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive();
+        if (inTransaction && applicationEventPublisher != null) {
             try {
                 var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
                 if (snapshot != null) {
@@ -967,6 +983,7 @@ public class MqttMessageReceiver {
             } catch (Exception ex) {
                 log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
             }
+            return;
         }
 
         if (realtimeEventPublisher != null) {
