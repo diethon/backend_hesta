@@ -79,6 +79,15 @@ class DispatchBatchResult:
 
         pattern_lower = pattern.lower() if pattern else ""
         hint_lower = hint.lower() if hint else ""
+
+        if device_type in ("curtain", "gate"):
+            if "bật" in pattern_lower or "bat" in pattern_lower:
+                action_vi = "bật"
+            elif "tắt" in pattern_lower or "tat" in pattern_lower:
+                action_vi = "tắt"
+            elif "dừng" in pattern_lower or "dung" in pattern_lower:
+                action_vi = "dừng"
+
         if device_type == "led_rgb":
             if "rgb" in pattern_lower or "rgb" in hint_lower:
                 type_vi = "đèn RGB"
@@ -86,6 +95,15 @@ class DispatchBatchResult:
                 type_vi = "đèn LED"
             else:
                 type_vi = "đèn LED RGB"
+        elif device_type == "curtain":
+            if any(w in pattern_lower for w in ["rèm cửa", "rem cua"]):
+                type_vi = "rèm cửa"
+            elif any(w in pattern_lower for w in ["rèm 2 mảnh", "rèm hai mảnh", "rem 2 manh", "rem hai manh"]):
+                type_vi = "rèm hai mảnh"
+            elif any(w in pattern_lower for w in ["màn", "man"]):
+                type_vi = "màn"
+            else:
+                type_vi = "rèm"
         elif device_type == "light" and (hint_lower == "ngủ" or "den ngu" in pattern_lower or "đèn ngủ" in pattern_lower):
             type_vi = "đèn ngủ"
             if room == "phòng ngủ":

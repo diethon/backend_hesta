@@ -355,3 +355,30 @@ class TestDispatchBatchResultMessages:
         )
         msg = batch.summary_message("TURN_ON", "fan", "phòng khách")
         assert "Không thể kết nối đến Gateway" in msg
+
+    def test_summary_curtain_messages(self):
+        batch = DispatchBatchResult(total_devices=1, successful_count=1, failed_count=0)
+
+        # Mở rèm
+        msg1 = batch.summary_message("OPEN", "curtain", "phòng khách", pattern="mở rèm")
+        assert msg1 == "Đã mở rèm phòng khách"
+
+        # Mở rèm cửa
+        msg2 = batch.summary_message("OPEN", "curtain", "phòng khách", pattern="mở rèm cửa")
+        assert msg2 == "Đã mở rèm cửa phòng khách"
+
+        # Bật rèm cửa
+        msg3 = batch.summary_message("OPEN", "curtain", "phòng ngủ", pattern="bật rèm cửa")
+        assert msg3 == "Đã bật rèm cửa phòng ngủ"
+
+        # Đóng rèm
+        msg4 = batch.summary_message("CLOSE", "curtain", "phòng khách", pattern="đóng rèm")
+        assert msg4 == "Đã đóng rèm phòng khách"
+
+        # Tắt rèm cửa
+        msg5 = batch.summary_message("CLOSE", "curtain", "phòng ngủ", pattern="tắt rèm cửa")
+        assert msg5 == "Đã tắt rèm cửa phòng ngủ"
+
+        # Dừng rèm cửa
+        msg6 = batch.summary_message("STOP", "curtain", "phòng khách", pattern="dừng rèm cửa")
+        assert msg6 == "Đã dừng rèm cửa phòng khách"

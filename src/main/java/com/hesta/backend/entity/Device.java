@@ -164,28 +164,28 @@ public class Device {
         if ("OPEN".equalsIgnoreCase(action) || "GATE_OPEN".equalsIgnoreCase(action)) {
             return this.capabilities.values().stream()
                     .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
+                    .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR") || act.equalsIgnoreCase("CURTAIN"));
         }
         if ("CLOSE".equalsIgnoreCase(action) || "GATE_CLOSE".equalsIgnoreCase(action)) {
             return this.capabilities.values().stream()
                     .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
+                    .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR") || act.equalsIgnoreCase("CURTAIN"));
         }
         if ("STOP".equalsIgnoreCase(action) || "GATE_STOP".equalsIgnoreCase(action)) {
             return this.capabilities.values().stream()
                     .flatMap(java.util.List::stream)
-                    .anyMatch(act -> act.equalsIgnoreCase("STOP") || act.equalsIgnoreCase("GATE_STOP") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
+                    .anyMatch(act -> act.equalsIgnoreCase("STOP") || act.equalsIgnoreCase("GATE_STOP") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR") || act.equalsIgnoreCase("CURTAIN"));
         }
         if ("TURN_ON".equalsIgnoreCase(action) || "POWER_ON".equalsIgnoreCase(action)) {
             boolean powerMatch = this.capabilities.values().stream()
                     .flatMap(java.util.List::stream)
                     .anyMatch(act -> act.equalsIgnoreCase("TURN_ON") || act.equalsIgnoreCase("POWER_ON") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
             if (powerMatch) return true;
-            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType)))
-                    || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR");
+            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType) || "CURTAIN".equalsIgnoreCase(this.deviceType)))
+                    || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR") || this.capabilities.containsKey("CURTAIN");
             if (isGate) {
                 return this.capabilities.values().stream().flatMap(java.util.List::stream)
-                        .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE"));
+                        .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("CURTAIN"));
             }
             return false;
         }
@@ -194,11 +194,11 @@ public class Device {
                     .flatMap(java.util.List::stream)
                     .anyMatch(act -> act.equalsIgnoreCase("TURN_OFF") || act.equalsIgnoreCase("POWER_OFF") || act.equalsIgnoreCase("POWER") || act.equalsIgnoreCase("SET_POWER"));
             if (powerMatch) return true;
-            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType)))
-                    || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR");
+            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType) || "CURTAIN".equalsIgnoreCase(this.deviceType)))
+                    || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR") || this.capabilities.containsKey("CURTAIN");
             if (isGate) {
                 return this.capabilities.values().stream().flatMap(java.util.List::stream)
-                        .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE"));
+                        .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("CURTAIN"));
             }
             return false;
         }

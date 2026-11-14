@@ -292,7 +292,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             // Normalize action and parameters for devices (including Air Conditioner and Gate)
             String normalizedAction = normalizeAction(device, action, effectiveParams);
             boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType())))
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
                     || "OPEN".equalsIgnoreCase(normalizedAction)
                     || "CLOSE".equalsIgnoreCase(normalizedAction)
                     || "STOP".equalsIgnoreCase(normalizedAction);
@@ -572,7 +572,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 || (parameters != null && (parameters.containsKey("temperature") || parameters.containsKey("temp") || parameters.containsKey("fan")));
 
         boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType())))
+                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
                 || "OPEN".equalsIgnoreCase(act)
                 || "CLOSE".equalsIgnoreCase(act)
                 || "STOP".equalsIgnoreCase(act)
@@ -931,7 +931,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
 
             boolean isGateOrDoor = device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()));
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
             if (isGateOrDoor) {
                 Object stateVal = currentState.get("state");
                 currentState.clear();
@@ -989,7 +989,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     deviceRepository.findByIdWithNode(deviceId).ifPresent(device -> {
                         if (!optimistic.equals(device.getCurrentState())) return;
                         boolean isActuator = device.getDeviceType() != null &&
-                                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()));
+                                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
                         if (isActuator) {
                             Object optState = optimistic.get("state");
                             if ("OPENING".equalsIgnoreCase(String.valueOf(optState)) || "CLOSING".equalsIgnoreCase(String.valueOf(optState))) {

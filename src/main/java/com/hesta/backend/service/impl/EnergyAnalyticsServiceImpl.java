@@ -508,6 +508,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             case "LIGHT", "LED", "LED_RGB"      -> 40;
             case "FAN"                          -> 65;
             case "GATE", "ROLLING_DOOR"         -> 350;
+            case "CURTAIN"                      -> 60;
             case "SMART_PLUG", "SOCKET"         -> 500;
             case "HEATER", "WATER_HEATER"       -> 2500;
             case "TEMP_HUMID_SENSOR", "SENSOR"  -> 2;

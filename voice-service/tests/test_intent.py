@@ -91,6 +91,27 @@ SAMPLE_INTENTS = {
             "device_type": "all",
             "patterns": ["bật tất cả thiết bị", "bật hết thiết bị", "bật toàn bộ thiết bị", "bật cả nhà", "bật hết cả nhà", "bật phòng", "bật hết phòng", "bật tất cả"]
         },
+        {
+            "action": "OPEN",
+            "device_type": "curtain",
+            "patterns": [
+                "mở rèm", "kéo rèm ra", "mở rèm cửa", "bật rèm", "bật rèm cửa",
+                "mở rèm 2 mảnh", "mở rèm hai mảnh", "mở tất cả rèm", "bật tất cả rèm cửa"
+            ]
+        },
+        {
+            "action": "CLOSE",
+            "device_type": "curtain",
+            "patterns": [
+                "đóng rèm", "kéo rèm vào", "đóng rèm cửa", "tắt rèm", "tắt rèm cửa",
+                "đóng rèm 2 mảnh", "đóng rèm hai mảnh", "đóng tất cả rèm", "tắt tất cả rèm cửa"
+            ]
+        },
+        {
+            "action": "STOP",
+            "device_type": "curtain",
+            "patterns": ["dừng rèm", "dừng rèm cửa"]
+        },
     ]
 }
 
@@ -503,3 +524,40 @@ class TestIntentConfig:
 
         result = mapper.map("bật cái gì đó giống đèn")
         assert result is None  # Confidence không đủ 99%
+
+
+class TestCurtainIntent:
+    """Test intent cho thiết bị rèm 2 mảnh / rèm motor."""
+
+    def test_open_curtain(self, mapper):
+        for phrase in ["mở rèm", "kéo rèm ra", "mở rèm cửa", "bật rèm", "bật rèm cửa", "mở rèm 2 mảnh"]:
+            result = mapper.map(phrase)
+            assert result is not None, f"Failed on: {phrase}"
+            assert result.action == "OPEN"
+            assert result.device_type == "curtain"
+
+    def test_close_curtain(self, mapper):
+        for phrase in ["đóng rèm", "kéo rèm vào", "đóng rèm cửa", "tắt rèm", "tắt rèm cửa", "đóng rèm 2 mảnh"]:
+            result = mapper.map(phrase)
+            assert result is not None, f"Failed on: {phrase}"
+            assert result.action == "CLOSE"
+            assert result.device_type == "curtain"
+
+    def test_curtain_with_room(self, mapper):
+        r_open = mapper.map("mở rèm phòng ngủ")
+        assert r_open is not None
+        assert r_open.action == "OPEN"
+        assert r_open.device_type == "curtain"
+        assert r_open.room == "phòng ngủ"
+
+        r_close = mapper.map("tắt rèm cửa phòng khách")
+        assert r_close is not None
+        assert r_close.action == "CLOSE"
+        assert r_close.device_type == "curtain"
+        assert r_close.room == "phòng khách"
+
+    def test_stop_curtain(self, mapper):
+        result = mapper.map("dừng rèm cửa")
+        assert result is not None
+        assert result.action == "STOP"
+        assert result.device_type == "curtain"

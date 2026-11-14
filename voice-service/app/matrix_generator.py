@@ -20,6 +20,7 @@ STANDARD_DEVICES = [
     "quạt",
     "điều hòa",
     "rèm",
+    "rèm cửa",
     "cửa",
     "cổng",
     "cổng chính",
@@ -54,13 +55,14 @@ def generate_phrases_for_room(
     if not clean_room:
         return []
 
-    devices = list(device_types) if device_types else ["đèn", "quạt", "điều hòa", "rèm", "cửa", "cổng", "cổng chính", "cửa cuốn"]
+    devices = list(device_types) if device_types else ["đèn", "quạt", "điều hòa", "rèm", "rèm cửa", "cửa", "cổng", "cổng chính", "cửa cuốn"]
     phrases: list[str] = []
 
     for dev in devices:
         is_open_close = any(k in dev.lower() for k in ["cửa", "cổng", "rèm"])
         actions = [("mở", "đóng")] if is_open_close else [("bật", "tắt")]
         if any(k in dev.lower() for k in ["rèm"]):
+            actions.append(("bật", "tắt"))
             actions.append(("kéo", "hạ"))
 
         for act_on, act_off in actions:

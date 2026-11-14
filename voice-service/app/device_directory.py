@@ -198,7 +198,7 @@ class DeviceDirectory:
             "door_lock": {"door_lock", "smart_lock", "lock"},
             "water_heater": {"water_heater", "boiler"},
             "water_pump": {"water_pump", "pump"},
-            "curtain": {"curtain", "blind", "shade"},
+            "curtain": {"curtain", "blind", "shade", "curtain_motor", "motorized_curtain", "rem", "rem_cua", "rem_2_manh"},
             "gate": {"gate", "rolling_door", "garage_door"},
             "socket": {"socket", "plug", "outlet"},
             "speaker": {"speaker", "audio"},
@@ -244,7 +244,7 @@ class DeviceDirectory:
                         types_to_register.add("water_heater")
                     if any(w in db_name for w in ["bơm", "máy bơm"]):
                         types_to_register.add("water_pump")
-                    if any(w in db_name for w in ["rèm", "màn"]):
+                    if any(w in db_name for w in ["rèm", "màn", "curtain"]):
                         types_to_register.add("curtain")
 
                 # Nếu nó là bộ điều khiển hồng ngoại (IR_REMOTE), phân loại thêm dựa vào tên

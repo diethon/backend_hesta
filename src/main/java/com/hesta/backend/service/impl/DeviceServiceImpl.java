@@ -218,7 +218,7 @@ public class DeviceServiceImpl implements DeviceService {
             }
 
             boolean isGateOrDoor = device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()));
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
 
             Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
             Map<String, Object> newState;
@@ -729,8 +729,9 @@ public class DeviceServiceImpl implements DeviceService {
                     result.put("SWING", List.of("SET_SWING"));
                     result.put("TIMER", List.of("SET_TIMER", "CANCEL_TIMER"));
                 }
-                case "GATE", "ROLLING_DOOR" -> {
+                case "GATE", "ROLLING_DOOR", "CURTAIN" -> {
                     result.put("GATE", List.of("OPEN", "CLOSE", "STOP", "GATE_OPEN", "GATE_CLOSE", "GATE_STOP"));
+                    result.put("CURTAIN", List.of("OPEN", "CLOSE", "STOP", "TURN_ON", "TURN_OFF", "TOGGLE"));
                 }
                 case "IR_REMOTE" -> {
                     result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE"));
