@@ -69,8 +69,8 @@ class RecommendationSchedulerTest {
 
     @Test
     void autoGenerateSucceedsAndNotifiesHomeOwner() {
-        when(homeRepository.findAll()).thenReturn(List.of(home));
-        when(jdbcTemplate.update(anyString(), eq("REC_GENERATE"), eq(homeId), eq(LocalDate.now()))).thenReturn(1);
+        when(homeRepository.findAll(any(org.springframework.data.domain.Pageable.class))).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(home)));
+        when(jdbcTemplate.update(anyString(), eq("REC_GENERATE"), eq(homeId), eq(LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))))).thenReturn(1);
         when(recommendationService.generateForSystem(eq(homeId), any(OffsetDateTime.class), any(OffsetDateTime.class)))
                 .thenReturn(List.of(RecommendationResponse.builder().id(UUID.randomUUID()).build()));
         when(homeMemberRepository.findByHomeIdWithUser(homeId)).thenReturn(List.of(ownerMember));
@@ -90,8 +90,8 @@ class RecommendationSchedulerTest {
 
     @Test
     void autoGenerateSkipsWhenAlreadyClaimedByAnotherNode() {
-        when(homeRepository.findAll()).thenReturn(List.of(home));
-        when(jdbcTemplate.update(anyString(), eq("REC_GENERATE"), eq(homeId), eq(LocalDate.now()))).thenReturn(0);
+        when(homeRepository.findAll(any(org.springframework.data.domain.Pageable.class))).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(home)));
+        when(jdbcTemplate.update(anyString(), eq("REC_GENERATE"), eq(homeId), eq(LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))))).thenReturn(0);
 
         scheduler.runAutoGenerate();
 
@@ -99,8 +99,18 @@ class RecommendationSchedulerTest {
     }
 
     @Test
+    void autoGenerateTakesNoClaimWhileMlServiceIsDown() {
+        when(mlServiceClient.getModelStatus(null))
+                .thenReturn(com.hesta.backend.dto.response.MlModelStatusResponse.builder().status("UNAVAILABLE").build());
+
+        scheduler.runAutoGenerate();
+
+        verifyNoInteractions(jdbcTemplate, recommendationService, homeRepository);
+    }
+
+    @Test
     void autoRetrainSkipsWhenInsufficientNewEvents() {
-        when(jdbcTemplate.update(anyString(), eq("REC_RETRAIN"), any(UUID.class), eq(LocalDate.now()))).thenReturn(1);
+        when(jdbcTemplate.update(anyString(), eq("REC_RETRAIN"), any(UUID.class), eq(LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))))).thenReturn(1);
         when(behaviorEventRepository.countByOccurredAtAfter(any(OffsetDateTime.class))).thenReturn(45L);
 
         scheduler.runAutoRetrain();
@@ -111,7 +121,7 @@ class RecommendationSchedulerTest {
 
     @Test
     void autoRetrainTriggersWhenCriteriaMet() {
-        when(jdbcTemplate.update(anyString(), eq("REC_RETRAIN"), any(UUID.class), eq(LocalDate.now()))).thenReturn(1);
+        when(jdbcTemplate.update(anyString(), eq("REC_RETRAIN"), any(UUID.class), eq(LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))))).thenReturn(1);
         when(behaviorEventRepository.countByOccurredAtAfter(any(OffsetDateTime.class))).thenReturn(150L);
         when(mlServiceClient.triggerRetraining(isNull())).thenReturn(
                 MlModelStatusResponse.builder().status("READY").version("rf-v2").accuracy(0.92).build()

@@ -67,6 +67,9 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.localId = :localId")
     Optional<Device> findByNodeCodeAndLocalId(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
 
+    @Query("SELECT d FROM Device d LEFT JOIN d.node n WHERE (n IS NOT NULL AND (n.id = :nodeId OR n.nodeCode = :nodeCode)) OR (d.mqttTopic LIKE CONCAT('%/nodes/', :nodeCode, '/%'))")
+    List<Device> findByNodeIdOrNodeCode(@Param("nodeId") UUID nodeId, @Param("nodeCode") String nodeCode);
+
     Optional<Device> findByMqttTopic(String mqttTopic);
 
     // Eager variants for callers outside a Hibernate session (MQTT automation path).

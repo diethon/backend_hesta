@@ -27,4 +27,9 @@ public interface DeviceService {
 
     com.hesta.backend.dto.response.HomeCapabilitiesResponse getHomeCapabilities(UUID userId, UUID homeId);
     com.hesta.backend.dto.response.DeviceCapabilityInfoResponse getDeviceCapabilities(UUID userId, UUID deviceId);
+
+    /**
+     * Xóa cache lịch sử trạng thái in-memory của thiết bị.
+     */
+    default void evictDeviceHistoryCache(UUID deviceId) {}
 }

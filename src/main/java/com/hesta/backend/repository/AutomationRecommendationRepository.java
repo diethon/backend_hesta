@@ -18,6 +18,8 @@ public interface AutomationRecommendationRepository extends JpaRepository<Automa
 
     boolean existsByHomeIdAndDeviceIdAndStatus(UUID homeId, UUID deviceId, String status);
 
+    List<AutomationRecommendation> findAllByDeviceIdAndStatus(UUID deviceId, String status);
+
     @EntityGraph(attributePaths = {"device", "device.room"})
     List<AutomationRecommendation> findAllByHomeIdAndDeviceIdAndCreatedAtAfter(UUID homeId, UUID deviceId, OffsetDateTime after);
 

@@ -1,6 +1,8 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.response.DeviceUptimeResponse;
+import com.hesta.backend.dto.response.TwinDeviceSnapshotResponse;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.DeviceStateHistory;
 import com.hesta.backend.repository.DeviceRepository;
@@ -23,7 +25,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class DeviceProfilingServiceTest {
@@ -127,5 +129,31 @@ class DeviceProfilingServiceTest {
         // Expect approximately 48 hours (+- 1 hour due to test execution drift), NOT 168.0
         assertTrue(response.getTotalHours() >= 47.0 && response.getTotalHours() <= 49.0);
         assertEquals(24, response.getTimelinePoints().size());
+    }
+
+    @Test
+    @DisplayName("Uptime Profiling: caches response and evicts on event")
+    void testGetDeviceUptime_CachesResponse_andEvictsOnEvent() {
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+        when(historyRepository.findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(eq(deviceId), any(), any()))
+                .thenReturn(List.of());
+
+        // Call 1
+        DeviceUptimeResponse first = profilingService.getDeviceUptime(deviceId, 7);
+        // Call 2: should hit in-memory cache directly without querying repository again
+        DeviceUptimeResponse second = profilingService.getDeviceUptime(deviceId, 7);
+
+        assertSame(first, second);
+        verify(deviceRepository, times(1)).findById(deviceId);
+
+        // Evict via event
+        TwinDeviceSnapshotResponse payload = new TwinDeviceSnapshotResponse(
+                deviceId, null, "Lamp", "LIGHT", null, null, null, null, null);
+        profilingService.onDeviceStateChanged(new DeviceStateChangedEvent(UUID.randomUUID(), payload));
+
+        // Call 3: should re-query
+        DeviceUptimeResponse third = profilingService.getDeviceUptime(deviceId, 7);
+        assertNotNull(third);
+        verify(deviceRepository, times(2)).findById(deviceId);
     }
 }

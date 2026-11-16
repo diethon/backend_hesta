@@ -83,7 +83,7 @@ class MqttDiagnosticsServiceImplTest {
     @Test
     @DisplayName("Circuit Breaker: trip endpoint forces OPEN state and blocks commands")
     void testTripCircuitBreaker() {
-        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
 
         assertTrue(diagnosticsService.allowExecution(nodeCode));
 
@@ -113,7 +113,7 @@ class MqttDiagnosticsServiceImplTest {
     @DisplayName("Circuit Breaker: in HALF_OPEN state, only one trial execution in flight is permitted")
     void testCircuitBreaker_HalfOpenOnlyAllowsSingleTrial() {
         // Manually trip
-        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
         diagnosticsService.tripCircuitBreaker(nodeCode);
         assertFalse(diagnosticsService.allowExecution(nodeCode));
 
@@ -136,8 +136,8 @@ class MqttDiagnosticsServiceImplTest {
     @Test
     @DisplayName("Circuit Breaker: trip endpoint with UUID nodeId resolves node and forces OPEN state")
     void testTripCircuitBreaker_ByNodeId() {
-        when(edgeNodeRepository.findById(node.getId())).thenReturn(Optional.of(node));
-        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByIdWithHome(node.getId())).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
 
         assertTrue(diagnosticsService.allowExecution(nodeCode));
 

@@ -136,4 +136,4 @@ public class RoomServiceImpl implements RoomService {
         roomRepository.delete(room);
         log.info("User {} deleted room '{}' (id: {}) in home {}", userId, room.getName(), roomId, homeId);
     }
-}
+}

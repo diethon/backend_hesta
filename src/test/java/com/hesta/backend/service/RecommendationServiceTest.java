@@ -1,7 +1,6 @@
 package com.hesta.backend.service;
 
 import com.hesta.backend.dto.request.CreateAutomationRuleRequest;
-import com.hesta.backend.dto.request.ScheduleRequest;
 import com.hesta.backend.dto.response.AutomationRuleResponse;
 import com.hesta.backend.dto.response.MlModelStatusResponse;
 import com.hesta.backend.dto.response.MlRecommendationProposal;
@@ -48,7 +47,8 @@ class RecommendationServiceTest {
     @Mock UserRepository users;
     @Mock HomeRepository homeRepository;
     @Mock AutomationRuleService rules;
-    @Mock ScheduleService schedules;
+    @Mock com.hesta.backend.repository.AutomationRuleRepository ruleRepository;
+    @Mock com.hesta.backend.repository.AutomationScheduleRepository ruleSchedules;
     @InjectMocks RecommendationServiceImpl service;
 
     private final UUID userId = UUID.randomUUID();
@@ -236,18 +236,17 @@ class RecommendationServiceTest {
     void approvalCreatesRuleAndScheduleAndRecordsFeedback() {
         when(recommendations.findByIdAndHomeId(recommendationId, homeId)).thenReturn(Optional.of(pending()));
         when(users.findById(userId)).thenReturn(Optional.of(User.builder().id(userId).build()));
-        UUID ruleId = UUID.randomUUID();
-        when(rules.create(eq(userId), eq(homeId), any())).thenReturn(AutomationRuleResponse.builder().id(ruleId).build());
+        when(rules.create(eq(userId), eq(homeId), any())).thenReturn(AutomationRuleResponse.builder().id(UUID.randomUUID()).build());
         when(recommendations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var result = service.approve(userId, homeId, recommendationId);
 
         assertThat(result.getStatus()).isEqualTo("ACCEPTED");
-        verify(rules).create(eq(userId), eq(homeId), any(CreateAutomationRuleRequest.class));
-
-        ArgumentCaptor<ScheduleRequest> scheduleCaptor = ArgumentCaptor.forClass(ScheduleRequest.class);
-        verify(schedules).saveRuleSchedule(eq(userId), eq(homeId), eq(ruleId), isNull(), scheduleCaptor.capture());
-        assertThat(scheduleCaptor.getValue().getScheduledTime()).isEqualTo(LocalTime.of(7, 15));
+        // The time travels with the rule so the rule is never saved without one.
+        ArgumentCaptor<CreateAutomationRuleRequest> ruleCaptor = ArgumentCaptor.forClass(CreateAutomationRuleRequest.class);
+        verify(rules).create(eq(userId), eq(homeId), ruleCaptor.capture());
+        assertThat(ruleCaptor.getValue().getSchedules()).singleElement()
+                .satisfies(schedule -> assertThat(schedule.getScheduledTime()).isEqualTo(LocalTime.of(7, 15)));
 
         // Verify feedback recorded
         verify(behaviorEventRecorder).recordRecommendationFeedback(
@@ -264,7 +263,7 @@ class RecommendationServiceTest {
         var result = service.reject(userId, homeId, recommendationId);
 
         assertThat(result.getStatus()).isEqualTo("REJECTED");
-        verifyNoInteractions(rules, schedules);
+        verifyNoInteractions(rules);
         verify(behaviorEventRecorder).recordRecommendationFeedback(
                 eq(home), eq(userId), eq(device), eq(recommendationId), eq("REJECTED"), eq("ML"), eq("rf-v1.0.0")
         );
@@ -279,7 +278,7 @@ class RecommendationServiceTest {
         var result = service.dismiss(userId, homeId, recommendationId);
 
         assertThat(result.getStatus()).isEqualTo("DISMISSED");
-        verifyNoInteractions(rules, schedules);
+        verifyNoInteractions(rules);
         verify(behaviorEventRecorder).recordRecommendationFeedback(
                 eq(home), eq(userId), eq(device), eq(recommendationId), eq("DISMISSED"), eq("ML"), eq("rf-v1.0.0")
         );
@@ -287,7 +286,7 @@ class RecommendationServiceTest {
 
     @Test
     void getModelStatusDelegatesToMlClient() {
-        when(mlServiceClient.getModelStatus()).thenReturn(MlModelStatusResponse.builder()
+        when(mlServiceClient.getModelStatus(homeId)).thenReturn(MlModelStatusResponse.builder()
                 .status("READY")
                 .version("rf-v1.0.0")
                 .accuracy(0.85)
@@ -314,5 +313,23 @@ class RecommendationServiceTest {
                 .triggerCondition(Map.of("type", "SCHEDULE", "time", "07:15", "repeatDays", List.of()))
                 .proposedAction(Map.of("deviceId", deviceId.toString(), "action", "TURN_ON", "parameters", Map.of()))
                 .build();
+    }
+
+    @Test
+    void weekdayRuleDoesNotCoverWeekendHabit() {
+        Short[] weekdays = {1, 2, 3, 4, 5};
+        assertThat(RecommendationServiceImpl.coversDays(weekdays, List.of(6, 7))).isFalse();
+        assertThat(RecommendationServiceImpl.coversDays(weekdays, List.of(1, 2))).isTrue();
+        assertThat(RecommendationServiceImpl.coversDays(new Short[0], List.of(6, 7))).isTrue();
+        assertThat(RecommendationServiceImpl.coversDays(weekdays, List.of())).isFalse();
+    }
+
+    @Test
+    void learnedSettingsAreDroppedForTurnOffAndPowerIsNeverCopied() {
+        AutomationRecommendation rec = new AutomationRecommendation();
+        rec.setProposedAction(Map.of("action", "TURN_ON",
+                "parameters", Map.of("power", "ON", "temperature", 24)));
+        assertThat(RecommendationServiceImpl.proposedParameters(rec, "TURN_ON")).isEqualTo(Map.of("temperature", 24));
+        assertThat(RecommendationServiceImpl.proposedParameters(rec, "TURN_OFF")).isEmpty();
     }
 }

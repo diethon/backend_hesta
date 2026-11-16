@@ -123,7 +123,7 @@ public class DeviceController {
                 .message("Đã khôi phục tự động hóa").build());
     }
 
-    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
+    @PreAuthorize("@deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/automation/extend")
     public ResponseEntity<ApiResponse<OffsetDateTime>> extendAutomation(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -331,7 +331,7 @@ public class DeviceController {
                 .build());
     }
 
-@PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
+@PreAuthorize("@deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -351,7 +351,7 @@ public class DeviceController {
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
     }
 
-@PreAuthorize("@deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
+@PreAuthorize("@deviceAccessValidator.canControlRoom(principal.id, #roomId)")
     @PostMapping("/rooms/{roomId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<List<CommandResult>>>> sendRoomCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,

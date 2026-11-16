@@ -106,6 +106,7 @@ public class ScheduleServiceImpl implements ScheduleService {
         AutomationSchedule schedule = scheduleId == null ? AutomationSchedule.builder().rule(rule).build()
                 : ruleSchedules.findById(scheduleId).filter(item -> item.getRule().getId().equals(ruleId))
                 .orElseThrow(() -> new AppException(ErrorCode.SCENE_SCHEDULE_NOT_FOUND));
+        if (!request.getActive()) requireAnotherActiveTime(schedule);
         schedule.setScheduledTime(request.getScheduledTime().withSecond(0).withNano(0));
         schedule.setRepeatDays(days);
         schedule.setActive(request.getActive());
@@ -124,7 +125,39 @@ public class ScheduleServiceImpl implements ScheduleService {
         AutomationSchedule schedule = ruleSchedules.findById(scheduleId)
                 .filter(item -> item.getRule().getId().equals(ruleId))
                 .orElseThrow(() -> new AppException(ErrorCode.SCENE_SCHEDULE_NOT_FOUND));
+        requireAnotherActiveTime(schedule);
         ruleSchedules.delete(schedule);
+    }
+
+    /** A SCHEDULE rule keeps at least one active time; to pause it the user turns the rule off. */
+    private void requireAnotherActiveTime(AutomationSchedule schedule) {
+        if (schedule.getId() != null && schedule.isActive()
+                && ruleSchedules.countByRuleIdAndActiveTrue(schedule.getRule().getId()) <= 1) {
+            throw new AppException(ErrorCode.AUTOMATION_SCHEDULE_REQUIRED);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void syncRuleSchedules(AutomationRule rule, List<ScheduleRequest> requests) {
+        if (rule.getTriggerType() != TriggerType.SCHEDULE && !requests.isEmpty()) {
+            throw new AppException(ErrorCode.AUTOMATION_TRIGGER_INVALID);
+        }
+        List<AutomationSchedule> existing = ruleSchedules.findAllByRuleIdOrderByScheduledTimeAsc(rule.getId());
+        java.util.Set<UUID> kept = new HashSet<>();
+        for (ScheduleRequest request : requests) {
+            Short[] days = validate(request);
+            AutomationSchedule schedule = request.getId() == null ? AutomationSchedule.builder().rule(rule).build()
+                    : existing.stream().filter(item -> item.getId().equals(request.getId())).findFirst()
+                    .orElseThrow(() -> new AppException(ErrorCode.SCENE_SCHEDULE_NOT_FOUND));
+            if (schedule.getId() != null && !kept.add(schedule.getId())) throw new AppException(ErrorCode.SCENE_SCHEDULE_INVALID);
+            schedule.setScheduledTime(request.getScheduledTime().withSecond(0).withNano(0));
+            schedule.setRepeatDays(days);
+            schedule.setActive(request.getActive());
+            ruleSchedules.save(schedule);
+        }
+        existing.stream().filter(item -> !kept.contains(item.getId())).forEach(ruleSchedules::delete);
+        ruleSchedules.flush(); // the caller counts active times right after
     }
 
     private Scene scene(UUID homeId, UUID sceneId) {

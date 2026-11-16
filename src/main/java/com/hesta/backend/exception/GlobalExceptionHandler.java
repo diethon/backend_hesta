@@ -82,6 +82,14 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Object>> handleGeneralException(Exception exception) {
+        // Spring's own client errors (unknown route 404, wrong method 405, missing param 400) keep their status.
+        if (exception instanceof org.springframework.web.ErrorResponse springError
+                && springError.getStatusCode().is4xxClientError()) {
+            return clientError(springError.getStatusCode(), springError.getBody().getDetail());
+        }
+        if (exception instanceof org.springframework.beans.TypeMismatchException) {
+            return clientError(org.springframework.http.HttpStatus.BAD_REQUEST, "Request parameter has an invalid format");
+        }
         log.error("Uncaught Exception: ", exception);
         
         ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
@@ -90,6 +98,14 @@ public class GlobalExceptionHandler {
                 .build();
                 
         return ResponseEntity.status(ErrorCode.UNCATEGORIZED_EXCEPTION.getStatusCode()).body(apiResponse);
+    }
+
+    private ResponseEntity<ApiResponse<Object>> clientError(org.springframework.http.HttpStatusCode status, String detail) {
+        ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
+                .code(ErrorCode.INVALID_REQUEST.getCode())
+                .message(detail != null ? detail : "Request is invalid")
+                .build();
+        return ResponseEntity.status(status).body(apiResponse);
     }
 
     private ResponseEntity<ApiResponse<Object>> errorResponse(ErrorCode errorCode) {

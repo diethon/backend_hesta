@@ -101,4 +101,32 @@ public class DeviceAccessValidator {
         }
         return false;
     }
+
+    public boolean canControlRoom(UUID userId, UUID roomId) {
+        if (userId == null || roomId == null) return false;
+        if (homeAuthorizationService != null) {
+            try {
+                Room room = roomRepository.findById(roomId).orElse(null);
+                if (room == null || room.getHome() == null) return false;
+                com.hesta.backend.service.MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(room.getHome().getId(), userId);
+                if (!ctx.isActive()) return false;
+                if (ctx.isOwner() || ctx.scope() == com.hesta.backend.enums.AccessScope.ALL) return true;
+                AccessLevel lvl = ctx.roomLevels().getOrDefault(roomId, AccessLevel.NONE);
+                return lvl == AccessLevel.CONTROL;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return canAccessRoom(userId, roomId);
+    }
+
+    public boolean canControlRoom(Object principal, UUID roomId) {
+        if (principal instanceof CustomUserDetails userDetails) {
+            return canControlRoom(userDetails.getId(), roomId);
+        }
+        if (principal instanceof UUID userId) {
+            return canControlRoom(userId, roomId);
+        }
+        return false;
+    }
 }

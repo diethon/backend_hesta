@@ -26,7 +26,7 @@ class DispatchConfig:
     base_url: str = "http://localhost:8080"
     action_endpoint_template: str = "/internal/devices/{device_id}/actions"
     api_key_env: str = "INTERNAL_API_KEY"
-    request_timeout_seconds: float = 3.0
+    request_timeout_seconds: float = 4.0
     max_workers: int = 10
     max_connections: int = 50
     max_keepalive_connections: int = 20
@@ -40,6 +40,7 @@ class DispatchResult:
     success: bool
     status_code: int = 0
     response_data: dict[str, Any] = field(default_factory=dict)
+    error_code: str = ""
     error_message: str = ""
     duration_ms: float = 0.0
 
@@ -78,6 +79,15 @@ class DispatchBatchResult:
 
         pattern_lower = pattern.lower() if pattern else ""
         hint_lower = hint.lower() if hint else ""
+
+        if device_type in ("curtain", "gate"):
+            if "bật" in pattern_lower or "bat" in pattern_lower:
+                action_vi = "bật"
+            elif "tắt" in pattern_lower or "tat" in pattern_lower:
+                action_vi = "tắt"
+            elif "dừng" in pattern_lower or "dung" in pattern_lower:
+                action_vi = "dừng"
+
         if device_type == "led_rgb":
             if "rgb" in pattern_lower or "rgb" in hint_lower:
                 type_vi = "đèn RGB"
@@ -85,6 +95,15 @@ class DispatchBatchResult:
                 type_vi = "đèn LED"
             else:
                 type_vi = "đèn LED RGB"
+        elif device_type == "curtain":
+            if any(w in pattern_lower for w in ["rèm cửa", "rem cua"]):
+                type_vi = "rèm cửa"
+            elif any(w in pattern_lower for w in ["rèm 2 mảnh", "rèm hai mảnh", "rem 2 manh", "rem hai manh"]):
+                type_vi = "rèm hai mảnh"
+            elif any(w in pattern_lower for w in ["màn", "man"]):
+                type_vi = "màn"
+            else:
+                type_vi = "rèm"
         elif device_type == "light" and (hint_lower == "ngủ" or "den ngu" in pattern_lower or "đèn ngủ" in pattern_lower):
             type_vi = "đèn ngủ"
             if room == "phòng ngủ":
@@ -147,7 +166,17 @@ class DispatchBatchResult:
             return (f"Đã {action_vi} {self.successful_count}/{self.total_devices} "
                     f"{type_vi}{room_str}, {self.failed_count} thiết bị lỗi")
         else:
-            return f"Không thể {action_vi} {type_vi}{room_str} — tất cả thiết bị đều lỗi"
+            # Phân loại nguyên nhân lỗi chi tiết dựa theo kết quả phản hồi từ Backend
+            err_codes = {r.error_code for r in self.results if r.error_code}
+            if "ACCESS_DENIED" in err_codes or any(r.status_code == 403 for r in self.results):
+                return f"Bạn không có quyền {action_vi} {type_vi}{room_str}."
+            if "UNAUTHORIZED" in err_codes or any(r.status_code == 401 for r in self.results):
+                return f"Bạn chưa đăng nhập hoặc không có quyền điều khiển {type_vi}{room_str}."
+            if "DEVICE_OFFLINE" in err_codes:
+                return f"{type_vi.capitalize()}{room_str} hiện đang ngoại tuyến hoặc chưa kết nối."
+            if "GATEWAY_DISCONNECTED" in err_codes:
+                return f"Không thể kết nối đến Gateway để {action_vi} {type_vi}{room_str}."
+            return f"Không thể {action_vi} {type_vi}{room_str} — thiết bị không phản hồi."
 
 
 class Dispatcher:
@@ -187,13 +216,15 @@ class Dispatcher:
         return key
 
     def dispatch(self, device_id: str, action: str,
-                 parameters: dict[str, Any] | None = None) -> DispatchResult:
+                 parameters: dict[str, Any] | None = None,
+                 user_id: str = "") -> DispatchResult:
         """Gửi 1 action tới 1 thiết bị qua REST nội bộ.
 
         Args:
             device_id: ID thiết bị (UUID)
             action: hành động (VD: "TURN_ON", "SET_TEMPERATURE")
             parameters: tham số bổ sung (VD: {"temperature": 25})
+            user_id: ID người dùng ra lệnh (nếu có để kiểm tra phân quyền RBAC)
 
         Returns:
             DispatchResult với thông tin kết quả.
@@ -202,21 +233,48 @@ class Dispatcher:
         payload: dict[str, Any] = {"action": action}
         if parameters:
             payload["parameters"] = parameters
+        if user_id:
+            payload["userId"] = user_id
 
         try:
             client = self._get_client()
             api_key = self._get_api_key()
 
+            headers = {"X-Internal-Api-Key": api_key}
+            if user_id:
+                headers["X-User-Id"] = user_id
+
             t0 = time.perf_counter()
             response = client.post(
                 endpoint,
                 json=payload,
-                headers={"X-Internal-Api-Key": api_key},
+                headers=headers,
             )
             duration_ms = (time.perf_counter() - t0) * 1000
 
             if response.status_code in (200, 201, 204):
                 response_data = response.json() if response.content else {}
+                # Kiểm tra ApiResponse wrapper và CommandResult từ Spring Boot
+                result_obj = response_data.get("result", {})
+                if isinstance(result_obj, dict):
+                    cmd_success = result_obj.get("success", True)
+                    cmd_err_code = result_obj.get("errorCode", "")
+                    cmd_msg = result_obj.get("message", "")
+                    if not cmd_success:
+                        logger.warning(
+                            "Dispatch rejected by backend: %s → %s — [%s] %s",
+                            device_id, action, cmd_err_code, cmd_msg,
+                        )
+                        return DispatchResult(
+                            device_id=device_id,
+                            success=False,
+                            status_code=response.status_code,
+                            response_data=response_data,
+                            error_code=cmd_err_code or "FAILED",
+                            error_message=cmd_msg or "Thực thi thất bại",
+                            duration_ms=round(duration_ms, 1),
+                        )
+
                 logger.info(
                     "Dispatch OK: %s → %s (%.0fms)",
                     device_id, action, duration_ms,
@@ -226,6 +284,18 @@ class Dispatcher:
                     success=True,
                     status_code=response.status_code,
                     response_data=response_data,
+                    duration_ms=round(duration_ms, 1),
+                )
+            elif response.status_code in (401, 403):
+                err_code = "ACCESS_DENIED" if response.status_code == 403 else "UNAUTHORIZED"
+                err_msg = "Bạn không có quyền điều khiển thiết bị này" if response.status_code == 403 else "Chưa xác thực người dùng"
+                logger.warning("Dispatch permission error: %s → %s — HTTP %d: %s", device_id, action, response.status_code, err_msg)
+                return DispatchResult(
+                    device_id=device_id,
+                    success=False,
+                    status_code=response.status_code,
+                    error_code=err_code,
+                    error_message=err_msg,
                     duration_ms=round(duration_ms, 1),
                 )
             else:
@@ -238,20 +308,25 @@ class Dispatcher:
                     device_id=device_id,
                     success=False,
                     status_code=response.status_code,
+                    error_code="INTERNAL_ERROR",
                     error_message=error_msg,
                     duration_ms=round(duration_ms, 1),
                 )
 
         except httpx.RequestError as e:
+            duration_ms = (time.perf_counter() - t0) * 1000
             logger.error("Dispatch ERROR: %s → %s — %s", device_id, action, e)
             return DispatchResult(
                 device_id=device_id,
                 success=False,
+                error_code="CONNECTION_ERROR",
                 error_message=str(e),
+                duration_ms=round(duration_ms, 1),
             )
 
     def dispatch_batch(self, device_ids: list[str], action: str,
-                       parameters: dict[str, Any] | None = None) -> DispatchBatchResult:
+                       parameters: dict[str, Any] | None = None,
+                       user_id: str = "") -> DispatchBatchResult:
         """Gửi cùng 1 action tới nhiều thiết bị (Mục 2.4 bước 3).
 
         Dùng khi có nhiều thiết bị cùng loại trong 1 phòng hoặc toàn nhà.
@@ -262,6 +337,7 @@ class Dispatcher:
             device_ids: danh sách device ID
             action: hành động
             parameters: tham số chung cho tất cả
+            user_id: ID người dùng ra lệnh (để kiểm tra phân quyền)
 
         Returns:
             DispatchBatchResult tổng hợp.
@@ -279,11 +355,11 @@ class Dispatcher:
         results: list[DispatchResult] = []
 
         if len(device_ids) == 1:
-            results.append(self.dispatch(device_ids[0], action, parameters))
+            results.append(self.dispatch(device_ids[0], action, parameters, user_id=user_id))
         else:
             workers = min(self.config.max_workers, len(device_ids))
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                results = list(executor.map(lambda d_id: self.dispatch(d_id, action, parameters), device_ids))
+                results = list(executor.map(lambda d_id: self.dispatch(d_id, action, parameters, user_id=user_id), device_ids))
 
         total_duration = (time.perf_counter() - t0) * 1000
         success_count = sum(1 for r in results if r.success)

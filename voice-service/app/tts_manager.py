@@ -30,6 +30,8 @@ def clean_tts_text(text: str) -> str:
     cleaned = re.sub(r"[✅⚠️❌⚡📝🔒🔓💡🔌🌀❄️☀️🌡️🔊🔇]", "", text)
     # Xóa markdown bold/italic/code
     cleaned = re.sub(r"[\*_`~#]", "", cleaned)
+    # Thay dấu gạch ngang dài — hoặc – bằng dấu phẩy để giọng đọc ngắt nghỉ tự nhiên
+    cleaned = re.sub(r"\s*[—–]\s*", ", ", cleaned)
     # Xóa nhiều khoảng trắng
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
@@ -48,7 +50,7 @@ class TTSManager:
         self.bundled_dir = bundled_dir
         self.default_voice = default_voice
         self._memory_cache: dict[str, bytes] = {}
-        self._lock = asyncio.Lock()
+        self._key_locks: dict[str, asyncio.Lock] = {}
         self._warmup_task: asyncio.Task | None = None
 
         # Đảm bảo thư mục cache tồn tại
@@ -57,6 +59,12 @@ class TTSManager:
             self.bundled_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.warning("Could not create TTS cache dir: %s", e)
+
+    def _get_key_lock(self, key: str) -> asyncio.Lock:
+        """Khóa lock riêng cho từng key để các câu thoại khác nhau có thể sinh đồng thời."""
+        if key not in self._key_locks:
+            self._key_locks[key] = asyncio.Lock()
+        return self._key_locks[key]
 
     def _get_cache_key(self, text: str, voice: str) -> str:
         clean = clean_tts_text(text).lower()
@@ -113,11 +121,34 @@ class TTSManager:
         except Exception as e:
             logger.warning("Error writing disk cache for key %s: %s", key, e)
 
+    def preload_disk_cache(self) -> int:
+        """
+        Nạp toàn bộ file âm thanh MP3 có sẵn trên ổ đĩa (bundled assets và disk cache) vào RAM.
+        Hoạt động hoàn toàn offline, 0ms latency khi gọi và không gọi ra mạng.
+        """
+        loaded = 0
+        for directory in (self.bundled_dir, self.cache_dir):
+            if directory.is_dir():
+                for p in directory.glob("*.mp3"):
+                    key = p.stem
+                    if key not in self._memory_cache:
+                        try:
+                            data = p.read_bytes()
+                            if data:
+                                self._memory_cache[key] = data
+                                loaded += 1
+                        except Exception as e:
+                            logger.debug("Error preloading cache file %s: %s", p, e)
+
+        logger.info("✅ Đã nạp %d file giọng nói từ disk cache vào RAM (sẵn sàng phản hồi tức thì)", loaded)
+        return loaded
+
     async def synthesize(
         self,
         text: str,
         voice: str | None = None,
         timeout_sec: float = 6.0,
+        silent_errors: bool = False,
     ) -> bytes:
         """
         Sinh âm thanh tiếng Việt MP3.
@@ -134,8 +165,9 @@ class TTSManager:
         if cached:
             return cached
 
-        # 2. Gọi Edge TTS qua mạng với khóa chống trùng lặp
-        async with self._lock:
+        # 2. Gọi Edge TTS qua mạng với khóa chống trùng lặp theo từng key
+        key = self._get_cache_key(clean, voice)
+        async with self._get_key_lock(key):
             # Re-check sau khi acquire lock
             cached = self.get_cached_audio(clean, voice)
             if cached:
@@ -161,16 +193,22 @@ class TTSManager:
                         self.save_to_cache(clean, voice, result_bytes)
                         return result_bytes
                 except asyncio.TimeoutError:
-                    logger.warning(
-                        "TTS timeout (attempt %d) for text: %s", attempt + 1, clean[:40]
-                    )
+                    if not silent_errors:
+                        logger.warning(
+                            "TTS timeout (attempt %d) for text: %s", attempt + 1, clean[:40]
+                        )
+                    else:
+                        logger.debug("TTS timeout (attempt %d) during warmup: %s", attempt + 1, clean[:40])
                 except Exception as e:
-                    logger.warning(
-                        "TTS error (attempt %d): %s for text: %s",
-                        attempt + 1,
-                        e,
-                        clean[:40],
-                    )
+                    if not silent_errors:
+                        logger.warning(
+                            "TTS error (attempt %d): %s for text: %s",
+                            attempt + 1,
+                            e,
+                            clean[:40],
+                        )
+                    else:
+                        logger.debug("TTS error (attempt %d) during warmup: %s", attempt + 1, clean[:40])
 
                 if attempt == 0:
                     await asyncio.sleep(0.3)
@@ -178,15 +216,13 @@ class TTSManager:
         return b""
 
     def start_warmup(self, extra_phrases: list[str] | None = None) -> None:
-        """Khởi động pre-warming trong background task."""
-        from app.matrix_generator import generate_matrix_phrases
-
-        # Tự động sinh ma trận phrases kết hợp với extra_phrases
-        all_phrases = generate_matrix_phrases(custom_devices=None, include_compounds=True)
+        """Khởi động nạp trước bộ nhớ đệm: nạp disk cache vào RAM và chỉ nạp nền nếu có yêu cầu cụ thể."""
+        self.preload_disk_cache()
+        # Không tự động quét hàng ngàn câu ma trận qua mạng để tránh bị Microsoft Edge-TTS rate-limit.
+        # Chỉ nạp nếu có danh sách câu cụ thể được truyền vào (giới hạn tối đa 20 câu ưu tiên).
         if extra_phrases:
-            all_phrases = list(dict.fromkeys(all_phrases + extra_phrases))
-
-        self.add_warmup_phrases(all_phrases)
+            priority_phrases = extra_phrases[:20]
+            self.add_warmup_phrases(priority_phrases)
 
     def add_warmup_phrases(self, phrases: list[str]) -> None:
         """Thêm các câu thoại mới vào hàng đợi pre-warming nền."""
@@ -216,24 +252,48 @@ class TTSManager:
         self.add_warmup_phrases(phrases)
 
     async def _warmup_worker(self) -> None:
-        """Tải trước các câu thoại trong hàng đợi vào bộ nhớ đệm."""
+        """Tải trước các câu thoại trong hàng đợi vào bộ nhớ đệm một cách nhẹ nhàng, không gây nghẽn mạng."""
         if not hasattr(self, "_pending_warmup"):
             self._pending_warmup = set()
 
-        count = 0
         total_initially = len(self._pending_warmup)
-        logger.info("Starting TTS background pre-warming for %d phrases...", total_initially)
+        if total_initially == 0:
+            return
+
+        logger.info("Starting gentle TTS background pre-warming for %d phrases...", total_initially)
+
+        count = 0
+        consecutive_errors = 0
 
         while self._pending_warmup:
-            phrase = self._pending_warmup.pop()
+            try:
+                phrase = self._pending_warmup.pop()
+            except KeyError:
+                break
+
             if not self.get_cached_audio(phrase, self.default_voice):
                 try:
-                    await self.synthesize(phrase, self.default_voice)
-                    count += 1
-                    # Nghỉ 0.15s giữa các câu để hoàn toàn không chiếm dụng CPU và không dồn request
-                    await asyncio.sleep(0.15)
+                    data = await self.synthesize(phrase, self.default_voice, timeout_sec=5.0, silent_errors=True)
+                    if data:
+                        count += 1
+                        consecutive_errors = 0
+                    else:
+                        consecutive_errors += 1
                 except Exception as e:
                     logger.debug("Warmup error for '%s': %s", phrase, e)
+                    consecutive_errors += 1
+
+                # Nếu bị Edge-TTS từ chối 3 lần liên tiếp (dấu hiệu rate limit hoặc đứt mạng)
+                if consecutive_errors >= 3:
+                    logger.info(
+                        "TTS background pre-warming tạm dừng (Microsoft Edge-TTS rate limit). "
+                        "Các câu còn lại sẽ được tạo khi người dùng gọi lệnh thực tế."
+                    )
+                    self._pending_warmup.clear()
+                    break
+
+                # Giãn cách 0.5s giữa các request để tôn trọng rate limit của Edge-TTS
+                await asyncio.sleep(0.5)
 
         logger.info("TTS pre-warming finished. %d new phrases cached.", count)
 

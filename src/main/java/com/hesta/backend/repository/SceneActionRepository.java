@@ -12,6 +12,8 @@ import java.util.UUID;
 @Repository
 public interface SceneActionRepository extends JpaRepository<SceneAction, UUID> {
     List<SceneAction> findAllBySceneIdOrderByOrderAsc(UUID sceneId);
+
+    List<SceneAction> findAllByTargetDeviceId(UUID deviceId);
     boolean existsBySceneIdAndOrder(UUID sceneId, int order);
     boolean existsBySceneIdAndOrderAndIdNot(UUID sceneId, int order, UUID id);
     long countBySceneId(UUID sceneId);

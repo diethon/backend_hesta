@@ -221,6 +221,20 @@ public class HomeAuthorizationService {
     }
 
     @Transactional(readOnly = true)
+    public boolean hasDeviceAccess(UUID userId, UUID deviceId, AccessLevel minLevel) {
+        if (userId == null || deviceId == null) return false;
+        Optional<Device> devOpt = deviceRepository.findById(deviceId);
+        if (devOpt.isEmpty() || devOpt.get().isDeleted()) return false;
+        Device dev = devOpt.get();
+        if (dev.getHome() == null) return false;
+        MemberAccessContext ctx = loadAccessContext(dev.getHome().getId(), userId);
+        if (!ctx.isActive()) return false;
+        AccessLevel level = effectiveLevel(ctx, dev);
+        if (level == AccessLevel.NONE) return false;
+        return minLevel == null || level.ordinal() >= minLevel.ordinal();
+    }
+
+    @Transactional(readOnly = true)
     public Set<UUID> getVisibleDeviceIds(UUID homeId, UUID userId, AccessLevel minLevel) {
         MemberAccessContext context = loadAccessContext(homeId, userId);
         if (!context.isActive()) {

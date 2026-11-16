@@ -83,6 +83,27 @@ class MqttMessageReceiverTest {
     }
 
     @Test
+    void stateMessageReleasesWaitingCommandBeforeTheDbWrite() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        var waiting = new java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>();
+        var active = (java.util.Map<UUID, java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>>)
+                org.springframework.test.util.ReflectionTestUtils.getField(
+                        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
+        active.put(deviceId, waiting);
+        // The DB write sees the command already done, i.e. the ACK did not wait for it.
+        doAnswer(inv -> { org.junit.jupiter.api.Assertions.assertTrue(waiting.isDone()); return null; })
+                .when(deviceService).updateDeviceStateFromMqtt(any(), any(), any());
+
+        receiver.handleMessage(MessageBuilder.withPayload("{\"state\":\"opening\"}")
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/state")
+                .build());
+
+        verify(deviceService).updateDeviceStateFromMqtt(any(), any(), any());
+        org.junit.jupiter.api.Assertions.assertTrue(waiting.join().isSuccess());
+    }
+
+    @Test
     void deviceStatusOnlineUpdatesStatus() {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
@@ -129,10 +150,16 @@ class MqttMessageReceiverTest {
         var device = Device.builder().id(deviceId).room(Room.builder().home(home).build())
                 .status(status == DeviceStatus.ONLINE ? DeviceStatus.OFFLINE : DeviceStatus.ONLINE).build();
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        var realtimeEventPublisher = mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(receiver, "realtimeEventPublisher", realtimeEventPublisher);
         receiver.handleMessage(MessageBuilder.withPayload(status.name())
                 .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/status").build());
-        verify(applicationEvents).publishEvent(argThat((DeviceStateChangedEvent event) ->
-                event.homeId().equals(homeId) && event.payload().status() == status && event.payload().lastSeen() == null));
+        // No transaction here, so the receiver broadcasts the snapshot itself instead of relying on AFTER_COMMIT listeners.
+        verify(realtimeEventPublisher).publish(argThat(event ->
+                event.type() == com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED
+                        && event.homeId().equals(homeId)
+                        && event.data() instanceof com.hesta.backend.dto.response.TwinDeviceSnapshotResponse snapshot
+                        && snapshot.status() == status && snapshot.lastSeen() == null));
     }
 
     @Test
@@ -176,5 +203,54 @@ class MqttMessageReceiverTest {
                 "temperature".equals(p.getMetricType())
                         && new java.math.BigDecimal("55.0").equals(p.getValue())
                         && "°C".equals(p.getUnit())));
+    }
+
+    @Test
+    void commandAckWithStatusOkCompletesPendingCommandSuccessfully() {
+        String commandId = UUID.randomUUID().toString();
+        java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult> future = new java.util.concurrent.CompletableFuture<>();
+        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.pendingCommands.put(commandId, future);
+
+        String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"OK\"}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/response")
+                .build());
+
+        org.junit.jupiter.api.Assertions.assertTrue(future.isDone());
+        com.hesta.backend.dto.command.CommandResult result = future.join();
+        org.junit.jupiter.api.Assertions.assertTrue(result.isSuccess());
+        org.junit.jupiter.api.Assertions.assertEquals("OK", result.getStatus());
+    }
+
+    @Test
+    void commandAckWithStatusClosingCompletesPendingCommandSuccessfully() {
+        String commandId = UUID.randomUUID().toString();
+        java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult> future = new java.util.concurrent.CompletableFuture<>();
+        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.pendingCommands.put(commandId, future);
+
+        String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"CLOSING\"}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/response")
+                .build());
+
+        org.junit.jupiter.api.Assertions.assertTrue(future.isDone());
+        com.hesta.backend.dto.command.CommandResult result = future.join();
+        org.junit.jupiter.api.Assertions.assertTrue(result.isSuccess());
+        org.junit.jupiter.api.Assertions.assertEquals("CLOSING", result.getStatus());
+    }
+
+    @Test
+    void lateAckResolvesDeviceIdFromCommandDeviceMap() {
+        String commandId = UUID.randomUUID().toString();
+        UUID deviceId = UUID.randomUUID();
+        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.commandDeviceMap.put(commandId, deviceId);
+
+        String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"CLOSED\",\"state\":{\"state\":\"CLOSED\"}}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/response")
+                .build());
+
+        verify(deviceService).updateDeviceStateFromMqtt(isNull(), eq(deviceId.toString()), anyMap());
+        org.junit.jupiter.api.Assertions.assertFalse(com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.commandDeviceMap.containsKey(commandId));
     }
 }

@@ -1,5 +1,7 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.entity.AutomationRule;
+
 import com.hesta.backend.dto.request.ScheduleRequest;
 import com.hesta.backend.dto.response.ScheduleResponse;
 
@@ -13,4 +15,10 @@ public interface ScheduleService {
     List<ScheduleResponse> ruleSchedules(UUID userId, UUID homeId, UUID ruleId);
     ScheduleResponse saveRuleSchedule(UUID userId, UUID homeId, UUID ruleId, UUID scheduleId, ScheduleRequest request);
     void deleteRuleSchedule(UUID userId, UUID homeId, UUID ruleId, UUID scheduleId);
+
+    /**
+     * Makes the rule's times exactly {@code requests}: items with an id are updated, items without one are
+     * created, times missing from the list are deleted. The caller checks that an active time remains.
+     */
+    void syncRuleSchedules(AutomationRule rule, List<ScheduleRequest> requests);
 }

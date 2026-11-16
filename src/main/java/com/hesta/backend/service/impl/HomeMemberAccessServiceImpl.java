@@ -41,7 +41,7 @@ public class HomeMemberAccessServiceImpl implements HomeMemberAccessService {
     private final DeviceRepository deviceRepository;
     private final ApplicationEventPublisher eventPublisher;
 
-    @Value("${access.custom-scope.enabled:false}")
+    @Value("${access.custom-scope.enabled:true}")
     private boolean customScopeEnabled;
 
     @Override

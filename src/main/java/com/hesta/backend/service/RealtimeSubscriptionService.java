@@ -4,4 +4,5 @@ import java.util.UUID;
 
 public interface RealtimeSubscriptionService {
     void authorizeSubscription(UUID userId, UUID homeId);
+    void authorizeSubscription(UUID userId, UUID homeId, String destination);
 }

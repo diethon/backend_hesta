@@ -47,10 +47,14 @@ public class RecommendationScheduler {
     @Autowired(required = false)
     private NotificationService notificationService;
 
+    // Claims use the same local date as the cron zone, not the JVM default zone.
+    @Value("${hesta.scheduler.zone:Asia/Ho_Chi_Minh}")
+    private String zoneName = "Asia/Ho_Chi_Minh";
+
     @Value("${hesta.recommendation.auto-generate.enabled:true}")
     private boolean autoGenerateEnabled;
 
-    @Value("${hesta.recommendation.auto-generate.lookback-days:14}")
+    @Value("${hesta.recommendation.auto-generate.lookback-days:30}")
     private int lookbackDays;
 
     @Value("${hesta.recommendation.auto-retrain.enabled:true}")
@@ -63,18 +67,27 @@ public class RecommendationScheduler {
      * Tự động quét và sinh các gợi ý thói quen thông minh (Recommendation) chạy nền ở giờ thấp điểm.
      * Mặc định chạy lúc 02:00 sáng hàng ngày.
      */
-    @Scheduled(cron = "${hesta.recommendation.auto-generate.cron:0 0 2 * * ?}", zone = "${hesta.scheduler.zone:Asia/Ho_Chi_Minh}")
+    @Scheduled(cron = "${hesta.recommendation.auto-generate.cron:0 0 2-5 * * ?}", zone = "${hesta.scheduler.zone:Asia/Ho_Chi_Minh}")
     public void runAutoGenerate() {
         if (!autoGenerateEnabled) {
             log.debug("Auto-generation of recommendations is disabled by configuration");
             return;
         }
 
-        log.info("Starting background scheduled recommendation generation...");
-        LocalDate today = LocalDate.now();
-        List<Home> homes = homeRepository.findAll();
+        // Claims are taken per home, so with the ML service down a home would lose today's run;
+        // skip instead and let the next hourly run (cron 2-5h) retry.
+        MlModelStatusResponse ml = mlServiceClient.getModelStatus(null);
+        if (ml != null && "UNAVAILABLE".equals(ml.getStatus())) {
+            log.warn("ML service unavailable, recommendation generation postponed to the next run");
+            return;
+        }
 
-        for (Home home : homes) {
+        log.info("Starting background scheduled recommendation generation...");
+        LocalDate today = LocalDate.now(java.time.ZoneId.of(zoneName));
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 50);
+        while (true) {
+            org.springframework.data.domain.Page<Home> page = homeRepository.findAll(pageable);
+            for (Home home : page.getContent()) {
             if (!claim("REC_GENERATE", home.getId(), today)) {
                 log.debug("Recommendation generation for home {} already claimed by another node today", home.getId());
                 continue;
@@ -94,6 +107,9 @@ public class RecommendationScheduler {
             } catch (Exception ex) {
                 log.error("Failed to generate recommendations for home {}", home.getId(), ex);
             }
+            }
+            if (!page.hasNext()) break;
+            pageable = page.nextPageable();
         }
         log.info("Background scheduled recommendation generation completed.");
     }
@@ -109,7 +125,7 @@ public class RecommendationScheduler {
             return;
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(java.time.ZoneId.of(zoneName));
         if (!claim("REC_RETRAIN", SYSTEM_RETRAIN_CLAIM_ID, today)) {
             log.debug("Auto-retraining task for today already claimed by another node");
             return;
@@ -173,8 +189,8 @@ public class RecommendationScheduler {
                     "INSERT INTO scheduled_run_claims (schedule_type, schedule_id, local_date) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
                     type, scheduleId, date) == 1;
         } catch (Exception ex) {
-            log.warn("Claim check failed for type {} id {}: {}", type, scheduleId, ex.getMessage());
-            return true; // Fallback: if claim table has error, allow execution
+            log.error("Claim check DB error for type {} id {} — skipping execution to avoid duplicate runs: {}", type, scheduleId, ex.getMessage());
+            return false; // Safe default: skip rather than risk duplicate execution across nodes
         }
     }
 }

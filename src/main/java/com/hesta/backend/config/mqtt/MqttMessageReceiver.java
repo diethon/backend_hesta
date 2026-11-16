@@ -44,6 +44,8 @@ public class MqttMessageReceiver {
     private final ApplicationEventPublisher applicationEvents;
     private final TwinSnapshotMapper twinSnapshotMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AutomationDispatcher automationDispatcher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.diagnostics.MqttDlqService dlqService;
@@ -51,6 +53,12 @@ public class MqttMessageReceiver {
     private com.hesta.backend.shadow.DeviceShadowService deviceShadowService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.ota.OtaCampaignService otaCampaignService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.falldetection.service.FallIncidentService fallIncidentService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -143,7 +151,7 @@ public class MqttMessageReceiver {
             // 5. COMMAND ACK
             // =====================================================
 
-            else if (topic.endsWith("/ack")) {
+            else if (topic.endsWith("/ack") || topic.endsWith("/response")) {
 
                 handleCommandAck(payload);
 
@@ -166,6 +174,16 @@ public class MqttMessageReceiver {
             else if (topic.contains("/ota/")) {
 
                 handleOtaMessage(topic, payload);
+
+            }
+
+            // =====================================================
+            // 8. FALL DETECTION / EMERGENCY SOS
+            // =====================================================
+
+            else if (topic.contains("fall-detection") || topic.contains("emergency/fall")) {
+
+                handleFallDetectionEvent(topic, payload);
 
             }
 
@@ -369,18 +387,25 @@ public class MqttMessageReceiver {
         if (device.getRoom() == null || device.getRoom().getHome() == null) {
             return;
         }
-        try {
-            automationEngine.process(
-                    device.getRoom().getHome().getId(),
-                    AutomationEventRequest.builder()
-                            .sourceDeviceId(device.getId())
-                            .eventType(eventType)
-                            .data(data)
-                            .build()
-            );
-        } catch (Exception ex) {
-            log.warn("AutomationEngine execution error for device {}: {}", device.getId(), ex.getMessage());
-        }
+        UUID homeId = device.getRoom().getHome().getId();
+        UUID deviceId = device.getId();
+        AutomationEventRequest event = AutomationEventRequest.builder()
+                .sourceDeviceId(deviceId)
+                .eventType(eventType)
+                .data(new HashMap<>(data))
+                .stateReport(true)
+                .build();
+        Runnable task = () -> {
+            try {
+                automationEngine.process(homeId, event);
+            } catch (Exception ex) {
+                log.warn("AutomationEngine execution error for device {}: {}", deviceId, ex.getMessage());
+            }
+        };
+        // Async: own transaction (an engine failure can no longer roll back this telemetry write)
+        // and the MQTT thread stays free to deliver the ACKs the engine waits for.
+        if (automationDispatcher != null) automationDispatcher.dispatch(task);
+        else task.run();
     }
 
     private void applyMetricAliases(Map<String, Object> data, String metricType, Object value) {
@@ -496,6 +521,15 @@ public class MqttMessageReceiver {
         // ---------------------------------------------------------
 
         Object stateObject = data.get("state");
+
+        // Release the waiting command before the slow remote-DB writes below, so the ACK is not late.
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> ackState = stateObject instanceof Map<?, ?> ? (Map<String, Object>) stateObject : data;
+            MqttDeviceCommandServiceImpl.completeDeviceCommand(UUID.fromString(deviceId), ackState);
+        } catch (IllegalArgumentException localId) {
+            // Not a UUID: resolved by node + localId lookup at the end of this method.
+        }
 
         if (stateObject instanceof Map<?, ?>) {
 
@@ -635,18 +669,17 @@ public class MqttMessageReceiver {
 
         CompletableFuture<CommandResult> future =
                 MqttDeviceCommandServiceImpl.pendingCommands.remove(commandId);
+
+        UUID mappedDeviceId = MqttDeviceCommandServiceImpl.commandDeviceMap.get(commandId);
+        if (data.get("deviceId") == null && mappedDeviceId != null) {
+            data.put("deviceId", mappedDeviceId.toString());
+        }
+
         if (future != null) {
 
             // -----------------------------------------------------
             // Determine success
             // -----------------------------------------------------
-
-            boolean success =
-                    "SUCCESS".equalsIgnoreCase(
-                            String.valueOf(
-                                    data.get("status")
-                            )
-                    );
 
             String status =
                     data.get("status") != null
@@ -657,6 +690,31 @@ public class MqttMessageReceiver {
                     data.get("errorCode") != null
                             ? data.get("errorCode").toString()
                             : null;
+
+            String statusUpper = status.trim().toUpperCase(java.util.Locale.ROOT);
+            Object successObj = data.get("success");
+            boolean success = false;
+            if (successObj instanceof Boolean) {
+                success = (Boolean) successObj;
+            } else if (successObj != null && ("true".equalsIgnoreCase(successObj.toString()) || "1".equals(successObj.toString()))) {
+                success = true;
+            } else {
+                success = "SUCCESS".equals(statusUpper)
+                        || "OK".equals(statusUpper)
+                        || "ACCEPTED".equals(statusUpper)
+                        || "ACK".equals(statusUpper)
+                        || "DONE".equals(statusUpper)
+                        || "CLOSING".equals(statusUpper)
+                        || "OPENING".equals(statusUpper)
+                        || "CLOSED".equals(statusUpper)
+                        || "OPEN".equals(statusUpper);
+            }
+
+            if (errorCode != null && !errorCode.isBlank() && !"NONE".equalsIgnoreCase(errorCode) && !"0".equals(errorCode)) {
+                if (!"SUCCESS".equals(statusUpper) && !"OK".equals(statusUpper) && !"ACCEPTED".equals(statusUpper)) {
+                    success = false;
+                }
+            }
 
             // -----------------------------------------------------
             // Build command result
@@ -717,6 +775,21 @@ public class MqttMessageReceiver {
                 data.get("deviceId") != null
                         ? data.get("deviceId").toString()
                         : null;
+
+        String commandId =
+                data.get("commandId") != null
+                        ? data.get("commandId").toString()
+                        : null;
+
+        if ((deviceId == null || deviceId.isBlank()) && commandId != null) {
+            UUID mapped = MqttDeviceCommandServiceImpl.commandDeviceMap.remove(commandId);
+            if (mapped != null) {
+                deviceId = mapped.toString();
+                data.put("deviceId", deviceId);
+            }
+        } else if (commandId != null) {
+            MqttDeviceCommandServiceImpl.commandDeviceMap.remove(commandId);
+        }
 
         if (deviceId == null || deviceId.isBlank()) {
 
@@ -856,6 +929,7 @@ public class MqttMessageReceiver {
                     node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
                     edgeNodeRepository.save(node);
                     log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
+                    cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
                 });
             }
         } catch (Exception e) {
@@ -873,10 +947,14 @@ public class MqttMessageReceiver {
                 com.hesta.backend.enums.EdgeNodeStatus nodeStatus = "ONLINE".equals(statusStr)
                         ? com.hesta.backend.enums.EdgeNodeStatus.ONLINE
                         : com.hesta.backend.enums.EdgeNodeStatus.OFFLINE;
+                com.hesta.backend.enums.DeviceStatus nodeDevStatus = "ONLINE".equals(statusStr)
+                        ? com.hesta.backend.enums.DeviceStatus.ONLINE
+                        : com.hesta.backend.enums.DeviceStatus.OFFLINE;
                 edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
                     n.setStatus(nodeStatus);
                     edgeNodeRepository.save(n);
                     log.info("Updated node {} status to {}", nodeCode, nodeStatus);
+                    cascadeNodeStatusToDevices(n, nodeDevStatus);
                 });
                 return;
             }
@@ -901,11 +979,12 @@ public class MqttMessageReceiver {
                 boolean statusChanged = device.getStatus() != devStatus;
                 device.setStatus(devStatus);
                 devices.save(device);
-                if (statusChanged && device.getHome() != null) {
-                    applicationEvents.publishEvent(new DeviceStateChangedEvent(
-                            device.getHome().getId(), twinSnapshotMapper.device(device)));
+                // A heartbeat that changes nothing must not broadcast: its snapshot can be older than a command
+                // committed meanwhile and would flip other screens back. Freshness is handled by twin health.
+                if (statusChanged) {
+                    log.info("Updated device {} status to {}", device.getId(), devStatus);
+                    publishDeviceStateChanged(device);
                 }
-                log.info("Updated device {} status to {}", device.getId(), devStatus);
 
                 if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
                     EdgeNode node = device.getNode();
@@ -935,6 +1014,73 @@ public class MqttMessageReceiver {
             log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
         }
     }
+
+    private void handleFallDetectionEvent(String topic, String payload) {
+        log.info("Processing Fall Detection MQTT event from topic: {}", topic);
+        if (fallIncidentService != null) {
+            try {
+                com.hesta.backend.falldetection.dto.FallIncidentEventDTO event =
+                        objectMapper.readValue(payload, com.hesta.backend.falldetection.dto.FallIncidentEventDTO.class);
+                fallIncidentService.processIncomingFallEvent(event);
+            } catch (Exception e) {
+                log.error("Failed to parse or process fall incident payload: {}", payload, e);
+            }
+        } else {
+            log.warn("FallIncidentService is not available to process fall event");
+        }
+    }
+
+    private void cascadeNodeStatusToDevices(EdgeNode node, com.hesta.backend.enums.DeviceStatus newStatus) {
+        if (devices == null || node == null) return;
+        try {
+            List<com.hesta.backend.entity.Device> devList = devices.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
+            for (com.hesta.backend.entity.Device dev : devList) {
+                if (dev.getStatus() != newStatus) {
+                    dev.setStatus(newStatus);
+                    dev.setLastSeen(java.time.OffsetDateTime.now());
+                    devices.save(dev);
+                    log.info("Cascaded status {} to device {} ({}) for node {}", newStatus, dev.getName(), dev.getId(), node.getNodeCode());
+                    publishDeviceStateChanged(dev);
+                }
+            }
+        } catch (Exception ex) {
+            log.error("Failed to cascade status {} to devices of node {}: {}", newStatus, node.getNodeCode(), ex.getMessage());
+        }
+    }
+
+    private void publishDeviceStateChanged(com.hesta.backend.entity.Device dev) {
+        UUID homeId = dev.getHome() != null ? dev.getHome().getId() : null;
+        if (homeId == null) return;
+
+        // One broadcast per change: inside a transaction the AFTER_COMMIT listener sends it, otherwise we do.
+        boolean inTransaction = org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive();
+        if (inTransaction && applicationEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    applicationEventPublisher.publishEvent(new com.hesta.backend.dto.command.DeviceStateChangedEvent(homeId, snapshot));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
+            }
+            return;
+        }
+
+        if (realtimeEventPublisher != null) {
+            try {
+                var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
+                if (snapshot != null) {
+                    realtimeEventPublisher.publish(com.hesta.backend.realtime.model.RealtimeEvent.create(
+                            com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED,
+                            homeId,
+                            dev.getId(),
+                            snapshot
+                    ));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to publish realtime websocket event for device {}: {}", dev.getId(), ex.getMessage());
+            }
+        }
+    }
+
 }
-
-

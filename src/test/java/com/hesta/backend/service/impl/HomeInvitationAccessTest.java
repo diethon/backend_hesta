@@ -193,12 +193,13 @@ class HomeInvitationAccessTest {
     }
 
     @Test
-    @DisplayName("Invitation - Already invited (pending active) throws 409 INVITATION_ALREADY_EXISTS")
-    void testGenerateInvitation_AlreadyInvited_ThrowsConflict() {
+    @DisplayName("Invitation - Already invited (pending active) cancels previous and creates new invite")
+    void testGenerateInvitation_AlreadyInvited_CancelsPreviousAndCreatesNew() {
         when(userRepository.findById(inviterId)).thenReturn(Optional.of(inviter));
         when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
         when(homeMemberRepository.findByHomeIdAndUserId(homeId, inviterId)).thenReturn(Optional.of(ownerMember));
         when(userRepository.findByEmail("guest@hesta.vn")).thenReturn(Optional.empty());
+        when(emailService.sendInvitationEmail(any(), any(), any(), any(), any())).thenReturn(true);
 
         HomeInvitation activeInvite = HomeInvitation.builder()
                 .expiresAt(OffsetDateTime.now().plusDays(2))
@@ -207,9 +208,15 @@ class HomeInvitationAccessTest {
         when(homeInvitationRepository.findByHomeIdAndTargetEmailAndStatus(eq(homeId), eq("guest@hesta.vn"), eq(InvitationStatus.PENDING)))
                 .thenReturn(List.of(activeInvite));
 
-        AppException ex = assertThrows(AppException.class, () ->
-                homeService.generateInvitation(inviterId, homeId, "guest@hesta.vn", null));
-        assertEquals(ErrorCode.INVITATION_ALREADY_EXISTS, ex.getErrorCode());
+        Map<String, Object> res = homeService.generateInvitation(inviterId, homeId, "guest@hesta.vn", null);
+
+        assertNotNull(res);
+        assertEquals(InvitationStatus.CANCELLED, activeInvite.getStatus());
+        verify(homeInvitationRepository).saveAll(argThat((Iterable<HomeInvitation> list) -> {
+            var it = list.iterator();
+            return it.hasNext() && it.next().getStatus() == InvitationStatus.CANCELLED;
+        }));
+        verify(homeInvitationRepository).save(any(HomeInvitation.class));
     }
 
     @Test

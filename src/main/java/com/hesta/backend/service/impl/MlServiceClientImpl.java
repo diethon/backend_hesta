@@ -2,7 +2,6 @@ package com.hesta.backend.service.impl;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.hesta.backend.dto.response.MlModelStatusResponse;
-import com.hesta.backend.dto.response.MlPredictionResponse;
 import com.hesta.backend.dto.response.MlRecommendationProposal;
 import com.hesta.backend.service.MlServiceClient;
 import lombok.AllArgsConstructor;
@@ -22,26 +21,53 @@ import java.util.*;
 public class MlServiceClientImpl implements MlServiceClient {
 
     private final RestClient restClient;
+    private final RestClient trainClient;
     private final String baseUrl;
     private final double defaultThreshold;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public MlServiceClientImpl(
             @Value("${hesta.ml-service.url:http://localhost:8000}") String baseUrl,
             @Value("${hesta.ml-service.timeout-ms:5000}") int timeoutMs,
+            @Value("${hesta.ml-service.train-timeout-ms:300000}") int trainTimeoutMs,
             @Value("${hesta.recommendation.confidence-threshold:0.80}") double defaultThreshold,
+            @Value("${hesta.ml-service.api-key:}") String apiKey,
             RestClient.Builder restClientBuilder) {
+        // Timeouts so a hung ML service cannot block scheduler threads forever; training gets a longer budget.
+        this(baseUrl, defaultThreshold,
+                withApiKey(restClientBuilder.clone().requestFactory(timeouts(timeoutMs)), apiKey),
+                withApiKey(restClientBuilder.clone().requestFactory(timeouts(trainTimeoutMs)), apiKey));
+    }
+
+    /** Shared secret the ML service checks (X-API-Key); blank only for local development. */
+    private static RestClient.Builder withApiKey(RestClient.Builder builder, String apiKey) {
+        return apiKey == null || apiKey.isBlank() ? builder : builder.defaultHeader("X-API-Key", apiKey);
+    }
+
+    /** Keeps the builder's own request factory (e.g. a MockRestServiceServer in tests). */
+    public MlServiceClientImpl(String baseUrl, int timeoutMs, double defaultThreshold, RestClient.Builder restClientBuilder) {
+        this(baseUrl, defaultThreshold, restClientBuilder, restClientBuilder);
+    }
+
+    private MlServiceClientImpl(String baseUrl, double defaultThreshold, RestClient.Builder builder, RestClient.Builder trainBuilder) {
         this.baseUrl = baseUrl;
         this.defaultThreshold = defaultThreshold;
-        this.restClient = restClientBuilder
-                .baseUrl(baseUrl)
-                .build();
+        this.restClient = builder.baseUrl(baseUrl).build();
+        this.trainClient = trainBuilder.baseUrl(baseUrl).build();
+    }
+
+    private static org.springframework.http.client.SimpleClientHttpRequestFactory timeouts(int readTimeoutMs) {
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(3000);
+        factory.setReadTimeout(readTimeoutMs);
+        return factory;
     }
 
     @Override
-    public MlModelStatusResponse getModelStatus() {
+    public MlModelStatusResponse getModelStatus(UUID homeId) {
         try {
             return restClient.get()
-                    .uri("/model/status")
+                    .uri(uri -> uri.path("/model/status").queryParam("home_id", homeId).build())
                     .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
                     .body(MlModelStatusResponse.class);
@@ -54,38 +80,6 @@ public class MlServiceClientImpl implements MlServiceClient {
                     .accuracy(0.0)
                     .confidenceThreshold(defaultThreshold)
                     .metrics(Map.of("error", ex.getMessage()))
-                    .build();
-        }
-    }
-
-    @Override
-    public MlPredictionResponse predict(UUID homeId, UUID deviceId, String deviceType, UUID roomId,
-                                         Map<String, Object> currentState, OffsetDateTime at) {
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("home_id", homeId != null ? homeId.toString() : null);
-        requestBody.put("device_id", deviceId != null ? deviceId.toString() : null);
-        requestBody.put("device_type", deviceType);
-        requestBody.put("room_id", roomId != null ? roomId.toString() : null);
-        requestBody.put("current_state", currentState != null ? currentState : Map.of());
-        requestBody.put("timestamp", at != null ? at.toString() : OffsetDateTime.now().toString());
-
-        try {
-            return restClient.post()
-                    .uri("/predict")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(MlPredictionResponse.class);
-        } catch (Exception ex) {
-            log.warn("ML predict call failed for device {}: {}", deviceId, ex.getMessage());
-            return MlPredictionResponse.builder()
-                    .deviceId(deviceId)
-                    .action("NONE")
-                    .confidence(0.0)
-                    .eligible(false)
-                    .threshold(defaultThreshold)
-                    .status("ERROR")
-                    .reason("Không thể kết nối dịch vụ ML: " + ex.getMessage())
                     .build();
         }
     }
@@ -126,7 +120,7 @@ public class MlServiceClientImpl implements MlServiceClient {
         requestBody.put("force", true);
 
         try {
-            return restClient.post()
+            return trainClient.post()
                     .uri("/train")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(requestBody)

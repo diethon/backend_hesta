@@ -47,6 +47,7 @@ class DeviceInfo:
     room_name: str
     home_id: str
     settings: dict[str, Any] = field(default_factory=dict)
+    status: str = "ONLINE"
 
 
 # Ngữ cảnh ánh sáng gợi ý mặc định (Built-in Mood Presets) đồng bộ với Frontend
@@ -197,7 +198,7 @@ class DeviceDirectory:
             "door_lock": {"door_lock", "smart_lock", "lock"},
             "water_heater": {"water_heater", "boiler"},
             "water_pump": {"water_pump", "pump"},
-            "curtain": {"curtain", "blind", "shade"},
+            "curtain": {"curtain", "blind", "shade", "curtain_motor", "motorized_curtain", "rem", "rem_cua", "rem_2_manh"},
             "gate": {"gate", "rolling_door", "garage_door"},
             "socket": {"socket", "plug", "outlet"},
             "speaker": {"speaker", "audio"},
@@ -243,7 +244,7 @@ class DeviceDirectory:
                         types_to_register.add("water_heater")
                     if any(w in db_name for w in ["bơm", "máy bơm"]):
                         types_to_register.add("water_pump")
-                    if any(w in db_name for w in ["rèm", "màn"]):
+                    if any(w in db_name for w in ["rèm", "màn", "curtain"]):
                         types_to_register.add("curtain")
 
                 # Nếu nó là bộ điều khiển hồng ngoại (IR_REMOTE), phân loại thêm dựa vào tên
@@ -256,6 +257,7 @@ class DeviceDirectory:
                         types_to_register.add("fan")
 
                 dev_settings = dev.get("settings") if isinstance(dev.get("settings"), dict) else {}
+                dev_status = str(dev.get("status", "ONLINE")).upper()
                 for t in types_to_register:
                     info = DeviceInfo(
                         device_id=str(dev["id"]),
@@ -264,6 +266,7 @@ class DeviceDirectory:
                         room_name=str(dev.get("roomName", dev.get("room", ""))).strip().lower(),
                         home_id=str(dev.get("homeId", dev.get("home_id", ""))),
                         settings=dev_settings,
+                        status=dev_status,
                     )
                     key = (info.home_id, info.room_name, t)
                     if key not in cache:

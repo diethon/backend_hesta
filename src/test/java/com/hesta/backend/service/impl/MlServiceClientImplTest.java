@@ -1,7 +1,6 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.response.MlModelStatusResponse;
-import com.hesta.backend.dto.response.MlPredictionResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -9,8 +8,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
-import java.time.OffsetDateTime;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +16,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class MlServiceClientImplTest {
 
+    private static final UUID HOME = UUID.fromString("37fd02b2-e87c-4e73-86fb-df5b70e97fb2");
     private MockRestServiceServer mockServer;
     private MlServiceClientImpl client;
 
@@ -43,11 +41,11 @@ class MlServiceClientImplTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/model/status"))
+        mockServer.expect(requestTo("http://localhost:8000/model/status?home_id=" + HOME))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
-        MlModelStatusResponse response = client.getModelStatus();
+        MlModelStatusResponse response = client.getModelStatus(HOME);
 
         assertThat(response.getStatus()).isEqualTo("READY");
         assertThat(response.getVersion()).isEqualTo("rf-v1.0.0");
@@ -57,47 +55,28 @@ class MlServiceClientImplTest {
 
     @Test
     void getModelStatusHandlesOfflineFallbackGracefully() {
-        mockServer.expect(requestTo("http://localhost:8000/model/status"))
+        mockServer.expect(requestTo("http://localhost:8000/model/status?home_id=" + HOME))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withServerError());
 
-        MlModelStatusResponse response = client.getModelStatus();
+        MlModelStatusResponse response = client.getModelStatus(HOME);
 
         assertThat(response.getStatus()).isEqualTo("UNAVAILABLE");
         assertThat(response.getConfidenceThreshold()).isEqualTo(0.80);
     }
 
     @Test
-    void predictReturnsCorrectPrediction() {
-        UUID homeId = UUID.randomUUID();
-        UUID deviceId = UUID.randomUUID();
-        UUID roomId = UUID.randomUUID();
+    void sendsApiKeyWhenConfigured() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        RestClient.Builder keyed = builder.defaultHeader("X-API-Key", "secret");
+        MlServiceClientImpl keyedClient = new MlServiceClientImpl("http://localhost:8000", 2000, 0.80, keyed);
+        server.expect(requestTo("http://localhost:8000/model/status?home_id=" + HOME))
+                .andExpect(header("X-API-Key", "secret"))
+                .andRespond(withSuccess("{\"status\":\"COLD_START\",\"version\":\"none\",\"confidenceThreshold\":0.8}",
+                        MediaType.APPLICATION_JSON));
 
-        String json = """
-            {
-                "deviceId": "%s",
-                "deviceName": "Bed Light",
-                "action": "TURN_ON",
-                "confidence": 0.89,
-                "eligible": true,
-                "threshold": 0.80,
-                "reason": "Predicted user bedtime habit",
-                "modelVersion": "rf-v1.0.0",
-                "status": "SUCCESS"
-            }
-            """.formatted(deviceId);
-
-        mockServer.expect(requestTo("http://localhost:8000/predict"))
-                .andExpect(method(HttpMethod.POST))
-                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
-
-        MlPredictionResponse response = client.predict(
-                homeId, deviceId, "LED_RGB", roomId, Map.of("power", "OFF"), OffsetDateTime.now()
-        );
-
-        assertThat(response.getAction()).isEqualTo("TURN_ON");
-        assertThat(response.getConfidence()).isEqualTo(0.89);
-        assertThat(response.getEligible()).isTrue();
-        mockServer.verify();
+        assertThat(keyedClient.getModelStatus(HOME).getStatus()).isEqualTo("COLD_START");
+        server.verify();
     }
 }
