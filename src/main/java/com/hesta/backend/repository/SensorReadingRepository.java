@@ -14,7 +14,7 @@ import java.util.UUID;
 public interface SensorReadingRepository extends JpaRepository<SensorReading, Long> {
     String HEALTH_REFERENCES = """
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   reading.metricType as metricType, reading.recordedAt as referenceTime
+                   reading.metricType as metricType, reading.recordedAt as referenceTime, device.status as deviceStatus
             from SensorReading reading join reading.device device
             where device.isDeleted = false and not exists (
                 select newer.id from SensorReading newer

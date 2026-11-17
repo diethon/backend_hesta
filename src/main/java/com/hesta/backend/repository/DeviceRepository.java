@@ -18,14 +18,14 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("""
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, device.updatedAt as referenceTime
+                   null as metricType, null as referenceTime, device.status as deviceStatus
             from Device device where device.isDeleted = false
             """)
     List<TwinHealthReference> findHealthReferences();
 
     @Query("""
             select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
-                   null as metricType, device.updatedAt as referenceTime
+                   null as metricType, null as referenceTime, device.status as deviceStatus
             from Device device where device.id = :id and device.isDeleted = false
             """)
     Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);
@@ -72,6 +72,17 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     Optional<Device> findByMqttTopic(String mqttTopic);
 
+    // Eager variants for callers outside a Hibernate session (MQTT automation path).
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE n.nodeCode = :nodeCode AND d.localId = :localId")
+    Optional<Device> findByNodeCodeAndLocalIdWithRoomAndHome(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
+
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE n.nodeCode = :nodeCode AND d.name = :name")
+    Optional<Device> findByNodeCodeAndNameWithRoomAndHome(@Param("nodeCode") String nodeCode, @Param("name") String name);
+
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE d.mqttTopic = :mqttTopic")
+    Optional<Device> findByMqttTopicWithRoomAndHome(@Param("mqttTopic") String mqttTopic);
+
+
     Optional<Device> findByLocalId(String localId);
 
     @Query("SELECT d FROM Device d WHERE d.mqttTopic LIKE %:keyword%")
@@ -108,4 +119,21 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     @Query("SELECT d.deviceType, COUNT(d) FROM Device d GROUP BY d.deviceType")
     List<Object[]> countGroupedByDeviceType();
+
+    @Query("""
+        SELECT d FROM Device d
+        LEFT JOIN FETCH d.room r
+        LEFT JOIN FETCH r.home
+        LEFT JOIN FETCH d.node n
+        LEFT JOIN FETCH n.home
+        WHERE d.isDeleted = false
+          AND (d.status IS NULL OR d.status != com.hesta.backend.enums.DeviceStatus.UNCLAIMED)
+          AND d.deviceType IN :monitoredTypes
+          AND d.lastSeen IS NOT NULL
+          AND d.lastSeen >= :maxAgeCutoff
+    """)
+    List<Device> findCandidateSensorsForOfflineMonitoring(
+            @Param("monitoredTypes") java.util.Collection<String> monitoredTypes,
+            @Param("maxAgeCutoff") java.time.OffsetDateTime maxAgeCutoff
+    );
 }

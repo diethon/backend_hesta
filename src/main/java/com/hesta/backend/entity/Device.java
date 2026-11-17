@@ -114,20 +114,8 @@ public class Device {
 
     public Home getHome() { return room != null ? room.getHome() : (node != null ? node.getHome() : null); }
 
-    // DUMMY METHODS FOR COMPATIBILITY WITH TWIN HEALTH
-    @Transient
-    private OffsetDateTime transientLastSeen;
-
-    public OffsetDateTime getLastSeen() {
-        return transientLastSeen != null ? transientLastSeen : updatedAt;
-    }
-
-    public void setLastSeen(OffsetDateTime lastSeen) {
-        this.transientLastSeen = lastSeen;
-        if (lastSeen != null) {
-            this.updatedAt = lastSeen;
-        }
-    }
+    @Column(name = "last_seen")
+    private OffsetDateTime lastSeen;
 
     public boolean supportsAction(String action) {
         if (this.capabilities == null || this.capabilities.isEmpty()) return true;

@@ -1,9 +1,13 @@
 # Độ mới dữ liệu Digital Twin: ACTIVE / STALE / OFFLINE
 
-`TwinHealthStatus` là trạng thái suy ra để phục vụ hiển thị, tách biệt với
-`DeviceStatus` và `currentState` hiện có. Tính năng này không thay đổi trạng
-thái nghiệp vụ của thiết bị hay `lastSeen`. Trạng thái hoạt động suy ra không
-được lưu vào cơ sở dữ liệu.
+Kết nối thiết bị chỉ dùng `DeviceStatus`: ONLINE cho phép điều khiển;
+OFFLINE, ERROR và UNKNOWN không cho phép điều khiển. Không dùng `lastSeen`
+hay ngưỡng thời gian để đổi kết nối thiết bị. `healthStatus` của thiết bị
+được giữ để tương thích DTO: ONLINE → ACTIVE, các status khác → OFFLINE.
+Trường `lastSeen` trong DTO cũ luôn null; entity không còn getter/setter này.
+
+Các quy tắc độ mới theo thời gian bên dưới áp dụng cho dữ liệu cảm biến.
+`currentState` và số đo vẫn chỉ cập nhật từ dữ liệu được backend xác nhận.
 
 ## Thời gian tham chiếu chuẩn và quy tắc chính xác
 
@@ -24,7 +28,7 @@ Thành phần này dùng `java.time.Clock` được tiêm vào (mặc định UT
 Dấu thời gian không bao giờ bị ghi lại hay thay thế bằng thời điểm yêu cầu
 bản chụp trạng thái hoặc thời điểm phát WebSocket.
 
-- Thiết bị chỉ dùng `Device.lastSeen` đã lưu.
+- Thiết bị chỉ dùng `Device.status`, không có chuyển sang STALE theo thời gian.
 - Luồng cảm biến dùng `SensorReading.recordedAt` mới nhất, được trả ra qua
   `observedAt`. Mới nhất vẫn là thời điểm đo lớn nhất, sau đó là ID bản ghi đo
   lớn nhất nếu trùng thời điểm. Mỗi luồng `(deviceId, exact metricType)` độc lập.
@@ -56,8 +60,8 @@ theo thời gian và dọn bộ nhớ đệm.
 
 ## Bản chụp trạng thái và sự kiện chứa đầy đủ một nút
 
-`TwinDeviceSnapshotResponse` bổ sung trường `TwinHealthStatus healthStatus`,
-giữ nguyên `DeviceStatus status`, `currentState` và `lastSeen`.
+`TwinDeviceSnapshotResponse` giữ `DeviceStatus status`, `currentState` và
+`healthStatus` tương thích; `lastSeen` luôn null và không tham gia logic.
 `TwinSensorSnapshotResponse` bổ sung `healthStatus` và giữ toàn bộ trường
 hiện có. Cấu trúc nhà/phòng, UUID, ID cảm biến nguyên bản và cấu trúc bao
 `ApiResponse` đều không đổi. `TwinSnapshotMapper` đánh giá mọi nút trong một
@@ -66,9 +70,9 @@ tác đọc bản chụp không thay đổi bộ nhớ đệm.
 
 Các sự kiện `DEVICE_STATE_CHANGED` và `SENSOR_READING_UPDATED` hiện có tiếp
 tục gửi DTO đầy đủ của một nút, nay có thêm healthStatus. Bộ lắng nghe
-`AFTER_COMMIT` hiện có tính lại trạng thái hoạt động khi phát dựa trên thời
-gian tham chiếu chuẩn trong dữ liệu, nên giao dịch kéo dài không thể phát
-ACTIVE một cách máy móc dựa vào thời điểm DTO được ánh xạ ban đầu.
+`AFTER_COMMIT` dùng status cho thiết bị và tính lại độ mới từ `observedAt`
+cho cảm biến. MQTT status đổi kết nối phát `DEVICE_STATE_CHANGED` sau commit;
+frontend nhận status trực tiếp, bỏ qua sự kiện freshness cũ của thiết bị.
 
 ## Đánh giá theo thời gian và bộ nhớ đệm chuyển trạng thái
 
@@ -185,7 +189,7 @@ thái. Thời gian chờ của hàng đợi socket chỉ dùng để đợi vi�
 - Bộ kiểm thử giả lập dùng PostgreSQL/STOMP thật hiện có còn xác minh chuyển
   trạng thái thuần theo thời gian, phục hồi từ STALE/OFFLINE, hoàn tác cảm
   biến/thiết bị, dữ liệu lịch sử, tính độc lập giữa các chỉ số và ngữ nghĩa
-  status/lastSeen của thiết bị không đổi.
+  status của thiết bị và độ mới cảm biến được xử lý độc lập.
 
 Sau khi cấu hình `HESTA_TEST_DATABASE_URL`, `HESTA_TEST_DATABASE_USERNAME` và
 `HESTA_TEST_DATABASE_PASSWORD` cho môi trường cục bộ, có thể ghi lại phiên
@@ -219,10 +223,9 @@ không thay đổi không ghi dữ liệu đo theo từng nút.
   cho cả giao dịch đồng thời lẫn các lượt đọc này.
 - Số đo mang thời gian tương lai giữ ACTIVE cho đến khi tuổi dữ liệu chạm
   ngưỡng. Quy tắc độ mới có kết quả xác định này không sửa sai lệch đồng hồ nguồn.
-- Thiết bị chỉ phục hồi khi nguồn phát thực sự cập nhật lastSeen và phát sự
-  kiện hoạt động đã xác nhận hiện có. Luồng tiếp nhận cảm biến chủ đích không
-  làm thay hai việc này cho thiết bị. Thay đổi trực tiếp trong cơ sở dữ liệu
-  được phát hiện ở lượt quét tiếp theo.
+- Thiết bị đổi kết nối khi status từ nguồn tiếp nhận thay đổi. Thời gian
+  trôi qua không tự đổi status. Thay đổi trực tiếp trong cơ sở dữ liệu được
+  phản ánh khi tải lại snapshot; MQTT status được gửi bằng sự kiện thiết bị.
 
 Tính năng này không bao gồm frontend, tích hợp MQTT, thay đổi thông báo,
 thực thể Sensor mới, bảng trạng thái hoạt động, migration hay hạ tầng
@@ -320,4 +323,4 @@ Tài liệu được sửa: `docs/DIGITAL_TWIN.md`, `docs/MOCK_SENSOR_PIPELINE.m
 Rà soát phạm vi: không đọc hay sửa tệp frontend; không thay đổi tệp thực thể,
 migration, MQTT, thông báo, xác thực hay hạ tầng WebSocket. Bộ phát, luồng
 giả lập và hành vi SENSOR_READING_UPDATED hiện có được giữ nguyên.
-DeviceStatus và lastSeen đã lưu giữ nguyên ngữ nghĩa hiện tại.
+DeviceStatus là nguồn quyết định kết nối; lastSeen không còn tham gia logic thiết bị.

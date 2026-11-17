@@ -248,7 +248,7 @@ class MockSensorPipelineIntegrationTest {
         assertThat(nextEvent().at("/data/healthStatus").asText()).isEqualTo("OFFLINE");
         new TransactionTemplate(transactions).executeWithoutResult(status -> {
             Device managed = em.find(Device.class, device.getId());
-            managed.setLastSeen(TIME);
+            managed.setStatus(DeviceStatus.ONLINE);
             applicationEvents.publishEvent(new DeviceStateChangedEvent(home.getId(), mapper.device(managed)));
             status.setRollbackOnly();
         });
@@ -256,14 +256,14 @@ class MockSensorPipelineIntegrationTest {
         assertThat(healthEvents.poll(200, TimeUnit.MILLISECONDS)).isNull();
         new TransactionTemplate(transactions).executeWithoutResult(status -> {
             Device managed = em.find(Device.class, device.getId());
-            managed.setLastSeen(TIME); // simulate an authoritative activity producer, not sensor ingestion
+            managed.setStatus(DeviceStatus.ONLINE);
             applicationEvents.publishEvent(new DeviceStateChangedEvent(home.getId(), mapper.device(managed)));
             assertThat(healthEvents).isEmpty();
         });
         assertHealthEvent("DEVICE", device.getId().toString(), "OFFLINE", "ACTIVE");
         var snapshot = snapshots.getSnapshot(user.getId(), home.getId());
         assertThat(snapshot.rooms().getFirst().devices().getFirst().healthStatus()).isEqualTo(TwinHealthStatus.ACTIVE);
-        assertThat(snapshot.rooms().getFirst().devices().getFirst().status()).isEqualTo(DeviceStatus.UNKNOWN);
+        assertThat(snapshot.rooms().getFirst().devices().getFirst().status()).isEqualTo(DeviceStatus.ONLINE);
         assertThat(snapshot.rooms().getFirst().sensors().getFirst().healthStatus()).isEqualTo(TwinHealthStatus.OFFLINE);
     }
 

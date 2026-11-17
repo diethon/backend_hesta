@@ -10,6 +10,9 @@ import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
 import com.hesta.backend.repository.EdgeNodeRepository;
 import com.hesta.backend.entity.EdgeNode;
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import java.util.List;
 import com.hesta.backend.service.TelemetryService;
 import com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl;
@@ -29,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class MqttMessageReceiver {
     private final DeviceRepository devices;
     private final AutomationEngine automationEngine;
@@ -39,6 +41,8 @@ public class MqttMessageReceiver {
     private final TelemetryService telemetryService;
     private final EdgeNodeRepository edgeNodeRepository;
     private final DeviceService deviceService;
+    private final ApplicationEventPublisher applicationEvents;
+    private final TwinSnapshotMapper twinSnapshotMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private AutomationDispatcher automationDispatcher;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -55,8 +59,6 @@ public class MqttMessageReceiver {
     private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.hesta.backend.mapper.TwinSnapshotMapper twinSnapshotMapper;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -242,6 +244,9 @@ public class MqttMessageReceiver {
             // Full device state telemetry (e.g., Air Conditioner telemetry or composite state)
             handleDeviceState(topic, payload);
 
+            // Extract safety metrics from flat map if present: gas_ppm, smoke, temperature
+            extractAndProcessSafetyMetricsFromFlatMap(topic, payload);
+
             try {
                 String deviceIdStr = extractDeviceIdFromTopic(topic);
                 if (deviceIdStr != null) {
@@ -294,6 +299,43 @@ public class MqttMessageReceiver {
             }
             triggerAutomation(device, data, "SENSOR");
         });
+    }
+
+    private void extractAndProcessSafetyMetricsFromFlatMap(String topic, String payload) {
+        try {
+            Map<String, Object> map = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            if (map == null || map.isEmpty()) return;
+            // Actuators (e.g. AC) report a "temperature" setpoint, not a measured value.
+            Object deviceType = map.get("deviceType");
+            if (deviceType != null && !deviceType.toString().toUpperCase().contains("SENSOR")) return;
+
+            String nodeCode = extractNodeCodeFromTopic(topic);
+            String deviceIdStr = map.containsKey("deviceId") && map.get("deviceId") != null
+                    ? map.get("deviceId").toString()
+                    : extractDeviceIdFromTopic(topic);
+
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "gas_ppm", "ppm");
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "smoke", "ppm");
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "temperature", "°C");
+            if (!map.containsKey("temperature")) {
+                extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "temp", "°C");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to extract safety metrics from flat map payload: {}", e.getMessage());
+        }
+    }
+
+    private void extractSingleSafetyMetric(String topic, String nodeCode, String deviceIdStr, Map<String, Object> map, String metricKey, String unit) {
+        if (!map.containsKey(metricKey) || map.get(metricKey) == null) return;
+        Object valObj = map.get(metricKey);
+        try {
+            java.math.BigDecimal val = new java.math.BigDecimal(valObj.toString().trim());
+            String normalizedMetric = "temp".equalsIgnoreCase(metricKey) ? "temperature" : metricKey;
+            TelemetryPayload singlePayload = new TelemetryPayload(nodeCode, deviceIdStr, normalizedMetric, val, unit);
+            telemetryService.processTelemetry(topic, singlePayload);
+        } catch (Exception ex) {
+            log.warn("Could not parse safety metric [{}] value [{}] from flat map: {}", metricKey, valObj, ex.getMessage());
+        }
     }
 
     private void processSensorAutomation(String topic, String payload) {
@@ -393,19 +435,19 @@ public class MqttMessageReceiver {
         if (deviceIdStr != null && !deviceIdStr.isBlank()) {
             try {
                 UUID uuid = UUID.fromString(deviceIdStr);
-                java.util.Optional<com.hesta.backend.entity.Device> byId = devices.findById(uuid);
+                java.util.Optional<com.hesta.backend.entity.Device> byId = devices.findByIdWithNode(uuid);
                 if (byId.isPresent()) return byId;
             } catch (IllegalArgumentException ignored) {}
         }
         if (nodeCode != null && deviceIdStr != null) {
-            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndLocal = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndLocal = devices.findByNodeCodeAndLocalIdWithRoomAndHome(nodeCode, deviceIdStr);
             if (byNodeAndLocal.isPresent()) return byNodeAndLocal;
 
-            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndName = devices.findByNodeCodeAndName(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> byNodeAndName = devices.findByNodeCodeAndNameWithRoomAndHome(nodeCode, deviceIdStr);
             if (byNodeAndName.isPresent()) return byNodeAndName;
         }
         if (topic != null && !topic.isBlank()) {
-            return devices.findByMqttTopic(topic);
+            return devices.findByMqttTopicWithRoomAndHome(topic);
         }
         return java.util.Optional.empty();
     }
@@ -936,7 +978,6 @@ public class MqttMessageReceiver {
             devOpt.ifPresent(device -> {
                 boolean statusChanged = device.getStatus() != devStatus;
                 device.setStatus(devStatus);
-                device.setLastSeen(java.time.OffsetDateTime.now());
                 devices.save(device);
                 // A heartbeat that changes nothing must not broadcast: its snapshot can be older than a command
                 // committed meanwhile and would flip other screens back. Freshness is handled by twin health.
