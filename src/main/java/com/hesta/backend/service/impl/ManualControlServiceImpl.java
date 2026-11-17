@@ -52,12 +52,9 @@ public class ManualControlServiceImpl implements ManualControlService {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
         CommandResult result = commands.sendCommand(deviceId, action, Map.of(), StateChangeSource.MANUAL).join();
-        OffsetDateTime until = null;
-        if (result != null && result.isSuccess()) {
-            // The command service records the habit event for every MANUAL command.
-            until = overrides.activate(device, userId, "OVERRIDE");
-        }
-        return ManualCommandResponse.builder().command(result).overrideUntil(until).build();
+        // Lệnh điều khiển thông thường không tự động kích hoạt ghi đè thủ công (override).
+        // Ghi đè thủ công chỉ được kích hoạt khi người dùng chủ động vào Cài đặt để tạm dừng/khóa tự động hóa.
+        return ManualCommandResponse.builder().command(result).overrideUntil(null).build();
     }
 
     @Override
