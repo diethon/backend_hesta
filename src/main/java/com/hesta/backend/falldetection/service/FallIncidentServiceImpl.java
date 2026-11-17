@@ -128,8 +128,8 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             broadcastRealtime(incident);
             if (mqttGateway != null) {
                 try {
-                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"START\",\"durationSec\":60}");
-                    log.info("[MQTT SIREN] Kích hoạt còi hú 12V trên ESP32");
+                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"FULL_SIREN\",\"mode\":\"CONTINUOUS_12V\",\"durationSec\":60}");
+                    log.info("[MQTT SIREN] Kích hoạt còi hú 12V trên ESP32 (Giai đoạn 2: FULL_SIREN 60s)");
                 } catch (Exception e) {
                     log.warn("[MQTT SIREN] Không thể gửi lệnh tới MQTT còi: {}", e.getMessage());
                 }
