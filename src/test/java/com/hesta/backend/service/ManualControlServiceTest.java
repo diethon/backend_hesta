@@ -42,14 +42,12 @@ class ManualControlServiceTest {
     UUID deviceId = UUID.randomUUID();
 
     @Test
-    void manualPowerCommandSendsCommandBeforeActivatingOverride() {
+    void manualPowerCommandSendsCommandWithoutActivatingOverride() {
         Home home = Home.builder().id(homeId).build();
         Device device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
                 .room(Room.builder().home(home).build())
                 .capabilities(java.util.Map.of("POWER", java.util.List.of("TURN_ON", "TURN_OFF"))).build();
         when(devices.findById(deviceId)).thenReturn(Optional.of(device));
-        OffsetDateTime until = OffsetDateTime.now().plusMinutes(30);
-        when(overrides.activate(device, userId, "OVERRIDE")).thenReturn(until);
         CommandResult command = CommandResult.builder().success(true).status("ACKNOWLEDGED").build();
         when(commands.sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL))
                 .thenReturn(CompletableFuture.completedFuture(command));
@@ -57,11 +55,11 @@ class ManualControlServiceTest {
         var result = service.command(userId, deviceId, "TURN_ON");
 
         assertThat(result.getCommand().isSuccess()).isTrue();
-        assertThat(result.getOverrideUntil()).isEqualTo(until);
-        var order = inOrder(authorization, commands, overrides);
+        assertThat(result.getOverrideUntil()).isNull();
+        var order = inOrder(authorization, commands);
         order.verify(authorization).requireAccess(userId, homeId);
         order.verify(commands).sendCommand(deviceId, "TURN_ON", Map.of(), StateChangeSource.MANUAL);
-        order.verify(overrides).activate(device, userId, "OVERRIDE");
+        verify(overrides, never()).activate(any(), any(), any());
     }
 
     @Test

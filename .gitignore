@@ -75,4 +75,5 @@ diagram*.xml
 /ai_hesta/
 fix_json.py
 fix_sensors.sql
+src/main/resources/application-local.properties
 
