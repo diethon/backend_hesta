@@ -11,6 +11,7 @@ import java.util.UUID;
 
 public interface NotificationService {
 
+    /** @return the created notification, or {@code null} if the recipient muted this category. */
     NotificationResponse create(NotificationEvent event);
 
     NotificationResponse receiveEvent(NotificationEvent event);

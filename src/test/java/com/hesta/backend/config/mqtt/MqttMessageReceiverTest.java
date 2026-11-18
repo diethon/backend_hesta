@@ -14,6 +14,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
+import com.hesta.backend.service.SecurityEventService;
 import com.hesta.backend.service.TelemetryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -115,6 +116,47 @@ class MqttMessageReceiverTest {
                 .build());
 
         verify(devices).save(argThat(d -> d.getStatus() == com.hesta.backend.enums.DeviceStatus.ONLINE));
+    }
+
+    @Test
+    void motionZeroReadingIgnoresStaleSavedMotionState() {
+        SecurityEventService securityEvents = mock(SecurityEventService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(receiver, "securityEventService", securityEvents);
+        Device sensor = motionSensor(java.util.Map.of("MOTION_SENSOR", 1, "motion", true));
+
+        sendMotionTelemetry(sensor, 0);
+
+        verify(securityEvents, never()).recordMotion(any());
+    }
+
+    @Test
+    void motionDetectedReadingRecordsSecurityEvent() {
+        SecurityEventService securityEvents = mock(SecurityEventService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(receiver, "securityEventService", securityEvents);
+        Device sensor = motionSensor(java.util.Map.of("MOTION_SENSOR", 0, "motion", false));
+
+        sendMotionTelemetry(sensor, 1);
+
+        verify(securityEvents).recordMotion(sensor);
+    }
+
+    private Device motionSensor(java.util.Map<String, Object> savedState) {
+        Home home = Home.builder().id(UUID.randomUUID()).build();
+        Device sensor = Device.builder().id(UUID.randomUUID())
+                .node(EdgeNode.builder().id(UUID.randomUUID()).home(home).build())
+                .room(Room.builder().home(home).build())
+                .deviceType("MOTION_SENSOR")
+                .currentState(new java.util.HashMap<>(savedState))
+                .build();
+        when(devices.findByIdWithNode(sensor.getId())).thenReturn(Optional.of(sensor));
+        return sensor;
+    }
+
+    private void sendMotionTelemetry(Device sensor, int value) {
+        String payload = "{\"deviceId\":\"" + sensor.getId() + "\",\"metricType\":\"motion\",\"value\":" + value + "}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/devices/" + sensor.getId() + "/sensor")
+                .build());
     }
 
     @Test
