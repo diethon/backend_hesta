@@ -600,3 +600,86 @@ class TestTwoBedroomsDisambiguation:
         res2 = mapper.map(phrase, custom_rooms=self.ROOMS_CUACON)
         assert res2 is not None, f"Failed (cua con) on: {phrase}"
         assert res2.room == "Phòng ngủ của con"
+
+
+class TestAllLightsVsAllDevicesDisambiguation:
+    """Đảm bảo lệnh bật/tắt toàn bộ đèn không bao giờ bị nhầm thành bật/tắt toàn bộ thiết bị (all)."""
+
+    @pytest.fixture
+    def real_mapper(self):
+        real_intents = os.path.join(os.path.dirname(__file__), "..", "config", "intents_vi.json")
+        m = IntentMapper(IntentConfig(min_confidence=50.0))
+        m.load_intents(real_intents)
+        return m
+
+    @pytest.mark.parametrize("phrase,expected_action", [
+        ("tắt toàn bộ đèn", "TURN_OFF"),
+        ("bật toàn bộ đèn", "TURN_ON"),
+        ("tắt toàn bộ đèn cả nhà", "TURN_OFF"),
+        ("bật toàn bộ đèn cả nhà", "TURN_ON"),
+        ("tắt toàn bộ hệ thống đèn", "TURN_OFF"),
+        ("bật toàn bộ hệ thống đèn", "TURN_ON"),
+        ("tắt toàn bộ bóng đèn", "TURN_OFF"),
+        ("bật toàn bộ bóng đèn", "TURN_ON"),
+        ("tắt toàn bộ ánh sáng", "TURN_OFF"),
+        ("bật toàn bộ ánh sáng", "TURN_ON"),
+        ("tắt tất cả đèn cả nhà", "TURN_OFF"),
+        ("bật tất cả đèn cả nhà", "TURN_ON"),
+    ])
+    def test_all_lights_never_maps_to_all_devices(self, real_mapper, phrase, expected_action):
+        res = real_mapper.map(phrase)
+        assert res is not None, f"Failed on: {phrase}"
+        assert res.action == expected_action
+        assert res.device_type == "light"
+        assert res.room is None
+
+    @pytest.mark.parametrize("phrase,expected_action", [
+        ("tắt toàn bộ thiết bị", "TURN_OFF"),
+        ("bật toàn bộ thiết bị", "TURN_ON"),
+        ("tắt cả nhà", "TURN_OFF"),
+        ("bật cả nhà", "TURN_ON"),
+        ("tắt toàn bộ", "TURN_OFF"),
+        ("bật toàn bộ", "TURN_ON"),
+    ])
+    def test_all_devices_still_maps_to_all(self, real_mapper, phrase, expected_action):
+        res = real_mapper.map(phrase)
+        assert res is not None, f"Failed on: {phrase}"
+        assert res.action == expected_action
+        assert res.device_type == "all"
+
+
+class TestRollingDoorAndGarageDoor:
+    """Kiểm thử nhận diện cửa cuốn / cửa gara (ROLLING_DOOR -> gate: OPEN / CLOSE / STOP)."""
+
+    @pytest.fixture
+    def real_mapper(self):
+        real_intents = os.path.join(os.path.dirname(__file__), "..", "config", "intents_vi.json")
+        m = IntentMapper(IntentConfig(min_confidence=50.0))
+        m.load_intents(real_intents)
+        return m
+
+    ROOMS = ["Garage", "Garden", "Phòng bếp", "Phòng khách", "Phòng ngủ 2 giường", "Phòng ngủ master"]
+
+    @pytest.mark.parametrize("phrase,expected_action", [
+        ("mở cửa cuốn", "OPEN"),
+        ("mở cửa cuống", "OPEN"),
+        ("kéo cửa cuốn", "OPEN"),
+        ("nâng cửa cuốn", "OPEN"),
+        ("mở cửa gara", "OPEN"),
+        ("mở cửa garage", "OPEN"),
+        ("kéo cửa gara", "OPEN"),
+        ("đóng cửa cuốn", "CLOSE"),
+        ("đóng cửa cuống", "CLOSE"),
+        ("hạ cửa cuốn", "CLOSE"),
+        ("đóng cửa gara", "CLOSE"),
+        ("đóng cửa garage", "CLOSE"),
+        ("dừng cửa cuốn", "STOP"),
+        ("dừng cửa cuống", "STOP"),
+        ("dừng cửa gara", "STOP"),
+        ("dừng cổng", "STOP"),
+    ])
+    def test_rolling_and_garage_door_actions(self, real_mapper, phrase, expected_action):
+        res = real_mapper.map(phrase, custom_rooms=self.ROOMS)
+        assert res is not None, f"Failed on: {phrase}"
+        assert res.device_type == "gate"
+        assert res.action == expected_action

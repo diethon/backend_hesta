@@ -67,6 +67,7 @@ class DispatchBatchResult:
             "TURN_OFF": "tắt",
             "OPEN": "mở",
             "CLOSE": "đóng",
+            "STOP": "dừng",
             "SET_TEMPERATURE": "đặt nhiệt độ",
             "INCREASE_TEMPERATURE": "tăng nhiệt độ",
             "DECREASE_TEMPERATURE": "giảm nhiệt độ",
@@ -95,6 +96,11 @@ class DispatchBatchResult:
                 type_vi = "đèn LED"
             else:
                 type_vi = "đèn LED RGB"
+        elif device_type == "gate":
+            if any(w in pattern_lower for w in ["cửa cuốn", "cua cuon", "cửa cuống", "cua cuong", "cửa gara", "cua gara", "cửa garage", "cua garage"]):
+                type_vi = "cửa cuốn"
+            else:
+                type_vi = "cổng"
         elif device_type == "curtain":
             if any(w in pattern_lower for w in ["rèm cửa", "rem cua"]):
                 type_vi = "rèm cửa"

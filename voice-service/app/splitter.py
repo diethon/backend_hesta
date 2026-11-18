@@ -79,7 +79,7 @@ DEVICE_KEYWORDS = [
     "đèn led rgb", "đèn led", "đèn rgb", "đèn ngủ", "đèn trần", "đèn bàn", "đèn chùm", "đèn",
     "máy lạnh", "điều hòa", "máy bơm nước", "máy bơm",
     "rèm cửa", "màn cửa", "rèm",
-    "cửa cuốn", "cửa chính", "cửa sổ", "cửa", "cổng",
+    "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage", "cửa chính", "cửa sổ", "cửa", "cổng",
     "ổ cắm", "tivi", "ti vi", "tv", "fan", "led", "rgb",
     "thiết bị",
 ]

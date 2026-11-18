@@ -238,9 +238,14 @@ class DeviceDirectory:
                         types_to_register.add("fan")
                     if any(w in db_name for w in ["điều hòa", "điều hoà", "máy lạnh", "ac"]):
                         types_to_register.add("air_conditioner")
-                    if any(w in db_name for w in ["khóa", "khoá", "cửa"]):
+                    is_gate_or_curtain = (
+                        db_type in TYPE_ALIASES["gate"]
+                        or db_type in TYPE_ALIASES["curtain"]
+                        or any(w in db_name for w in ["cổng", "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage", "rèm", "màn"])
+                    )
+                    if not is_gate_or_curtain and any(w in db_name for w in ["khóa", "khoá", "cửa"]):
                         types_to_register.add("door_lock")
-                    if any(w in db_name for w in ["cổng"]):
+                    if any(w in db_name for w in ["cổng", "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage"]):
                         types_to_register.add("gate")
                     if any(w in db_name for w in ["nóng lạnh", "bình nóng", "nước nóng"]):
                         types_to_register.add("water_heater")

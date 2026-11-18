@@ -335,6 +335,24 @@ class IntentMapper:
             for start in range(len(text_words_norm) - room_len + 1):
                 window_words = text_words_norm[start : start + room_len]
                 window_norm = " ".join(window_words)
+                if window_norm in {
+                    "anh sang", "he thong",
+                    "cua cuon", "cua cuong", "cua cong", "cua chinh", "cua so",
+                }:
+                    continue
+                if any(
+                    dev_kw in window_norm
+                    for dev_kw in ("cua cuon", "cua cuong", "cua cong", "cua chinh", "cua so")
+                ):
+                    continue
+                if norm_room == "cua con" and window_norm != "cua con":
+                    continue
+                # Chặn động từ hành động đầu câu bị fuzzy-match nhầm thành chữ "phòng" (VD: "đóng" ~ "phòng" = 66.7%!)
+                if room_words[0] == "phong" and window_words[0] in {
+                    "bat", "tat", "mo", "dong", "keo", "ha", "nang", "dung",
+                    "khoa", "chinh", "dat", "tang", "giam", "doi", "chuyen",
+                }:
+                    continue
 
                 matched_room = original_room
                 if window_norm in ROOM_PHONETIC_VARIANTS and not is_dynamic:
@@ -564,6 +582,13 @@ class IntentMapper:
         text_norm_nums = normalize_spoken_numbers(text)
 
         # Bước 1: Tách room (kết hợp danh mục tiêu chuẩn và custom_rooms)
+        full_text_norm = strip_vietnamese_tones(text_norm_nums.lower())
+        is_rolling_or_garage_door = bool(
+            re.search(
+                r"\b(?:cua cuon|cua cuong|cua gara|cua garage|cong gara|cong garage)\b",
+                full_text_norm,
+            )
+        )
         room, remaining = self.extract_room(text_norm_nums, custom_rooms=custom_rooms)
 
         if not remaining:
@@ -610,9 +635,61 @@ class IntentMapper:
 
         # Bước 2: Fuzzy match phần còn lại với tất cả patterns
         remaining_norm = strip_vietnamese_tones(remaining_for_match)
-        
+
+        # Trường hợp đặc biệt: cửa cuốn / cửa gara (VD: "mở cửa gara", "kéo cửa gara", "đóng cửa cuống")
+        # Khi extract_room tách chữ "gara"/"garage" ra khỏi "mở cửa gara", phần còn lại chỉ còn "mở cửa"
+        # rất dễ bị match nhầm sang door_lock (TURN_ON/TURN_OFF). Giữ nguyên full_text_norm và chỉ khớp nhóm gate.
+        room_norm_check = strip_vietnamese_tones(room.lower()) if room else ""
+        if is_rolling_or_garage_door or (
+            room_norm_check == "garage" and re.search(r"\b(?:cua|cong)\b", remaining_norm)
+        ):
+            gate_entries = [
+                (orig, p_norm, idef)
+                for orig, p_norm, idef in self._pattern_index
+                if idef.get("device_type") == "gate"
+            ]
+            if gate_entries:
+                gate_norm_patterns = [p_norm for _, p_norm, _ in gate_entries]
+                gate_query = full_text_norm if is_rolling_or_garage_door else f"{remaining_norm} gara"
+                gate_res = process.extractOne(gate_query, gate_norm_patterns, scorer=fuzz.WRatio)
+                if gate_res is not None and gate_res[1] >= self.config.min_confidence:
+                    _, g_score, g_idx = gate_res
+                    g_orig, _, g_def = gate_entries[g_idx]
+                    g_action, g_params = self.extract_parameters(text, g_def, mode_extracted=mode_extracted)
+                    return IntentResult(
+                        action=g_action,
+                        device_type="gate",
+                        room=room,
+                        parameters=g_params,
+                        confidence=g_score,
+                        matched_pattern=g_orig,
+                        raw_text=text,
+                        device_name_hint="",
+                    )
+
+        # Chống nhầm lẫn "bật/tắt toàn bộ đèn" (hoặc quạt/điều hòa/rèm/cổng/bơm/tivi)
+        # sang "bật/tắt toàn bộ thiết bị" (device_type == "all"):
+        # Khi người dùng đã nêu đích danh loại thiết bị cụ thể và KHÔNG nói "thiết bị",
+        # loại trừ các pattern của nhóm "all" khỏi tập ứng viên.
+        has_explicit_device_noun = bool(
+            re.search(
+                r"\b(?:den|bong den|anh sang|quat|dieu hoa|may lanh|rem|man cua|cong|cua cuon|cua cuong|cua gara|cua garage|may bom|bom nuoc|tivi|ti vi|tv|led|rgb|khoa cua|o cam|binh nong lanh)\b",
+                remaining_norm,
+            )
+        )
+        mentions_all_devices_word = bool(re.search(r"\bthiet bi\b", remaining_norm))
+
+        if has_explicit_device_noun and not mentions_all_devices_word:
+            candidate_entries = [
+                (orig, p_norm, idef)
+                for orig, p_norm, idef in self._pattern_index
+                if idef.get("device_type") != "all"
+            ]
+        else:
+            candidate_entries = self._pattern_index
+
         # Tạo danh sách các pattern đã được chuẩn hóa
-        all_norm_patterns = [p_norm for _, p_norm, _ in self._pattern_index]
+        all_norm_patterns = [p_norm for _, p_norm, _ in candidate_entries]
 
         # Tìm match tốt nhất trên bản chuẩn hóa (Sử dụng WRatio để vừa hỗ trợ biến thể/tham số vừa phản ánh đúng confidence)
         result = process.extractOne(
@@ -627,7 +704,7 @@ class IntentMapper:
         matched_norm_pattern, score, idx = result
 
         # Lấy lại pattern gốc và intent_def dựa trên index
-        matched_original_pattern, _, intent_def = self._pattern_index[idx]
+        matched_original_pattern, _, intent_def = candidate_entries[idx]
 
         if score < self.config.min_confidence:
             logger.info(
