@@ -20,5 +20,7 @@ public class FirmwarePackageDto {
     private String checksumSha256;
     private long fileSizeBytes;
     private String releaseNotes;
+    private boolean uploaded;
+    private String originalFileName;
     private OffsetDateTime createdAt;
 }
