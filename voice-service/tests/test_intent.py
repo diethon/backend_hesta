@@ -561,3 +561,42 @@ class TestCurtainIntent:
         assert result is not None
         assert result.action == "STOP"
         assert result.device_type == "curtain"
+
+
+class TestTwoBedroomsDisambiguation:
+    """Kiểm thử phân biệt 2 phòng ngủ: 'Phòng ngủ master' và 'Phòng ngủ 2 giường' (gọi là 'phòng ngủ của con')."""
+
+    ROOMS_2GIUONG = ["Garage", "Garden", "Phòng bếp", "Phòng khách", "Phòng ngủ 2 giường", "Phòng ngủ master"]
+    ROOMS_CUACON = ["Garage", "Garden", "Phòng bếp", "Phòng khách", "Phòng ngủ của con", "Phòng ngủ master"]
+
+    @pytest.mark.parametrize("phrase", [
+        "bật đèn phòng ngủ master",
+        "bật đèn phòng ngủ mắt tơ",
+        "tắt đèn phòng ngủ mát tơ",
+        "bật đèn ngủ phòng ngủ master",
+        "tắt đèn ngủ master",
+        "bật đèn master",
+        "mở rèm phòng ngủ master",
+    ])
+    def test_master_bedroom_never_falls_back_to_generic_phong_ngu(self, mapper, phrase):
+        res = mapper.map(phrase, custom_rooms=self.ROOMS_2GIUONG)
+        assert res is not None, f"Failed on: {phrase}"
+        assert res.room == "Phòng ngủ master"
+
+    @pytest.mark.parametrize("phrase", [
+        "bật đèn phòng ngủ của con",
+        "tắt đèn phòng ngủ của con",
+        "bật đèn phòng của con",
+        "bật đèn phòng con",
+        "bật đèn ngủ của con",
+        "bật điều hòa phòng ngủ của con",
+        "bật đèn phòng ngủ 2 giường",
+    ])
+    def test_child_bedroom_maps_to_2_giuong_or_cua_con(self, mapper, phrase):
+        res1 = mapper.map(phrase, custom_rooms=self.ROOMS_2GIUONG)
+        assert res1 is not None, f"Failed (2 giuong) on: {phrase}"
+        assert res1.room == "Phòng ngủ 2 giường"
+
+        res2 = mapper.map(phrase, custom_rooms=self.ROOMS_CUACON)
+        assert res2 is not None, f"Failed (cua con) on: {phrase}"
+        assert res2.room == "Phòng ngủ của con"

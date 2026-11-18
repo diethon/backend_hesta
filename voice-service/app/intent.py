@@ -124,7 +124,8 @@ def generate_room_aliases(room_name: str) -> list[tuple[str, str]]:
         aliases.append(("phong phong", clean))
         aliases.append(("phòng của phòng", clean))
 
-    # 3. Xử lý từ đồng nghĩa / tiếng Anh / phiên âm giải trí
+    # 3. Xử lý từ đồng nghĩa / tiếng Anh / phiên âm giải trí & phòng ngủ đặc thù
+    clean_norm = strip_vietnamese_tones(clean_lower)
     if "gaming" in clean_lower:
         aliases.append((clean_lower.replace("gaming", "game"), clean))
     elif "game" in clean_lower:
@@ -133,6 +134,60 @@ def generate_room_aliases(room_name: str) -> list[tuple[str, str]]:
         aliases.append((clean_lower.replace("karaoke", "hát"), clean))
     if "chiếu phim" in clean_lower or "xem phim" in clean_lower:
         aliases.append(("phòng cinema", clean))
+
+    # Phòng ngủ master — bao phủ các biến thể âm học Web Speech API & Whisper tiếng Việt
+    if "master" in clean_norm:
+        for variant in [
+            "phòng ngủ master",
+            "phòng master",
+            "phòng ngủ mát tơ",
+            "phòng ngủ mắt tơ",
+            "phòng ngủ mác tơ",
+            "phòng ngủ ma tơ",
+            "phòng ngủ mất tơ",
+            "phòng ngủ mết tơ",
+            "phòng ngủ mắc tơ",
+            "phòng ngủ bác tơ",
+            "phòng ngủ mặt tơ",
+            "phòng ngủ mát",
+            "phòng ngủ lớn",
+            "phòng ngủ chính",
+            "phòng mắt tơ",
+            "phòng mát tơ",
+            "phòng ngủ masters",
+            "ngủ master",
+            "ngủ mát tơ",
+            "ngủ mắt tơ",
+            "master",
+            "masters",
+            "mát tơ",
+            "mắt tơ",
+            "mác tơ",
+        ]:
+            aliases.append((variant, clean))
+
+    # Phòng ngủ của con / Phòng ngủ 2 giường — nhận diện đầy đủ cả hai cách gọi
+    if any(k in clean_norm for k in ["2 giuong", "hai giuong", "cua con", "ngu con", "tre em", "cua be"]):
+        for variant in [
+            "phòng ngủ của con",
+            "phòng của con",
+            "phòng ngủ con",
+            "phòng con",
+            "ngủ của con",
+            "của con",
+            "phòng ngủ 2 giường",
+            "phòng ngủ hai giường",
+            "phòng 2 giường",
+            "phòng hai giường",
+            "2 giường",
+            "hai giường",
+            "phòng ngủ trẻ em",
+            "phòng trẻ em",
+            "phòng ngủ nhỏ",
+            "phòng ngủ bé",
+            "phòng của bé",
+        ]:
+            aliases.append((variant, clean))
 
     return list(dict.fromkeys(aliases))
 
@@ -283,7 +338,12 @@ class IntentMapper:
 
                 matched_room = original_room
                 if window_norm in ROOM_PHONETIC_VARIANTS and not is_dynamic:
-                    score = 100.0
+                    # Các cụm ghép thiết bị ('den ngu', 'led ngu'...) chỉ làm fallback điểm thấp hơn
+                    # để không bao giờ đè lên tên phòng thật dài hơn như 'Phòng ngủ master' / 'Phòng ngủ của con'
+                    if window_norm in {"den ngu", "den led ngu", "den rgb ngu", "led ngu", "rgb ngu"}:
+                        score = 85.0
+                    else:
+                        score = 100.0
                     matched_room = ROOM_PHONETIC_VARIANTS[window_norm]
                 elif room_len == 1:
                     score = fuzz.ratio(window_norm, norm_room)
@@ -302,12 +362,33 @@ class IntentMapper:
                         continue
                     score = sum(word_scores) / len(word_scores)
 
+                # Kiểm tra quan hệ bao trùm giữa 2 cửa sổ từ (VD: 'phòng ngủ master' bao trùm 'phòng ngủ')
+                new_covers_best = (
+                    best_overall_start >= 0
+                    and start <= best_overall_start
+                    and (start + room_len) >= (best_overall_start + best_overall_len)
+                )
+                best_covers_new = (
+                    best_overall_start >= 0
+                    and best_overall_start <= start
+                    and (best_overall_start + best_overall_len) >= (start + room_len)
+                )
+
                 # Tiêu chí chọn match tốt nhất:
-                # 1. Điểm số cao hơn
-                # 2. Điểm bằng nhau: Ưu tiên phòng thực tế của ngôi nhà (Dynamic Room)
-                # 3. Cùng loại: Ưu tiên chuỗi khớp dài hơn (VD: 'phòng làm việc' > 'phòng')
+                # 1. Phòng động dài hơn bao trùm phòng generic ngắn hơn (VD: 'Phòng ngủ master' > 'phòng ngủ')
+                # 2. Cấm phòng generic ngắn hơn ghi đè phòng động dài hơn đã bao trùm nó
+                # 3. Điểm số cao hơn
+                # 4. Điểm bằng nhau: Ưu tiên Dynamic Room, sau đó ưu tiên chuỗi dài hơn
                 is_better = False
-                if score > best_overall_score:
+                if best_is_dynamic and not is_dynamic and best_overall_len > room_len and best_covers_new:
+                    is_better = False
+                elif is_dynamic and not best_is_dynamic and room_len > best_overall_len and new_covers_best and score >= 78.0:
+                    is_better = True
+                elif is_dynamic and best_is_dynamic and room_len > best_overall_len and new_covers_best and score >= 82.0:
+                    is_better = True
+                elif is_dynamic and best_is_dynamic and best_overall_len > room_len and best_covers_new and best_overall_score >= 82.0:
+                    is_better = False
+                elif score > best_overall_score:
                     is_better = True
                 elif score == best_overall_score:
                     if is_dynamic and not best_is_dynamic:
