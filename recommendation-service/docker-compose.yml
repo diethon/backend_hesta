@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ml-service:
+    build: .
+    container_name: hesta-ml-service
+    ports:
+      - "127.0.0.1:8000:8000"  # only this host (the backend); never expose publicly
+    # Secrets (DATABASE_URL, ML_API_KEY) come from .env, see .env.example.
+    env_file: .env
+    environment:
+      - CONFIDENCE_THRESHOLD=0.80
+      - TIMEZONE=Asia/Ho_Chi_Minh
+    volumes:
+      - ./artifacts:/app/artifacts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
