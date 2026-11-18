@@ -979,11 +979,11 @@ public class MqttMessageReceiver {
 
             devOpt.ifPresent(device -> {
                 boolean statusChanged = device.getStatus() != devStatus;
-                device.setStatus(devStatus);
-                devices.save(device);
-                // A heartbeat that changes nothing must not broadcast: its snapshot can be older than a command
+                // A heartbeat that changes nothing must not save or broadcast: its snapshot can be older than a command
                 // committed meanwhile and would flip other screens back. Freshness is handled by twin health.
                 if (statusChanged) {
+                    device.setStatus(devStatus);
+                    devices.save(device);
                     log.info("Updated device {} status to {}", device.getId(), devStatus);
                     publishDeviceStateChanged(device);
                 }
