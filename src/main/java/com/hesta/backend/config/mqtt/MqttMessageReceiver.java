@@ -968,11 +968,13 @@ public class MqttMessageReceiver {
                     ? com.hesta.backend.enums.DeviceStatus.ONLINE
                     : com.hesta.backend.enums.DeviceStatus.OFFLINE;
 
-            java.util.Optional<com.hesta.backend.entity.Device> devOpt;
-            try {
-                devOpt = devices.findById(UUID.fromString(deviceIdStr));
-            } catch (IllegalArgumentException e) {
-                devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> devOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+            if (devOpt.isEmpty()) {
+                try {
+                    devOpt = devices.findById(UUID.fromString(deviceIdStr));
+                } catch (IllegalArgumentException e) {
+                    devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+                }
             }
 
             devOpt.ifPresent(device -> {
@@ -986,11 +988,24 @@ public class MqttMessageReceiver {
                     publishDeviceStateChanged(device);
                 }
 
-                if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
-                    EdgeNode node = device.getNode();
-                    if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
-                        node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
-                        edgeNodeRepository.save(node);
+                if (devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
+                    if (nodeCode != null && !nodeCode.isBlank()) {
+                        edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
+                            if (n.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                                n.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(n);
+                            }
+                        });
+                    } else if (device.getNode() != null) {
+                        try {
+                            EdgeNode node = device.getNode();
+                            if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                                node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(node);
+                            }
+                        } catch (Exception ex) {
+                            log.debug("Could not verify node status for device {}: {}", device.getId(), ex.getMessage());
+                        }
                     }
                 }
             });
