@@ -880,6 +880,47 @@ public class MqttMessageReceiver {
 
         return null;
     }
+    private java.util.Optional<EdgeNode> resolveEdgeNode(String nodeIdent) {
+        if (nodeIdent == null || nodeIdent.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            java.util.Optional<EdgeNode> byId = edgeNodeRepository.findById(UUID.fromString(nodeIdent));
+            if (byId.isPresent()) {
+                return byId;
+            }
+        } catch (IllegalArgumentException ignored) {}
+        return edgeNodeRepository.findByNodeCode(nodeIdent);
+    }
+
+    private boolean isOnlinePayload(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return true;
+        }
+        String trimmed = payload.trim();
+        if (trimmed.startsWith("{")) {
+            try {
+                Map<String, Object> data = objectMapper.readValue(trimmed, new TypeReference<Map<String, Object>>() {});
+                Object val = data.get("status");
+                if (val == null) {
+                    val = data.get("state");
+                }
+                if (val == null) {
+                    return true;
+                }
+                if (val instanceof Boolean b) {
+                    return b;
+                }
+                String strVal = val.toString().trim();
+                return "ONLINE".equalsIgnoreCase(strVal) || "ON".equalsIgnoreCase(strVal) || "TRUE".equalsIgnoreCase(strVal);
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        String unquoted = trimmed.replace("\"", "").trim();
+        return "ONLINE".equalsIgnoreCase(unquoted) || "1".equals(unquoted) || "TRUE".equalsIgnoreCase(unquoted);
+    }
+
     private void handleCatalog(String topic, String payload) {
         log.info("Processing catalog. Topic: [{}]", topic);
         try {
@@ -887,7 +928,7 @@ public class MqttMessageReceiver {
             String[] parts = topic.split("/");
             if (parts.length >= 4) {
                 String nodeId = parts[2];
-                java.util.Optional<EdgeNode> nodeOpt = edgeNodeRepository.findByNodeCode(nodeId);
+                java.util.Optional<EdgeNode> nodeOpt = resolveEdgeNode(nodeId);
                 if (nodeOpt.isPresent()) {
                     EdgeNode node = nodeOpt.get();
                     List<Map<String, Object>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, Object>>>() {});
@@ -925,7 +966,7 @@ public class MqttMessageReceiver {
 
             if (nodeCode != null && !nodeCode.isBlank()) {
                 final String finalNodeCode = nodeCode;
-                edgeNodeRepository.findByNodeCode(finalNodeCode).ifPresent(node -> {
+                resolveEdgeNode(finalNodeCode).ifPresent(node -> {
                     node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
                     edgeNodeRepository.save(node);
                     log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
@@ -940,17 +981,17 @@ public class MqttMessageReceiver {
     private void handleDeviceStatus(String topic, String payload) {
         log.info("Processing status. Topic: [{}], Status: [{}]", topic, payload);
         try {
+            boolean online = isOnlinePayload(payload);
             String[] parts = topic.split("/");
             if (parts.length == 4 && "nodes".equals(parts[1]) && "status".equals(parts[3])) {
                 String nodeCode = parts[2];
-                String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
-                com.hesta.backend.enums.EdgeNodeStatus nodeStatus = "ONLINE".equals(statusStr)
+                com.hesta.backend.enums.EdgeNodeStatus nodeStatus = online
                         ? com.hesta.backend.enums.EdgeNodeStatus.ONLINE
                         : com.hesta.backend.enums.EdgeNodeStatus.OFFLINE;
-                com.hesta.backend.enums.DeviceStatus nodeDevStatus = "ONLINE".equals(statusStr)
+                com.hesta.backend.enums.DeviceStatus nodeDevStatus = online
                         ? com.hesta.backend.enums.DeviceStatus.ONLINE
                         : com.hesta.backend.enums.DeviceStatus.OFFLINE;
-                edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
+                resolveEdgeNode(nodeCode).ifPresent(n -> {
                     n.setStatus(nodeStatus);
                     edgeNodeRepository.save(n);
                     log.info("Updated node {} status to {}", nodeCode, nodeStatus);
@@ -963,34 +1004,62 @@ public class MqttMessageReceiver {
             String nodeCode = extractNodeCodeFromTopic(topic);
             if (deviceIdStr == null) return;
 
-            String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
-            com.hesta.backend.enums.DeviceStatus devStatus = "ONLINE".equals(statusStr)
+            com.hesta.backend.enums.DeviceStatus devStatus = online
                     ? com.hesta.backend.enums.DeviceStatus.ONLINE
                     : com.hesta.backend.enums.DeviceStatus.OFFLINE;
 
-            java.util.Optional<com.hesta.backend.entity.Device> devOpt;
-            try {
-                devOpt = devices.findById(UUID.fromString(deviceIdStr));
-            } catch (IllegalArgumentException e) {
-                devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> devOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+            if (devOpt.isEmpty()) {
+                try {
+                    devOpt = devices.findById(UUID.fromString(deviceIdStr));
+                } catch (IllegalArgumentException e) {
+                    devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+                }
             }
 
             devOpt.ifPresent(device -> {
+                if (devStatus == com.hesta.backend.enums.DeviceStatus.OFFLINE
+                        && nodeCode != null && !nodeCode.isBlank()
+                        && device.getNode() != null) {
+                    EdgeNode boundNode = device.getNode();
+                    boolean matchesNode = nodeCode.equalsIgnoreCase(boundNode.getNodeCode())
+                            || (boundNode.getId() != null && nodeCode.equalsIgnoreCase(boundNode.getId().toString()));
+                    if (!matchesNode) {
+                        log.warn("Ignoring foreign OFFLINE status for device {} from topic node {} (bound node: {} / {})",
+                                device.getId(), nodeCode, boundNode.getNodeCode(), boundNode.getId());
+                        return;
+                    }
+                }
+
                 boolean statusChanged = device.getStatus() != devStatus;
-                device.setStatus(devStatus);
-                devices.save(device);
-                // A heartbeat that changes nothing must not broadcast: its snapshot can be older than a command
+                // A heartbeat that changes nothing must not save or broadcast: its snapshot can be older than a command
                 // committed meanwhile and would flip other screens back. Freshness is handled by twin health.
                 if (statusChanged) {
+                    device.setStatus(devStatus);
+                    devices.save(device);
                     log.info("Updated device {} status to {}", device.getId(), devStatus);
                     publishDeviceStateChanged(device);
                 }
 
-                if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
-                    EdgeNode node = device.getNode();
-                    if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
-                        node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
-                        edgeNodeRepository.save(node);
+                if (devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
+                    if (nodeCode != null && !nodeCode.isBlank()) {
+                        resolveEdgeNode(nodeCode).ifPresent(n -> {
+                            if (n.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                                n.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(n);
+                            }
+                        });
+                    }
+                    if (device.getNode() != null) {
+                        try {
+                            EdgeNode node = device.getNode();
+                            if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                                node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(node);
+                            }
+                        } catch (Exception ex) {
+                            log.debug("Could not verify node status for device {}: {}", device.getId(), ex.getMessage());
+                        }
                     }
                 }
             });

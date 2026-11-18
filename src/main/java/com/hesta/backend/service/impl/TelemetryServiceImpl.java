@@ -20,9 +20,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
@@ -71,7 +74,7 @@ public class TelemetryServiceImpl implements TelemetryService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void processTelemetry(String topic, TelemetryPayload payload) {
         if (payload == null) {
             log.warn("Telemetry payload is null for topic: {}", topic);
@@ -201,9 +204,10 @@ public class TelemetryServiceImpl implements TelemetryService {
                     && device.getRoom() != null
                     && device.getRoom().getHome() != null) {
                 UUID homeId = device.getRoom().getHome().getId();
+                UUID deviceId = device.getId();
 
                 Map<String, Object> eventData = Map.of(
-                        "deviceId", device.getId(),
+                        "deviceId", deviceId,
                         "deviceName", device.getName(),
                         "metricType", payload.getMetricType(),
                         "value", payload.getValue(),
@@ -214,11 +218,26 @@ public class TelemetryServiceImpl implements TelemetryService {
                 RealtimeEvent<Map<String, Object>> event = RealtimeEvent.create(
                         RealtimeEventType.SENSOR_READING_UPDATED,
                         homeId,
-                        device.getId(),
+                        deviceId,
                         eventData
                 );
 
-                realtimeEventPublisher.publish(event);
+                // Run outside the DB transaction so WebSocketRealtimeTransport's repository lookups
+                // cannot flush pending writes or mark the telemetry transaction rollback-only on error.
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            try {
+                                realtimeEventPublisher.publish(event);
+                            } catch (Exception e) {
+                                log.error("Failed to publish realtime telemetry event for device [{}]: {}", deviceId, e.getMessage());
+                            }
+                        }
+                    });
+                } else {
+                    realtimeEventPublisher.publish(event);
+                }
             }
         } catch (Exception e) {
             log.error("Failed to publish realtime telemetry event for device [{}]: {}", device.getId(), e.getMessage());

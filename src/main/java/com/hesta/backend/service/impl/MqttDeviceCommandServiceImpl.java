@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.EdgeNodeStatus;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
@@ -112,7 +114,38 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         });
     }
 
+    private static boolean isDeviceUnavailable(Device device) {
+        if (device == null) {
+            return false;
+        }
+        if (device.getStatus() != null && device.getStatus() != DeviceStatus.ONLINE) {
+            return true;
+        }
+        try {
+            if (device.getNode() != null && device.getNode().getStatus() != null) {
+                EdgeNodeStatus nodeStatus = device.getNode().getStatus();
+                return nodeStatus == EdgeNodeStatus.OFFLINE
+                        || nodeStatus == EdgeNodeStatus.ERROR
+                        || nodeStatus == EdgeNodeStatus.UNPAIRED;
+            }
+        } catch (Exception ex) {
+            log.warn("Could not inspect node status for device {}: {}", device.getId(), ex.getMessage());
+        }
+        return false;
+    }
+
     private CompletableFuture<CommandResult> dispatch(Device device, UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
+        if (isDeviceUnavailable(device)) {
+            log.warn("Command rejected: device {} ({}) is unavailable (status={})", deviceId, device.getName(), device.getStatus());
+            return CompletableFuture.completedFuture(CommandResult.builder()
+                    .commandId(UUID.randomUUID().toString())
+                    .success(false)
+                    .status("FAILED")
+                    .errorCode("DEVICE_OFFLINE")
+                    .message("Thiết bị đang ngoại tuyến hoặc chưa kết nối")
+                    .build());
+        }
+
         Long lastStartTime = commandStartTimes.get(deviceId);
         long now = System.currentTimeMillis();
 
@@ -238,20 +271,6 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 }
             }
             resolvedNodeCode = nodeCode;
-
-            // Rejection for devices that are physically OFFLINE
-            if (device != null && device.getStatus() == com.hesta.backend.enums.DeviceStatus.OFFLINE) {
-                log.warn("Command rejected: device {} ({}) is OFFLINE", deviceId, device.getName());
-                activeDeviceCommands.remove(deviceId, future);
-                commandStartTimes.remove(deviceId);
-                return CompletableFuture.completedFuture(CommandResult.builder()
-                        .commandId(commandId)
-                        .success(false)
-                        .status("FAILED")
-                        .errorCode("DEVICE_OFFLINE")
-                        .message("Thiết bị đang ngoại tuyến hoặc chưa kết nối")
-                        .build());
-            }
 
             // Circuit Breaker check
             if (diagnosticsService != null && nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)
