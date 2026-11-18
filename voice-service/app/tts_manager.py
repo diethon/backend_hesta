@@ -1,12 +1,13 @@
 """
-TTS Manager cho Voice Service HESTA — Kiến trúc Hybrid 3 tầng.
+TTS Manager cho Voice Service HESTA — Kiến trúc Hybrid 3 tầng & Ghép MP3 Lệnh Kép.
 
 Cung cấp:
 - Tầng 1 (< 2ms): Caching đa tầng (RAM + Disk .cache/tts/ + Bundled assets/) giọng Microsoft Hoài My.
-- Tầng 2 (~100–250ms): Offline Neural TTS (Piper TTS trên Orange Pi ARM64) & fallback gTTS khi cache miss.
-  → Không bao giờ khựng 4 giây hay lỗi 500 khi Edge-TTS lag hoặc mất mạng internet.
-- Tầng 3 (Nâng cấp ngầm): Âm thầm tải bản giọng Hoài My từ Edge-TTS ở background để các lần sau
-  phát đúng 1 giọng Hoài My đồng nhất từ RAM (< 2ms).
+- Ghép lệnh kép (< 1ms): Tự động ghép trực tiếp các frame MP3 giọng Hoài My của từng lệnh con trong RAM
+  → 100% đồng nhất 1 giọng Hoài My cho mọi tổ hợp lệnh kép mà không cần gọi mạng!
+- Tầng 2 (Câu đơn mới): Gọi Microsoft Edge-TTS (giọng Hoài My) 1 lần nhanh; chỉ fallback sang
+  Piper Offline / gTTS khi Edge-TTS lỗi hoặc mất mạng internet (chống im lặng / lỗi 500).
+- Tầng 3 (Nâng cấp ngầm): Tự nâng cấp câu fallback sang giọng Hoài My ở background cho lần sau.
 """
 
 from __future__ import annotations
@@ -54,8 +55,24 @@ def detect_audio_mime(data: bytes) -> str:
     return "audio/mpeg"
 
 
+def strip_mp3_id3v2(data: bytes) -> bytes:
+    """Gỡ bỏ header ID3v2 (nếu có) trước khi nối trực tiếp các frame MP3 cùng chuẩn."""
+    if len(data) >= 10 and data[:3] == b"ID3":
+        # Synchsafe integer size (4 bytes)
+        size = (
+            ((data[6] & 0x7F) << 21)
+            | ((data[7] & 0x7F) << 14)
+            | ((data[8] & 0x7F) << 7)
+            | (data[9] & 0x7F)
+        )
+        offset = 10 + size
+        if offset < len(data):
+            return data[offset:]
+    return data
+
+
 class TTSManager:
-    """Quản lý sinh âm thanh Hybrid 3 tầng và bộ nhớ đệm giọng nói tiếng Việt."""
+    """Quản lý sinh âm thanh Hybrid 3 tầng, nối MP3 lệnh kép và bộ nhớ đệm giọng nói tiếng Việt."""
 
     def __init__(
         self,
@@ -63,10 +80,15 @@ class TTSManager:
         bundled_dir: Path = BUNDLED_DIR,
         default_voice: str = DEFAULT_VOICE,
         piper_model_path: Path | str | None = None,
+        primary_engine: str | None = None,
     ):
         self.cache_dir = cache_dir
         self.bundled_dir = bundled_dir
         self.default_voice = default_voice
+        # hoaimy (mặc định - đồng nhất 100% giọng Hoài My), piper (100% offline), gtts (100% Google)
+        self.primary_engine = (
+            primary_engine or os.environ.get("TTS_PRIMARY_ENGINE", "hoaimy")
+        ).strip().lower()
 
         env_piper = os.environ.get("PIPER_MODEL_PATH", "").strip()
         if piper_model_path is not None:
@@ -154,7 +176,6 @@ class TTSManager:
 
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wav_file:
-            # Tương thích cả piper-tts v1.3+ (synthesize_wav) và v1.2 (synthesize(text, wav_file))
             if hasattr(voice, "synthesize_wav"):
                 voice.synthesize_wav(text, wav_file)
             else:
@@ -177,7 +198,7 @@ class TTSManager:
             return b""
 
     # ------------------------------------------------------------------
-    # gTTS Fallback (Nhanh ~250ms, thuần Python cho cả Windows & ARM64)
+    # gTTS Fallback (Nhanh ~250–600ms, thuần Python cho cả Windows & ARM64)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -190,7 +211,7 @@ class TTSManager:
         tts.write_to_fp(buf)
         return buf.getvalue()
 
-    async def synthesize_gtts(self, text: str, timeout_sec: float = 3.0) -> bytes:
+    async def synthesize_gtts(self, text: str, timeout_sec: float = 3.5) -> bytes:
         """Async wrapper cho gTTS với timeout an toàn."""
         try:
             t0 = time.perf_counter()
@@ -228,7 +249,6 @@ class TTSManager:
 
         for attempt in range(max_attempts):
             try:
-                # Không truyền custom rate cho giọng vi-VN vì Microsoft SSML có thể lỗi NoAudioReceived
                 comm = edge_tts.Communicate(clean, voice)
                 mp3_bytes = bytearray()
 
@@ -289,10 +309,9 @@ class TTSManager:
                     clean, voice, timeout_sec=6.0, max_attempts=1, silent_errors=True
                 )
                 if mp3_bytes:
-                    self.save_to_cache(clean, voice, mp3_bytes)
+                    self.save_to_cache(clean, voice, mp3_bytes, persist_disk=True)
                     logger.debug("Background upgraded TTS cache to Hoài My MP3: '%s'", clean[:40])
                 else:
-                    # Tạm nghỉ 60s nếu Edge-TTS đang rớt mạng hoặc rate-limit
                     self._edge_cooldown_until = time.monotonic() + 60.0
             except Exception:
                 self._edge_cooldown_until = time.monotonic() + 60.0
@@ -305,20 +324,10 @@ class TTSManager:
     # Cache Management (RAM + Disk + Bundled Assets)
     # ------------------------------------------------------------------
 
-    def get_cached_audio(self, text: str, voice: str | None = None) -> bytes | None:
-        """Lấy âm thanh từ cache (RAM, Disk Cache, hoặc Bundled Assets). Trả về None nếu chưa có."""
-        voice = voice or self.default_voice
-        clean = clean_tts_text(text)
-        if not clean:
-            return None
-
-        key = self._get_cache_key(clean, voice)
-
-        # 1. Kiểm tra RAM cache
+    def _lookup_exact_key(self, key: str) -> bytes | None:
         if key in self._memory_cache:
             return self._memory_cache[key]
 
-        # 2. Kiểm tra Disk cache (.cache/tts)
         file_path = self.cache_dir / f"{key}.mp3"
         if file_path.is_file():
             try:
@@ -329,7 +338,6 @@ class TTSManager:
             except Exception as e:
                 logger.warning("Error reading disk cache for key %s: %s", key, e)
 
-        # 3. Kiểm tra Bundled Assets (assets/tts_cache có sẵn trong mã nguồn)
         bundled_file = self.bundled_dir / f"{key}.mp3"
         if bundled_file.is_file():
             try:
@@ -339,6 +347,31 @@ class TTSManager:
                     return data
             except Exception as e:
                 logger.warning("Error reading bundled assets for key %s: %s", key, e)
+
+        return None
+
+    def get_cached_audio(self, text: str, voice: str | None = None) -> bytes | None:
+        """Lấy âm thanh từ cache (RAM, Disk Cache, hoặc Bundled Assets).
+        Tự động chuẩn hóa dấu chấm cuối câu để tránh miss cache oan.
+        """
+        voice = voice or self.default_voice
+        clean = clean_tts_text(text)
+        if not clean:
+            return None
+
+        # Kiểm tra chính xác trước, sau đó kiểm tra biến thể có/không có dấu chấm cuối câu
+        no_dot = clean.rstrip(".")
+        candidates = [clean]
+        if no_dot != clean:
+            candidates.append(no_dot)
+        else:
+            candidates.append(f"{no_dot}.")
+
+        for candidate in candidates:
+            key = self._get_cache_key(candidate, voice)
+            hit = self._lookup_exact_key(key)
+            if hit:
+                return hit
 
         return None
 
@@ -376,7 +409,6 @@ class TTSManager:
                             logger.debug("Error preloading cache file %s: %s", p, e)
 
         logger.info("✅ Đã nạp %d file giọng nói từ disk cache vào RAM (sẵn sàng phản hồi tức thì)", loaded)
-        # Nạp sẵn Piper offline model nếu tồn tại trên đĩa
         self._load_piper_voice()
         return loaded
 
@@ -390,11 +422,85 @@ class TTSManager:
             pass
 
         return {
+            "primaryEngine": self.primary_engine,
             "ramCachedPhrases": len(self._memory_cache),
             "piperOfflineReady": self.is_piper_ready,
             "gttsFallbackReady": gtts_installed,
             "primaryVoice": self.default_voice,
         }
+
+    # ------------------------------------------------------------------
+    # Compound MP3 Stitching (< 1ms, 100% đồng nhất giọng Hoài My!)
+    # ------------------------------------------------------------------
+
+    async def synthesize_compound(
+        self,
+        sub_messages: list[str],
+        combined_text: str,
+        voice: str | None = None,
+        timeout_sec: float = 3.5,
+    ) -> bytes:
+        """
+        Sinh âm thanh cho câu lệnh kép bằng cách ghép trực tiếp các file MP3 giọng Hoài My
+        của từng câu con ngay trong RAM (< 1ms nếu các câu con đã có sẵn trong cache!).
+
+        Ví dụ:
+          sub 1: 'Đã bật 2 đèn Phòng khách' (MP3 Hoài My từ RAM)
+          sub 2: 'Đã đóng cổng'             (MP3 Hoài My từ RAM)
+          → nối trực tiếp 2 luồng frame MP3 → 100% giọng Hoài My, 0ms latency!
+        """
+        voice = voice or self.default_voice
+        clean_combined = clean_tts_text(combined_text)
+
+        # 1. Nếu nguyên câu kép đã có trong cache → trả ngay (< 2ms)
+        if clean_combined:
+            cached_full = self.get_cached_audio(clean_combined, voice)
+            if cached_full:
+                return cached_full
+
+        valid_subs = [clean_tts_text(m) for m in sub_messages if clean_tts_text(m)]
+        if len(valid_subs) < 2:
+            return await self.synthesize(clean_combined, voice, timeout_sec=timeout_sec, fast_mode=True)
+
+        # 2. Nếu tất cả câu con đều đã có trong cache MP3 → ghép thẳng trong < 1ms!
+        cached_parts = [self.get_cached_audio(m, voice) for m in valid_subs]
+        if all(p and detect_audio_mime(p) == "audio/mpeg" for p in cached_parts):
+            stitched = b"".join(strip_mp3_id3v2(p) for p in cached_parts if p)
+            if stitched:
+                if clean_combined:
+                    self.save_to_cache(clean_combined, voice, stitched, persist_disk=False)
+                logger.info(
+                    "⚡ Compound MP3 stitched from RAM cache (%d parts, %d bytes, 100%% Hoài My)",
+                    len(valid_subs),
+                    len(stitched),
+                )
+                return stitched
+
+        # 3. Nếu một số câu con chưa có trong cache → sinh song song các câu con còn thiếu bằng Hoài My!
+        if self.primary_engine == "hoaimy":
+            async def _fetch_sub(idx: int, msg: str) -> bytes:
+                existing = cached_parts[idx]
+                if existing and detect_audio_mime(existing) == "audio/mpeg":
+                    return existing
+                return await self.synthesize(
+                    msg, voice, timeout_sec=timeout_sec, fast_mode=True, allow_fallback=False
+                )
+
+            resolved = await asyncio.gather(*(_fetch_sub(i, m) for i, m in enumerate(valid_subs)))
+            if all(p and detect_audio_mime(p) == "audio/mpeg" for p in resolved):
+                stitched = b"".join(strip_mp3_id3v2(p) for p in resolved)
+                if stitched:
+                    if clean_combined:
+                        self.save_to_cache(clean_combined, voice, stitched, persist_disk=False)
+                    logger.info(
+                        "⚡ Compound MP3 stitched (%d Hoài My parts, %d bytes)",
+                        len(valid_subs),
+                        len(stitched),
+                    )
+                    return stitched
+
+        # 4. Fallback an toàn nếu mạng Edge-TTS đang đứt hoàn toàn
+        return await self.synthesize(clean_combined, voice, timeout_sec=timeout_sec, fast_mode=True)
 
     # ------------------------------------------------------------------
     # Main Synthesize Entrypoint (3-Tier Hybrid)
@@ -410,44 +516,52 @@ class TTSManager:
         allow_fallback: bool = True,
     ) -> bytes:
         """
-        Sinh âm thanh tiếng Việt theo kiến trúc Hybrid 3 tầng:
-        1. RAM/Disk/Bundled Cache (< 2ms) — Giọng Microsoft Hoài My.
-        2. Khi cache miss:
-           - Nếu fast_mode=True & có Piper Offline: trả ngay âm thanh Piper (~120ms, 100% offline),
-             đồng thời nâng cấp ngầm lên Hoài My ở background.
-           - Nếu chưa có Piper: thử nhanh Edge-TTS 1 lần (không retry gây khựng 4s) → fallback gTTS (~250ms).
-           - Nếu allow_fallback=False (dùng cho script generate_tts_matrix.py): chỉ dùng Edge-TTS.
+        Sinh âm thanh tiếng Việt theo kiến trúc ưu tiên đồng nhất giọng:
+        - primary_engine='hoaimy' (mặc định - Cách 1):
+            1. RAM/Disk/Bundled Cache (< 2ms) — Giọng Hoài My.
+            2. Microsoft Edge-TTS Hoài My (1 lần thử gọn) — giữ 100% đồng nhất giọng Hoài My.
+            3. Chỉ fallback sang Piper Offline / gTTS khi Edge-TTS timeout hoặc mất mạng (chống lỗi 500).
+        - primary_engine='piper': 100% Piper Offline (~120ms).
+        - primary_engine='gtts': 100% Google TTS (~300–600ms) + RAM cache.
         """
         voice = voice or self.default_voice
         clean = clean_tts_text(text)
         if not clean:
             return b""
 
-        # Tầng 1: Kiểm tra cache (RAM hoặc Disk) → < 2ms
+        # Chế độ chuyên biệt: 100% Piper Offline hoặc 100% gTTS
+        if self.primary_engine == "piper" and allow_fallback and self.is_piper_ready:
+            piper_key = self._get_cache_key(clean, "piper")
+            if piper_key in self._memory_cache:
+                return self._memory_cache[piper_key]
+            piper_bytes = await self.synthesize_piper(clean)
+            if piper_bytes:
+                self._memory_cache[piper_key] = piper_bytes
+                return piper_bytes
+
+        if self.primary_engine == "gtts" and allow_fallback:
+            gtts_key = self._get_cache_key(clean, "gtts")
+            if gtts_key in self._memory_cache:
+                return self._memory_cache[gtts_key]
+            gtts_bytes = await self.synthesize_gtts(clean, timeout_sec=3.5)
+            if gtts_bytes:
+                self._memory_cache[gtts_key] = gtts_bytes
+                return gtts_bytes
+
+        # Tầng 1: Kiểm tra cache Hoài My (RAM / Disk / Bundled) → < 2ms
         cached = self.get_cached_audio(clean, voice)
         if cached:
             return cached
 
         key = self._get_cache_key(clean, voice)
         async with self._get_key_lock(key):
-            # Re-check sau khi acquire lock
             cached = self.get_cached_audio(clean, voice)
             if cached:
                 return cached
 
-            # Tầng 2A (Tối ưu nhất cho Orange Pi):
-            # Khi cần phản hồi tức thì (fast_mode) và có Piper offline → phát ngay (~120ms),
-            # lưu tạm vào RAM để lặp lại 0ms, và âm thầm tải Hoài My ở background!
-            if fast_mode and allow_fallback and self.is_piper_ready:
-                piper_bytes = await self.synthesize_piper(clean)
-                if piper_bytes:
-                    self.save_to_cache(clean, voice, piper_bytes, persist_disk=False)
-                    self._schedule_edge_upgrade(clean, voice)
-                    return piper_bytes
-
-            # Tầng 2B: Thử Microsoft Edge-TTS (1 lần duy nhất ở fast_mode để tránh khựng 4s)
+            # Tầng 2: Thử Microsoft Edge-TTS Hoài My (1 lần thử gọn để ưu tiên đồng nhất giọng Hoài My)
             edge_attempts = 1 if (fast_mode or allow_fallback) else 2
-            edge_timeout = min(timeout_sec, 1.5) if fast_mode else timeout_sec
+            edge_timeout = min(timeout_sec, 3.5) if fast_mode else timeout_sec
             if allow_fallback and time.monotonic() < self._edge_cooldown_until:
                 edge_bytes = b""
             else:
@@ -466,10 +580,10 @@ class TTSManager:
             if not allow_fallback:
                 return b""
 
-            # Đánh dấu Edge-TTS đang lag để các request tiếp theo không phải chờ lại timeout
+            # Edge-TTS đang lag/đứt mạng → đánh dấu cooldown 30s và dùng fallback để không bao giờ im lặng
             self._edge_cooldown_until = time.monotonic() + 30.0
 
-            # Tầng 2C: Fallback offline Piper TTS (~120ms, không cần internet)
+            # Tầng 3A: Fallback offline Piper TTS (~120ms, không cần internet)
             if self.is_piper_ready:
                 piper_bytes = await self.synthesize_piper(clean)
                 if piper_bytes:
@@ -477,8 +591,8 @@ class TTSManager:
                     self._schedule_edge_upgrade(clean, voice)
                     return piper_bytes
 
-            # Tầng 2D: Fallback gTTS (~250ms, thuần Python cho Laptop/Windows)
-            gtts_bytes = await self.synthesize_gtts(clean, timeout_sec=3.0)
+            # Tầng 3B: Fallback gTTS (~300–600ms, thuần Python)
+            gtts_bytes = await self.synthesize_gtts(clean, timeout_sec=3.5)
             if gtts_bytes:
                 self.save_to_cache(clean, voice, gtts_bytes, persist_disk=False)
                 self._schedule_edge_upgrade(clean, voice)

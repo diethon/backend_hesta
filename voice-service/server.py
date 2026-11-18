@@ -199,8 +199,8 @@ async def get_voice_tts(
         audio_bytes = await tts_manager.synthesize(
             clean_text,
             voice,
-            timeout_sec=3.0,
-            fast_mode=tts_manager.is_piper_ready,
+            timeout_sec=3.5,
+            fast_mode=True,
         )
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech")
@@ -264,13 +264,23 @@ async def process_voice_command(
             mime = detect_audio_mime(cached_bytes)
             audio_data = f"data:{mime};base64,{base64.b64encode(cached_bytes).decode('ascii')}"
         else:
-            # 2. Hybrid Fast TTS: Piper Offline (~120ms) hoặc 1 lần thử nhanh Edge-TTS (<=1.5s) -> gTTS fallback
+            # 2. Nếu là lệnh kép (>= 2 lệnh con), ghép trực tiếp các file MP3 giọng Hoài My từ RAM cache (< 1ms)
+            #    Ngược lại gọi Edge-TTS Hoài My 1 lần gọn (<= 3.5s), chỉ fallback khi mất mạng/lỗi.
             try:
-                synthesized_bytes = await tts_manager.synthesize(
-                    clean_msg,
-                    timeout_sec=1.5,
-                    fast_mode=True,
-                )
+                sub_results = getattr(result, "sub_results", []) or []
+                if len(sub_results) >= 2:
+                    sub_msgs = [s.message for s in sub_results if getattr(s, "message", None)]
+                    synthesized_bytes = await tts_manager.synthesize_compound(
+                        sub_msgs,
+                        clean_msg,
+                        timeout_sec=3.5,
+                    )
+                else:
+                    synthesized_bytes = await tts_manager.synthesize(
+                        clean_msg,
+                        timeout_sec=3.5,
+                        fast_mode=True,
+                    )
                 if synthesized_bytes:
                     mime = detect_audio_mime(synthesized_bytes)
                     audio_data = f"data:{mime};base64,{base64.b64encode(synthesized_bytes).decode('ascii')}"
