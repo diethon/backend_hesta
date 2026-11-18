@@ -74,7 +74,9 @@ public class TwinHealthEvaluationServiceImpl implements TwinHealthEvaluationServ
     }
 
     private void evaluate(NodeReference node, Instant now) {
-        TwinHealthStatus current = resolver.resolve(node.row().getReferenceTime(), now);
+        TwinHealthStatus current = node.type() == TwinNodeType.DEVICE
+                ? TwinHealthStatus.forDevice(node.row().getDeviceStatus())
+                : resolver.resolve(node.row().getReferenceTime(), now);
         TwinHealthStatus previous = statuses.get(node.key());
         if (previous != null && previous != current) {
             var payload = new TwinHealthStatusChangedPayload(node.type(), node.key().id(),

@@ -6,6 +6,11 @@ import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
+import com.hesta.backend.support.TwinHealthTestSupport;
+import org.springframework.context.ApplicationEventPublisher;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.DeviceService;
@@ -32,6 +37,8 @@ class MqttMessageReceiverTest {
     @Mock TelemetryService telemetryService;
     @Mock DeviceService deviceService;
     @Spy ObjectMapper mapper = new ObjectMapper();
+    @Mock ApplicationEventPublisher applicationEvents;
+    @Spy TwinSnapshotMapper twinSnapshotMapper = TwinHealthTestSupport.mapper(new ObjectMapper());
     @InjectMocks MqttMessageReceiver receiver;
 
     @Test
@@ -40,7 +47,7 @@ class MqttMessageReceiverTest {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+        when(devices.findByIdWithNode(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
                 .deviceType("SENSOR").build()));
@@ -71,6 +78,8 @@ class MqttMessageReceiverTest {
 
         verify(deviceService).updateDeviceStateFromMqtt(eq(nodeId.toString()), eq(deviceId.toString()), argThat(map ->
                 Boolean.TRUE.equals(map.get("power")) && Integer.valueOf(26).equals(map.get("temperature")) && "COOL".equals(map.get("mode"))));
+        // AC "temperature" is a setpoint, not a safety reading
+        verify(telemetryService, never()).processTelemetry(anyString(), any());
     }
 
     @Test
@@ -114,7 +123,7 @@ class MqttMessageReceiverTest {
         UUID nodeId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         Home home = Home.builder().id(homeId).build();
-        when(devices.findById(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
+        when(devices.findByIdWithNode(deviceId)).thenReturn(Optional.of(Device.builder().id(deviceId)
                 .node(EdgeNode.builder().id(nodeId).home(home).build())
                 .room(Room.builder().home(home).build())
                 .deviceType("TEMPERATURE_SENSOR").build()));
@@ -131,6 +140,69 @@ class MqttMessageReceiverTest {
                         && new java.math.BigDecimal("32.5").equals(event.getData().get("temperature"))
                         && new java.math.BigDecimal("32.5").equals(event.getData().get("temp"))
                         && new java.math.BigDecimal("32.5").equals(event.getData().get("value"))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = DeviceStatus.class, names = {"ONLINE", "OFFLINE"})
+    void connectionStatusMessagePublishesStatusWithoutLastSeen(DeviceStatus status) {
+        UUID nodeId = UUID.randomUUID(), deviceId = UUID.randomUUID(), homeId = UUID.randomUUID();
+        var home = Home.builder().id(homeId).build();
+        var device = Device.builder().id(deviceId).room(Room.builder().home(home).build())
+                .status(status == DeviceStatus.ONLINE ? DeviceStatus.OFFLINE : DeviceStatus.ONLINE).build();
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        var realtimeEventPublisher = mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(receiver, "realtimeEventPublisher", realtimeEventPublisher);
+        receiver.handleMessage(MessageBuilder.withPayload(status.name())
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/status").build());
+        // No transaction here, so the receiver broadcasts the snapshot itself instead of relying on AFTER_COMMIT listeners.
+        verify(realtimeEventPublisher).publish(argThat(event ->
+                event.type() == com.hesta.backend.realtime.model.RealtimeEventType.DEVICE_STATE_CHANGED
+                        && event.homeId().equals(homeId)
+                        && event.data() instanceof com.hesta.backend.dto.response.TwinDeviceSnapshotResponse snapshot
+                        && snapshot.status() == status && snapshot.lastSeen() == null));
+    }
+
+    @Test
+    void flatMapTelemetryExtractsSafetyMetricsAndPreservesStateUpdate() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        String payload = "{\"nodeId\":\"" + nodeId + "\",\"deviceId\":\"" + deviceId + "\",\"humidity\":65.0,\"temperature\":29.5,\"gas_ppm\":850.0,\"smoke\":120.0}";
+
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/telemetry")
+                .build());
+
+        // 1. Existing behavior preserved: full map sent to updateDeviceStateFromMqtt
+        verify(deviceService).updateDeviceStateFromMqtt(eq(nodeId.toString()), eq(deviceId.toString()), argThat(map ->
+                Double.valueOf(65.0).equals(map.get("humidity"))
+                        && Double.valueOf(29.5).equals(map.get("temperature"))
+                        && Double.valueOf(850.0).equals(map.get("gas_ppm"))
+                        && Double.valueOf(120.0).equals(map.get("smoke"))
+        ));
+
+        // 2. Safety metrics extracted and dispatched to telemetryService
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "gas_ppm".equals(p.getMetricType()) && new java.math.BigDecimal("850.0").equals(p.getValue())));
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "smoke".equals(p.getMetricType()) && new java.math.BigDecimal("120.0").equals(p.getValue())));
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "temperature".equals(p.getMetricType()) && new java.math.BigDecimal("29.5").equals(p.getValue())));
+    }
+
+    @Test
+    void flatMapTelemetryWithTempKeyNormalizesMetricTypeToTemperature() {
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        String payload = "{\"nodeId\":\"" + nodeId + "\",\"deviceId\":\"" + deviceId + "\",\"temp\":55.0}";
+
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nodeId + "/devices/" + deviceId + "/telemetry")
+                .build());
+
+        verify(telemetryService).processTelemetry(contains("/telemetry"), argThat(p ->
+                "temperature".equals(p.getMetricType())
+                        && new java.math.BigDecimal("55.0").equals(p.getValue())
+                        && "°C".equals(p.getUnit())));
     }
 
     @Test

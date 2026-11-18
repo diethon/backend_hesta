@@ -74,7 +74,13 @@ public class AutomationEngineImpl implements AutomationEngine {
     @Transactional
     public AutomationEngineResponse process(UUID homeId, AutomationEventRequest event) {
         Device source = requireSourceDeviceInHome(homeId, event);
-        if (source != null && !event.isTest()) behaviorEventRecorder.recordSensor(source, event);
+        if (source != null && !event.isTest()) {
+            try {
+                behaviorEventRecorder.recordSensor(source, event);
+            } catch (Exception ex) {
+                log.error("Failed to record sensor behavior event for device {}: {}", source.getId(), ex.getMessage(), ex);
+            }
+        }
 
         List<AutomationRule> rules = ruleRepository.findAllByHomeIdAndEnabledTrueAndTriggerTypeIn(
                 homeId, List.of(TriggerType.SENSOR, TriggerType.EVENT));

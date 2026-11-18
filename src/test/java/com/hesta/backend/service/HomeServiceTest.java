@@ -7,6 +7,8 @@ import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.repository.HomeRepository;
+import com.hesta.backend.repository.MemberDeviceAccessRepository;
+import com.hesta.backend.repository.MemberRoomAccessRepository;
 import com.hesta.backend.service.impl.HomeServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,10 +36,10 @@ class HomeServiceTest {
     private HomeMemberRepository homeMemberRepository;
 
     @Mock
-    private com.hesta.backend.repository.MemberRoomAccessRepository memberRoomAccessRepository;
+    private MemberRoomAccessRepository memberRoomAccessRepository;
 
     @Mock
-    private com.hesta.backend.repository.MemberDeviceAccessRepository memberDeviceAccessRepository;
+    private MemberDeviceAccessRepository memberDeviceAccessRepository;
 
     @InjectMocks
     private HomeServiceImpl homeService;

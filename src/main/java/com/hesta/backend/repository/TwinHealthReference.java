@@ -2,6 +2,7 @@ package com.hesta.backend.repository;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import com.hesta.backend.enums.DeviceStatus;
 
 /** Scalar projection: no entity traversal or telemetry history loaded by health scans. */
 public interface TwinHealthReference {
@@ -9,5 +10,6 @@ public interface TwinHealthReference {
     UUID getDeviceId();
     UUID getRoomId();
     String getMetricType();
+    DeviceStatus getDeviceStatus();
     OffsetDateTime getReferenceTime();
 }

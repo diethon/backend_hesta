@@ -22,7 +22,7 @@
               "brightness": 80
             },
             "lastSeen": null,
-            "healthStatus": "OFFLINE"
+            "healthStatus": "ACTIVE"
           },
           {
             "deviceId": "00000000-0000-4000-8000-000000000023",
@@ -35,7 +35,7 @@
               "motion": true
             },
             "lastSeen": null,
-            "healthStatus": "OFFLINE"
+            "healthStatus": "ACTIVE"
           }
         ],
         "sensors": [
@@ -69,7 +69,7 @@
               "humidity": 61
             },
             "lastSeen": null,
-            "healthStatus": "OFFLINE"
+            "healthStatus": "ACTIVE"
           }
         ],
         "sensors": [

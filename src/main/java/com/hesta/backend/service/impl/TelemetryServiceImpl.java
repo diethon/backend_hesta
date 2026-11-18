@@ -1,5 +1,6 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.event.TelemetryAnomalyEvent;
 import com.hesta.backend.dto.request.TelemetryPayload;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
@@ -12,11 +13,16 @@ import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.EdgeNodeRepository;
 import com.hesta.backend.repository.SensorReadingRepository;
+import com.hesta.backend.service.AnomalyDetectionService;
 import com.hesta.backend.service.TelemetryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
@@ -26,13 +32,43 @@ import java.util.UUID;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TelemetryServiceImpl implements TelemetryService {
 
     private final DeviceRepository deviceRepository;
     private final SensorReadingRepository sensorReadingRepository;
     private final EdgeNodeRepository edgeNodeRepository;
     private final RealtimeEventPublisher realtimeEventPublisher;
+    private final AnomalyDetectionService anomalyDetectionService;
+    private final ApplicationEventPublisher applicationEventPublisher;
+
+    @Autowired
+    public TelemetryServiceImpl(
+            DeviceRepository deviceRepository,
+            SensorReadingRepository sensorReadingRepository,
+            EdgeNodeRepository edgeNodeRepository,
+            RealtimeEventPublisher realtimeEventPublisher,
+            @Autowired(required = false) AnomalyDetectionService anomalyDetectionService,
+            @Autowired(required = false) ApplicationEventPublisher applicationEventPublisher
+    ) {
+        this.deviceRepository = deviceRepository;
+        this.sensorReadingRepository = sensorReadingRepository;
+        this.edgeNodeRepository = edgeNodeRepository;
+        this.realtimeEventPublisher = realtimeEventPublisher;
+        this.anomalyDetectionService = anomalyDetectionService;
+        this.applicationEventPublisher = applicationEventPublisher;
+    }
+
+    /**
+     * Backward-compatible constructor for existing tests.
+     */
+    public TelemetryServiceImpl(
+            DeviceRepository deviceRepository,
+            SensorReadingRepository sensorReadingRepository,
+            EdgeNodeRepository edgeNodeRepository,
+            RealtimeEventPublisher realtimeEventPublisher
+    ) {
+        this(deviceRepository, sensorReadingRepository, edgeNodeRepository, realtimeEventPublisher, null, null);
+    }
 
     @Override
     @Transactional
@@ -54,26 +90,27 @@ public class TelemetryServiceImpl implements TelemetryService {
 
         // 2. Persist SensorReading
         if (payload.getValue() != null && payload.getMetricType() != null) {
+            OffsetDateTime now = OffsetDateTime.now();
             SensorReading reading = SensorReading.builder()
                     .device(device)
                     .metricType(payload.getMetricType())
                     .value(payload.getValue())
                     .unit(payload.getUnit() != null ? payload.getUnit() : "")
-                    .recordedAt(OffsetDateTime.now())
+                    .recordedAt(now)
                     .build();
 
-            sensorReadingRepository.save(reading);
+            SensorReading saved = sensorReadingRepository.save(reading);
             log.info("Saved SensorReading for device [{}] ({}): {} {}",
                     device.getName(), payload.getMetricType(), payload.getValue(), payload.getUnit());
 
-            // 3. Update Device live current_state and status
-            Map<String, Object> currentState = device.getCurrentState();
-            if (currentState == null) {
-                currentState = new HashMap<>();
-            }
+            // 3. Update Device live current_state (merge without overwriting other metrics), status, and lastSeen
+            Map<String, Object> currentState = device.getCurrentState() != null
+                    ? new HashMap<>(device.getCurrentState())
+                    : new HashMap<>();
             currentState.put(payload.getMetricType(), payload.getValue());
             device.setCurrentState(currentState);
             device.setStatus(DeviceStatus.ONLINE);
+            device.setLastSeen(now);
             deviceRepository.save(device);
 
             // 4. Update EdgeNode status if present
@@ -87,6 +124,42 @@ public class TelemetryServiceImpl implements TelemetryService {
 
             // 5. Publish Realtime STOMP event if assigned to a home
             publishRealtimeEvent(device, payload, reading.getRecordedAt());
+
+            // 6. Trigger Anomaly Detection after transaction commit
+            if (applicationEventPublisher != null) {
+                Long readingId = saved != null ? saved.getId() : null;
+                OffsetDateTime recordedAt = saved != null ? saved.getRecordedAt() : reading.getRecordedAt();
+                applicationEventPublisher.publishEvent(new TelemetryAnomalyEvent(
+                        readingId,
+                        device.getId(),
+                        payload.getMetricType(),
+                        payload.getValue(),
+                        recordedAt
+                ));
+            }
+        }
+    }
+
+    /**
+     * Isolated post-commit handler: triggers Tier-1 rule evaluation in REQUIRES_NEW.
+     * Guaranteed never to fail or roll back telemetry ingestion.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onSensorReadingCommitted(TelemetryAnomalyEvent event) {
+        if (event == null || anomalyDetectionService == null) return;
+        try {
+            Device device = deviceRepository.findById(event.deviceId()).orElse(null);
+            if (device != null) {
+                anomalyDetectionService.evaluateReading(
+                        device,
+                        event.metricType(),
+                        event.value(),
+                        event.recordedAt(),
+                        event.readingId()
+                );
+            }
+        } catch (Exception ex) {
+            log.error("Error in anomaly evaluation after commit for device {} (readingId: {}, metric: {}): {}", event.deviceId(), event.readingId(), event.metricType(), ex.getMessage(), ex);
         }
     }
 
