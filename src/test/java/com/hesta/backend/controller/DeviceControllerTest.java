@@ -126,6 +126,7 @@ class DeviceControllerTest {
                 .status("EXECUTED")
                 .build();
         when(deviceAccessValidator.canAccessDevice(userId, deviceId)).thenReturn(true);
+        when(deviceAccessValidator.canControlDevice(userId, deviceId)).thenReturn(true);
         when(deviceCommandService.sendCommand(eq(deviceId), eq("TURN_ON"), any(), eq(StateChangeSource.MANUAL)))
                 .thenReturn(CompletableFuture.completedFuture(result));
 
@@ -167,6 +168,7 @@ class DeviceControllerTest {
     void extendAutomation_authenticated_returnsUntil() throws Exception {
         OffsetDateTime until = OffsetDateTime.now().plusHours(1);
         when(deviceAccessValidator.canAccessDevice(userId, deviceId)).thenReturn(true);
+        when(deviceAccessValidator.canControlDevice(userId, deviceId)).thenReturn(true);
         when(manualOverrideService.extendOverride(deviceId, userId, 60)).thenReturn(until);
 
         mvc.perform(post("/api/v1/devices/{deviceId}/automation/extend", deviceId)
