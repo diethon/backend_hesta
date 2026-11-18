@@ -428,7 +428,16 @@ class VoicePipeline:
         err_code = None
         status = "SUCCESS"
         is_partial = (not dispatch_result.all_success) and (dispatch_result.successful_count > 0)
-        if not dispatch_result.all_success:
+        failed_results = [r for r in dispatch_result.results if not r.success]
+        only_permission_skips = (
+            is_partial
+            and bool(failed_results)
+            and all(
+                r.error_code in ("ACCESS_DENIED", "UNAUTHORIZED") or r.status_code in (401, 403, 404)
+                for r in failed_results
+            )
+        )
+        if not dispatch_result.all_success and not only_permission_skips:
             err_codes = {r.error_code for r in dispatch_result.results if r.error_code}
             if "ACCESS_DENIED" in err_codes or any(r.status_code == 403 for r in dispatch_result.results):
                 err_code = "ACCESS_DENIED"

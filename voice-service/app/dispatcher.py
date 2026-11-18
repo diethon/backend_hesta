@@ -169,8 +169,44 @@ class DispatchBatchResult:
                 else:
                     return f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}"
         elif self.successful_count > 0:
-            return (f"Đã {action_vi} {self.successful_count}/{self.total_devices} "
-                    f"{type_vi}{room_str}, {self.failed_count} thiết bị lỗi")
+            failed_results = [r for r in self.results if not r.success]
+            denied_count = sum(
+                1 for r in failed_results
+                if r.error_code in ("ACCESS_DENIED", "UNAUTHORIZED") or r.status_code in (401, 403, 404)
+            )
+            offline_count = sum(
+                1 for r in failed_results
+                if r.error_code in ("DEVICE_OFFLINE", "GATEWAY_DISCONNECTED")
+            )
+            other_err_count = len(failed_results) - denied_count - offline_count
+
+            # Nếu toàn bộ thiết bị còn lại chỉ bị bỏ qua do không có quyền (không có lỗi kỹ thuật):
+            # Không báo "lỗi" và không để lộ số lượng thiết bị ẩn ở các phòng bị cấm.
+            if failed_results and denied_count == len(failed_results):
+                return (
+                    f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str} "
+                    f"trong phạm vi quyền của bạn"
+                )
+
+            reasons: list[str] = []
+            if denied_count > 0:
+                reasons.append(f"{denied_count} thiết bị không có quyền")
+            if offline_count > 0:
+                reasons.append(f"{offline_count} thiết bị ngoại tuyến")
+            if other_err_count > 0:
+                reasons.append(f"{other_err_count} thiết bị lỗi")
+            if not reasons:
+                reasons.append(f"{self.failed_count} thiết bị lỗi")
+
+            if denied_count > 0:
+                return (
+                    f"Đã {action_vi} {self.successful_count} {type_vi}{room_str}{param_str}, "
+                    + ", ".join(reasons)
+                )
+            return (
+                f"Đã {action_vi} {self.successful_count}/{self.total_devices} "
+                f"{type_vi}{room_str}, " + ", ".join(reasons)
+            )
         else:
             # Phân loại nguyên nhân lỗi chi tiết dựa theo kết quả phản hồi từ Backend
             err_codes = {r.error_code for r in self.results if r.error_code}
@@ -292,9 +328,14 @@ class Dispatcher:
                     response_data=response_data,
                     duration_ms=round(duration_ms, 1),
                 )
-            elif response.status_code in (401, 403):
-                err_code = "ACCESS_DENIED" if response.status_code == 403 else "UNAUTHORIZED"
-                err_msg = "Bạn không có quyền điều khiển thiết bị này" if response.status_code == 403 else "Chưa xác thực người dùng"
+            elif response.status_code in (401, 403) or (response.status_code == 404 and user_id):
+                if response.status_code == 401:
+                    err_code = "UNAUTHORIZED"
+                    err_msg = "Chưa xác thực người dùng"
+                else:
+                    # Backend fail-closed trả 403 (VIEW) hoặc 404 (NONE) cho thiết bị ngoài phạm vi quyền
+                    err_code = "ACCESS_DENIED"
+                    err_msg = "Bạn không có quyền điều khiển thiết bị này"
                 logger.warning("Dispatch permission error: %s → %s — HTTP %d: %s", device_id, action, response.status_code, err_msg)
                 return DispatchResult(
                     device_id=device_id,
