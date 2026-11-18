@@ -99,6 +99,7 @@ public enum ErrorCode {
     AC_FAN_INVALID(1038, "Tốc độ quạt không hợp lệ. Các mức hợp lệ: AUTO, LOW, MID, HIGH", HttpStatus.BAD_REQUEST),
     AC_TIMER_INVALID(1039, "Thời gian hẹn giờ không hợp lệ (giờ từ 0 đến 24)", HttpStatus.BAD_REQUEST),
     GATE_ACTION_INVALID(1040, "Hành động điều khiển cổng không hợp lệ. Các hành động hợp lệ: OPEN, CLOSE, STOP", HttpStatus.BAD_REQUEST),
+    DEVICE_OFFLINE(1048, "Thiết bị đang ngoại tuyến hoặc chưa kết nối", HttpStatus.CONFLICT),
     // Notification Core
     NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST),
 

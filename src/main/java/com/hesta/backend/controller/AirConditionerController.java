@@ -29,11 +29,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.sendCommand(userId, deviceId, request)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Gửi lệnh điều khiển điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Gửi lệnh điều khiển điều hòa thành công"));
     }
 
     @PostMapping("/power")
@@ -44,11 +40,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.setPower(userId, deviceId, power)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Cập nhật nguồn điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Cập nhật nguồn điều hòa thành công"));
     }
 
     @PostMapping("/temperature")
@@ -59,11 +51,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.setTemperature(userId, deviceId, temperature)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Cài đặt nhiệt độ điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Cài đặt nhiệt độ điều hòa thành công"));
     }
 
     @PostMapping("/temperature-plus")
@@ -73,11 +61,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.temperaturePlus(userId, deviceId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Tăng nhiệt độ điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Tăng nhiệt độ điều hòa thành công"));
     }
 
     @PostMapping("/temperature-minus")
@@ -87,11 +71,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.temperatureMinus(userId, deviceId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Giảm nhiệt độ điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Giảm nhiệt độ điều hòa thành công"));
     }
 
     @PostMapping("/fan")
@@ -102,11 +82,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.setFan(userId, deviceId, fan)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Cài đặt quạt gió điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Cài đặt quạt gió điều hòa thành công"));
     }
 
     @PostMapping("/mode")
@@ -117,11 +93,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.setMode(userId, deviceId, mode)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Cài đặt chế độ điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Cài đặt chế độ điều hòa thành công"));
     }
 
     @PostMapping("/swing")
@@ -132,11 +104,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.setSwing(userId, deviceId, enabled)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Cài đặt đảo gió điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Cài đặt đảo gió điều hòa thành công"));
     }
 
     @PostMapping("/timer")
@@ -148,11 +116,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.setTimer(userId, deviceId, hour, halfHour)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Cài đặt hẹn giờ điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Cài đặt hẹn giờ điều hòa thành công"));
     }
 
     @PostMapping("/timer/cancel")
@@ -162,11 +126,7 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.cancelTimer(userId, deviceId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Hủy hẹn giờ điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Hủy hẹn giờ điều hòa thành công"));
     }
 
     @GetMapping("/state")
@@ -176,10 +136,6 @@ public class AirConditionerController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return airConditionerService.getState(userId, deviceId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Lấy trạng thái điều hòa thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Lấy trạng thái điều hòa thành công"));
     }
 }

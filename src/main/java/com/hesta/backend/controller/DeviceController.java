@@ -348,7 +348,7 @@ public class DeviceController {
             params.remove("action");
         }
         return deviceCommandService.sendCommand(deviceId, actionStr, params, StateChangeSource.MANUAL)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, null));
     }
 
 @PreAuthorize("@deviceAccessValidator.canControlRoom(principal.id, #roomId)")
