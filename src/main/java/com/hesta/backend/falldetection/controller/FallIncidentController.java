@@ -8,6 +8,9 @@ import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.RealtimeSubscriptionService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +21,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestController
 @RequestMapping({"/api/v1/emergency/fall", "/api/emergency/fall"})
 @RequiredArgsConstructor
@@ -27,9 +31,25 @@ public class FallIncidentController {
     private final RealtimeSubscriptionService homeAccess;
     private final HomeMemberRepository homeMemberRepository;
 
-    /** Public: pushed by the camera AI service, not by a logged-in user. */
+    @Value("${hesta.internal.api-key:}")
+    private String internalApiKey;
+
+    /**
+     * Pushed by internal Edge AI camera service.
+     * When hesta.internal.api-key is configured, requests must provide matching X-Internal-Secret or X-API-Key header.
+     */
     @PostMapping("/events")
-    public ResponseEntity<FallIncidentResponseDTO> handleFallEvent(@RequestBody FallIncidentEventDTO eventDTO) {
+    public ResponseEntity<FallIncidentResponseDTO> handleFallEvent(
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secretHeader,
+            @RequestHeader(value = "X-API-Key", required = false) String apiKeyHeader,
+            @RequestBody FallIncidentEventDTO eventDTO) {
+        if (internalApiKey != null && !internalApiKey.isBlank()) {
+            String token = secretHeader != null ? secretHeader : apiKeyHeader;
+            if (!internalApiKey.equals(token)) {
+                log.warn("[FALL CONTROLLER] Từ chối sự kiện té ngã: Thiếu hoặc sai internal API key");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+        }
         FallIncidentResponseDTO response = fallIncidentService.processIncomingFallEvent(eventDTO);
         return ResponseEntity.ok(response);
     }
