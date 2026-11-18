@@ -34,7 +34,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("select device from Device device where device.id = :id and device.isDeleted = false")
     Optional<Device> findForSensorReading(@Param("id") UUID id);
 
-    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId")
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.createdAt ASC, d.id ASC")
     List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
     @Query("""
@@ -45,6 +45,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
             LEFT JOIN FETCH n.home
             WHERE (r.home.id = :homeId)
                OR (r IS NULL AND n.home.id = :homeId)
+            ORDER BY d.createdAt ASC, d.id ASC
             """)
     List<Device> findByHomeIdWithRoomAndNode(@Param("homeId") UUID homeId);
 
@@ -52,7 +53,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.id ASC")
     List<Device> findByHomeIdOrderByIdAsc(@Param("homeId") UUID homeId);
 
-    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId")
+    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId ORDER BY d.createdAt ASC, d.id ASC")
     List<Device> findByRoomId(@Param("roomId") UUID roomId);
 
     @Query("SELECT d FROM Device d JOIN FETCH d.room r JOIN FETCH r.home WHERE d.id = :deviceId")

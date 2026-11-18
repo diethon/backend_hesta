@@ -511,3 +511,98 @@ class TestPipelineCompoundCommands:
         assert "stt_ms" in result.step_durations
         assert "intent_ms" in result.step_durations
 
+
+class TestVoiceBugRegressions:
+    """Kiểm thử hồi quy 4 lỗi thực tế: phòng ngủ master, phòng ngủ của con, lệnh kép 2 phòng ngủ, bật/tắt toàn bộ đèn."""
+
+    @staticmethod
+    def _build_real_layout_pipeline(intents_file, child_room_name: str = "Phòng ngủ 2 giường"):
+        real_devices = [
+            {"id": "l-pk-1", "name": "Đèn phòng khách", "deviceType": "LIGHT", "roomName": "Phòng khách", "homeId": "h-real"},
+            {"id": "l-pk-2", "name": "Đèn chiếu TV", "deviceType": "LIGHT", "roomName": "Phòng khách", "homeId": "h-real"},
+            {"id": "l-pb-1", "name": "Đèn phòng bếp", "deviceType": "LIGHT", "roomName": "Phòng bếp", "homeId": "h-real"},
+            {"id": "l-ms-1", "name": "Đèn ngủ master", "deviceType": "LIGHT", "roomName": "Phòng ngủ master", "homeId": "h-real"},
+            {"id": "l-con-1", "name": "Đèn phòng ngủ của con", "deviceType": "LIGHT", "roomName": child_room_name, "homeId": "h-real"},
+            {"id": "rgb-con-1", "name": "Đèn ngủ", "deviceType": "LED_RGB", "roomName": child_room_name, "homeId": "h-real"},
+            {"id": "ac-con-1", "name": "Điều hòa DAIKIN", "deviceType": "AIR_CONDITIONER", "roomName": child_room_name, "homeId": "h-real"},
+            {"id": "p-gd-1", "name": "Máy bơm nước", "deviceType": "WATER_PUMP", "roomName": "Garden", "homeId": "h-real"},
+        ]
+        transport = make_mock_backend_transport(devices=real_devices)
+        client = httpx.Client(base_url="http://localhost:8080", transport=transport)
+        dd = DeviceDirectory(
+            config=DeviceDirectoryConfig(base_url="http://localhost:8080", devices_endpoint="/internal/devices"),
+            http_client=client,
+        )
+        dd.refresh(home_id="h-real")
+
+        # Dùng file intents_vi.json thật của dự án để kiểm thử sát thực tế
+        real_intents_path = os.path.join(os.path.dirname(__file__), "..", "config", "intents_vi.json")
+        mapper = IntentMapper(IntentConfig(min_confidence=50.0))
+        mapper.load_intents(real_intents_path)
+
+        mock_stt = MagicMock(spec=SpeechToText)
+        mock_stt.is_loaded = True
+        return VoicePipeline(
+            audio_gate=AudioGate(AudioGateConfig()),
+            stt=mock_stt,
+            device_directory=dd,
+            intent_mapper=mapper,
+            dispatcher=Dispatcher(DispatchConfig(base_url="http://localhost:8080"), http_client=client),
+            dialogue_state=DialogueState(ttl_seconds=45),
+            home_id="h-real",
+        )
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_turn_off_and_on_all_lights_not_polluted_by_previous_room(self, intents_file):
+        """'tắt toàn bộ đèn' / 'bật toàn bộ đèn' ngay sau lệnh ở 1 phòng phải điều khiển toàn bộ 6 đèn cả nhà."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        # Turn 1: đặt dialogue_state.last_room = 'Phòng khách'
+        r1 = p.process_text("bật đèn phòng khách")
+        assert r1.success is True
+        assert {d.device_id for d in r1.dispatch_result.results} == {"l-pk-1", "l-pk-2"}
+
+        # Turn 2: 'tắt toàn bộ đèn' KHÔNG được bị dính room='Phòng khách'
+        r2 = p.process_text("tắt toàn bộ đèn")
+        assert r2.success is True
+        assert {d.device_id for d in r2.dispatch_result.results} == {
+            "l-pk-1", "l-pk-2", "l-pb-1", "l-ms-1", "l-con-1", "rgb-con-1"
+        }
+
+        # Turn 3: điều khiển phòng không có đèn ('Garden') rồi 'bật toàn bộ đèn' vẫn phải bật đủ 6 đèn
+        r3 = p.process_text("bật máy bơm")
+        assert r3.success is True
+        r4 = p.process_text("bật toàn bộ đèn")
+        assert r4.success is True
+        assert {d.device_id for d in r4.dispatch_result.results} == {
+            "l-pk-1", "l-pk-2", "l-pb-1", "l-ms-1", "l-con-1", "rgb-con-1"
+        }
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_two_bedrooms_single_and_compound_commands(self, intents_file):
+        """Kiểm thử lệnh đơn và lệnh kép trên 2 phòng ngủ master + của con (cả khi DB tên là 'Phòng ngủ 2 giường')."""
+        p = self._build_real_layout_pipeline(intents_file, child_room_name="Phòng ngủ 2 giường")
+
+        r_master = p.process_text("bật đèn phòng ngủ mắt tơ")
+        assert r_master.success is True
+        assert {d.device_id for d in r_master.dispatch_result.results} == {"l-ms-1"}
+
+        r_child = p.process_text("bật đèn phòng ngủ của con")
+        assert r_child.success is True
+        assert {d.device_id for d in r_child.dispatch_result.results} == {"l-con-1"}
+
+        r_comp1 = p.process_text("bật đèn phòng ngủ master và tắt đèn phòng ngủ của con")
+        assert r_comp1.success is True
+        assert len(r_comp1.sub_results) == 2
+        assert {d.device_id for d in r_comp1.dispatch_result.results} == {"l-ms-1", "l-con-1"}
+
+        r_comp2 = p.process_text("bật đèn phòng ngủ master và của con")
+        assert r_comp2.success is True
+        assert len(r_comp2.sub_results) == 2
+        assert {d.device_id for d in r_comp2.dispatch_result.results} == {"l-ms-1", "l-con-1"}
+
+        r_comp3 = p.process_text("tắt đèn ngủ master và bật điều hòa phòng ngủ của con")
+        assert r_comp3.success is True
+        assert len(r_comp3.sub_results) == 2
+        assert {d.device_id for d in r_comp3.dispatch_result.results} == {"l-ms-1", "ac-con-1"}
+

@@ -76,4 +76,6 @@ diagram*.xml
 fix_json.py
 fix_sensors.sql
 src/main/resources/application-local.properties
+voice-service/assets/piper/*.onnx
+voice-service/assets/piper/*.onnx.json
 

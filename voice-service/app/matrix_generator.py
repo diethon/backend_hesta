@@ -195,3 +195,122 @@ def generate_matrix_phrases(
 
     # Khử trùng lặp và giữ thứ tự
     return list(dict.fromkeys(phrases))
+
+
+def generate_phrases_for_backend_devices(devices: Iterable[dict]) -> list[str]:
+    """
+    Sinh danh sách câu phản hồi chuẩn xác 100% khớp với dispatcher.py
+    dựa trên danh sách thiết bị và phòng THỰC TẾ từ Backend (/internal/devices).
+
+    Chỉ sinh đúng các câu thật sự có thể phát sinh trong ngôi nhà (kể cả số lượng N thiết bị
+    trong cùng 1 phòng, rèm 2 mảnh, điều hòa, LED RGB, và các câu báo lỗi RBAC/Offline/Gateway).
+    """
+    from collections import Counter
+
+    type_map: dict[str, tuple[list[str], list[tuple[str, str]]]] = {
+        "light": (["đèn"], [("bật", "tắt")]),
+        "led_rgb": (["đèn RGB", "đèn LED"], [("bật", "tắt")]),
+        "led": (["đèn LED", "đèn RGB"], [("bật", "tắt")]),
+        "fan": (["quạt"], [("bật", "tắt")]),
+        "air_conditioner": (["điều hòa"], [("bật", "tắt")]),
+        "ac": (["điều hòa"], [("bật", "tắt")]),
+        "curtain": (["rèm", "rèm cửa"], [("mở", "đóng"), ("bật", "tắt")]),
+        "gate": (["cổng"], [("mở", "đóng")]),
+        "rolling_door": (["cổng"], [("mở", "đóng")]),
+        "door": (["khóa cửa"], [("bật", "tắt"), ("mở", "đóng")]),
+        "door_lock": (["khóa cửa"], [("bật", "tắt"), ("mở", "đóng")]),
+        "water_pump": (["máy bơm nước"], [("bật", "tắt")]),
+        "water_heater": (["bình nóng lạnh"], [("bật", "tắt")]),
+        "tv": (["tivi"], [("bật", "tắt")]),
+        "socket": (["ổ cắm"], [("bật", "tắt")]),
+    }
+
+    room_type_counts: Counter[tuple[str, str]] = Counter()
+    house_type_counts: Counter[str] = Counter()
+    type_actions: dict[str, list[tuple[str, str]]] = {}
+    has_ac_rooms: set[str] = set()
+    has_curtain_rooms: set[str] = set()
+    total_controllable = 0
+
+    for dev in devices:
+        raw_type = str(dev.get("deviceType") or dev.get("type") or "").strip().lower()
+        if not raw_type or "sensor" in raw_type or "camera" in raw_type:
+            continue
+        room = str(dev.get("roomName") or dev.get("room") or "").strip()
+        name_lower = str(dev.get("name") or "").lower()
+
+        spec = type_map.get(raw_type)
+        if not spec:
+            continue
+
+        total_controllable += 1
+        type_names, actions = spec
+        expanded_names = list(type_names)
+        if raw_type == "light" and "ngủ" in name_lower and "đèn ngủ" not in expanded_names:
+            expanded_names.append("đèn ngủ")
+
+        for tv in expanded_names:
+            type_actions[tv] = actions
+            house_type_counts[tv] += 1
+            if room:
+                room_type_counts[(room, tv)] += 1
+
+        if raw_type in ("air_conditioner", "ac"):
+            has_ac_rooms.add(room)
+        if raw_type == "curtain":
+            has_curtain_rooms.add(room)
+
+    phrases: list[str] = [
+        "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+        "Không tìm thấy thiết bị nào phù hợp.",
+        "Thiết bị hiện đang ngoại tuyến hoặc chưa kết nối.",
+        "Bạn không có quyền điều khiển thiết bị này.",
+        "Đã bật tất cả thiết bị",
+        "Đã tắt tất cả thiết bị",
+    ]
+    if total_controllable > 1:
+        phrases.extend([
+            f"Đã bật tất cả {total_controllable} thiết bị trong nhà",
+            f"Đã tắt tất cả {total_controllable} thiết bị trong nhà",
+            "Thiết bị trong nhà hiện đang ngoại tuyến hoặc chưa kết nối.",
+            "Bạn không có quyền bật thiết bị trong nhà.",
+            "Bạn không có quyền tắt thiết bị trong nhà.",
+        ])
+
+    def _append_group(type_vi: str, room_str: str, count: int, actions: list[tuple[str, str]]) -> None:
+        phrases.append(f"{type_vi.capitalize()}{room_str} hiện đang ngoại tuyến hoặc chưa kết nối.")
+        for act_on, act_off in actions:
+            for act in (act_on, act_off):
+                phrases.append(f"Đã {act} {type_vi}{room_str}")
+                if count > 1:
+                    phrases.append(f"Đã {act} {count} {type_vi}{room_str}")
+                    phrases.append(f"Đã {act} tất cả {count} {type_vi}{room_str}")
+                phrases.append(f"Bạn không có quyền {act} {type_vi}{room_str}.")
+                phrases.append(f"Không thể kết nối đến Gateway để {act} {type_vi}{room_str}.")
+                phrases.append(f"Không thể {act} {type_vi}{room_str} — thiết bị không phản hồi.")
+
+    # 1. Câu theo từng (phòng thật, loại thiết bị thật)
+    for (room, type_vi), count in room_type_counts.items():
+        _append_group(type_vi, f" {room}", count, type_actions[type_vi])
+
+    # 2. Câu không nêu tên phòng (hoặc "trong nhà" cho lệnh toàn bộ)
+    for type_vi, count in house_type_counts.items():
+        _append_group(type_vi, "", count, type_actions[type_vi])
+        if count > 1:
+            _append_group(type_vi, " trong nhà", count, type_actions[type_vi])
+
+    # 3. Câu dừng motor rèm cho các phòng có rèm
+    for room in has_curtain_rooms:
+        room_str = f" {room}" if room else ""
+        for tv in ("rèm", "rèm cửa"):
+            phrases.append(f"Đã dừng {tv}{room_str}")
+            phrases.append(f"Đã dừng {tv}")
+
+    # 4. Câu đặt nhiệt độ điều hòa phổ biến (18–29°C) cho các phòng có điều hòa
+    for room in has_ac_rooms:
+        room_str = f" {room}" if room else ""
+        for temp in range(18, 30):
+            phrases.append(f"Đã đặt nhiệt độ điều hòa{room_str} về {temp} độ")
+            phrases.append(f"Đã đặt nhiệt độ điều hòa về {temp} độ")
+
+    return list(dict.fromkeys(phrases))
