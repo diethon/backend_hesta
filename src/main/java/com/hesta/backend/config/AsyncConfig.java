@@ -28,4 +28,22 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * AFTER_COMMIT listeners that open their own transaction (twin health, parental guardian). They must not run on
+     * the committing thread: it still holds that transaction's DB connection, so each device command needed two at
+     * once and concurrent scenes exhausted the pool. One thread keeps a device's state changes in order.
+     */
+    @Bean(name = "deviceStateEventExecutor")
+    public Executor deviceStateEventExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(2000);
+        executor.setThreadNamePrefix("device-state-");
+        executor.setRejectedExecutionHandler((r, exec) ->
+                log.warn("Device state event queue full ({}), dropping one listener run", exec.getQueue().size()));
+        executor.initialize();
+        return executor;
+    }
 }
