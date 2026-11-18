@@ -34,7 +34,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("select device from Device device where device.id = :id and device.isDeleted = false")
     Optional<Device> findForSensorReading(@Param("id") UUID id);
 
-    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId")
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.createdAt ASC, d.id ASC")
     List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
     @Query("""
@@ -45,6 +45,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
             LEFT JOIN FETCH n.home
             WHERE (r.home.id = :homeId)
                OR (r IS NULL AND n.home.id = :homeId)
+            ORDER BY d.createdAt ASC, d.id ASC
             """)
     List<Device> findByHomeIdWithRoomAndNode(@Param("homeId") UUID homeId);
 
@@ -52,7 +53,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.id ASC")
     List<Device> findByHomeIdOrderByIdAsc(@Param("homeId") UUID homeId);
 
-    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId")
+    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId ORDER BY d.createdAt ASC, d.id ASC")
     List<Device> findByRoomId(@Param("roomId") UUID roomId);
 
     @Query("SELECT d FROM Device d JOIN FETCH d.room r JOIN FETCH r.home WHERE d.id = :deviceId")
@@ -67,7 +68,7 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.localId = :localId")
     Optional<Device> findByNodeCodeAndLocalId(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
 
-    @Query("SELECT d FROM Device d LEFT JOIN d.node n WHERE (n IS NOT NULL AND (n.id = :nodeId OR n.nodeCode = :nodeCode)) OR (d.mqttTopic LIKE CONCAT('%/nodes/', :nodeCode, '/%'))")
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home WHERE (n IS NOT NULL AND (n.id = :nodeId OR n.nodeCode = :nodeCode)) OR (d.mqttTopic LIKE CONCAT('%/nodes/', :nodeCode, '/%'))")
     List<Device> findByNodeIdOrNodeCode(@Param("nodeId") UUID nodeId, @Param("nodeCode") String nodeCode);
 
     Optional<Device> findByMqttTopic(String mqttTopic);

@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app.tts_manager import clean_tts_text, tts_manager
+from app.tts_manager import clean_tts_text, detect_audio_mime, tts_manager
 
 
 # Setup logging
@@ -155,6 +155,7 @@ class WarmupRoomRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     pipelineReady: bool
+    tts: dict[str, Any] = {}
 
 
 # --- Endpoints ---
@@ -164,6 +165,7 @@ async def health_check():
     return HealthResponse(
         status="ok",
         pipelineReady=_pipeline is not None,
+        tts=tts_manager.get_engine_status(),
     )
 
 
@@ -194,14 +196,22 @@ async def get_voice_tts(
         raise HTTPException(status_code=400, detail="Text is empty")
 
     try:
-        mp3_data = await tts_manager.synthesize(clean_text, voice)
-        if not mp3_data:
+        audio_bytes = await tts_manager.synthesize(
+            clean_text,
+            voice,
+            timeout_sec=3.5,
+            fast_mode=True,
+        )
+        if not audio_bytes:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech")
+        mime = detect_audio_mime(audio_bytes)
         return Response(
-            content=mp3_data,
-            media_type="audio/mpeg",
+            content=audio_bytes,
+            media_type=mime,
             headers={"Cache-Control": "public, max-age=86400"},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("TTS generation error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -248,16 +258,32 @@ async def process_voice_command(
         clean_msg = clean_tts_text(result.message)
         audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
 
-        # 1. Kiểm tra nhanh trong cache (RAM/Disk/Bundled)
+        # 1. Kiểm tra nhanh trong cache (RAM/Disk/Bundled) -> < 2ms
         cached_bytes = tts_manager.get_cached_audio(clean_msg)
         if cached_bytes:
-            audio_data = f"data:audio/mpeg;base64,{base64.b64encode(cached_bytes).decode('ascii')}"
+            mime = detect_audio_mime(cached_bytes)
+            audio_data = f"data:{mime};base64,{base64.b64encode(cached_bytes).decode('ascii')}"
         else:
-            # 2. Nếu chưa có, cố gắng sinh nhanh trong 1.8s để đính kèm luôn Base64 cho Frontend phát tức thì
+            # 2. Nếu là lệnh kép (>= 2 lệnh con), ghép trực tiếp các file MP3 giọng Hoài My từ RAM cache (< 1ms)
+            #    Ngược lại gọi Edge-TTS Hoài My 1 lần gọn (<= 3.5s), chỉ fallback khi mất mạng/lỗi.
             try:
-                synthesized_bytes = await tts_manager.synthesize(clean_msg, timeout_sec=1.8)
+                sub_results = getattr(result, "sub_results", []) or []
+                if len(sub_results) >= 2:
+                    sub_msgs = [s.message for s in sub_results if getattr(s, "message", None)]
+                    synthesized_bytes = await tts_manager.synthesize_compound(
+                        sub_msgs,
+                        clean_msg,
+                        timeout_sec=3.5,
+                    )
+                else:
+                    synthesized_bytes = await tts_manager.synthesize(
+                        clean_msg,
+                        timeout_sec=3.5,
+                        fast_mode=True,
+                    )
                 if synthesized_bytes:
-                    audio_data = f"data:audio/mpeg;base64,{base64.b64encode(synthesized_bytes).decode('ascii')}"
+                    mime = detect_audio_mime(synthesized_bytes)
+                    audio_data = f"data:{mime};base64,{base64.b64encode(synthesized_bytes).decode('ascii')}"
             except Exception as e:
                 logger.debug("Inline TTS synthesize skipped/timeout: %s", e)
 

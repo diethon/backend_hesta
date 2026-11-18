@@ -139,3 +139,36 @@ class TestCombineCommandMessages:
         res = combine_command_messages(msgs)
         assert res == "Không tìm thấy quạt nào ở phòng khách và không tìm thấy đèn nào ở phòng ngủ."
 
+
+class TestSplitterTwoBedrooms:
+    """Kiểm thử tách lệnh kép liên quan đến 2 phòng ngủ (master và của con)."""
+
+    ROOMS = ["Phòng khách", "Phòng ngủ master", "Phòng ngủ 2 giường"]
+
+    def test_compound_full_two_bedrooms(self):
+        parts = split_compound_command(
+            "bật đèn phòng ngủ master và tắt đèn phòng ngủ của con",
+            custom_rooms=self.ROOMS,
+        )
+        assert parts == ["bật đèn phòng ngủ master", "tắt đèn phòng ngủ của con"]
+
+    def test_compound_abbreviated_second_bedroom(self):
+        parts = split_compound_command(
+            "bật đèn phòng ngủ master và của con",
+            custom_rooms=self.ROOMS,
+        )
+        assert parts == ["bật đèn phòng ngủ master", "bật đèn phòng ngủ của con"]
+
+        parts2 = split_compound_command(
+            "tắt đèn phòng ngủ của con và master",
+            custom_rooms=self.ROOMS,
+        )
+        assert parts2 == ["tắt đèn phòng ngủ của con", "tắt đèn phòng ngủ master"]
+
+    def test_compound_with_voi_conjunction(self):
+        parts = split_compound_command(
+            "bật đèn phòng ngủ của con với phòng ngủ master",
+            custom_rooms=self.ROOMS,
+        )
+        assert parts == ["bật đèn phòng ngủ của con", "bật đèn phòng ngủ master"]
+

@@ -24,6 +24,7 @@ import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
@@ -54,6 +55,8 @@ public class DeviceServiceImpl implements DeviceService {
     private com.hesta.backend.service.DeviceHealthService deviceHealthService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.EnergyAnalyticsService energyAnalyticsService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.repository.EdgeNodeRepository edgeNodeRepository;
 
     private static final long HISTORY_CACHE_TTL_MILLIS = 15_000L;
     private final Map<UUID, CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>> historyCache = new ConcurrentHashMap<>();
@@ -194,13 +197,15 @@ public class DeviceServiceImpl implements DeviceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void updateDeviceStateFromMqtt(String nodeCode, String deviceIdStr, Map<String, Object> payload) {
         try {
             Device device = null;
             try {
                 UUID deviceId = UUID.fromString(deviceIdStr);
-                device = deviceRepository.findById(deviceId).orElse(null);
+                device = deviceRepository.findByIdWithNode(deviceId)
+                        .or(() -> deviceRepository.findById(deviceId))
+                        .orElse(null);
             } catch (IllegalArgumentException e) {
                 if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode)) {
                     device = deviceRepository.findByNodeCodeAndLocalId(nodeCode, deviceIdStr).orElse(null);
@@ -252,6 +257,13 @@ public class DeviceServiceImpl implements DeviceService {
             if (device.getStatus() != com.hesta.backend.enums.DeviceStatus.ONLINE) {
                 device.setStatus(com.hesta.backend.enums.DeviceStatus.ONLINE);
                 statusChanged = true;
+            }
+            if (device.getNode() != null
+                    && device.getNode().getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                device.getNode().setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                if (edgeNodeRepository != null) {
+                    edgeNodeRepository.save(device.getNode());
+                }
             }
 
             // 2. Chặn Spam Heartbeat (Nếu trạng thái y hệt nhau và không đổi status, không làm gì thêm)

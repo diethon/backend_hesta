@@ -11,4 +11,6 @@ python-dotenv        # load INTERNAL_API_KEY từ file .env
 fastapi>=0.104.0     # HTTP server cho voice pipeline
 uvicorn[standard]    # ASGI server chạy FastAPI
 edge-tts>=7.0.0      # Neural Vietnamese TTS chất lượng cao (Hoài My / Nam Minh)
+gTTS>=2.5.0          # Fast fallback TTS thuần Python khi Edge-TTS lag
+# Optional cho Orange Pi (100% offline ~150ms): cài qua bash scripts/setup_piper_vi.sh
 

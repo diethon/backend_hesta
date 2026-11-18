@@ -48,6 +48,9 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     @Autowired(required = false)
     private SimpMessagingTemplate messagingTemplate;
 
+    @Autowired(required = false)
+    private com.hesta.backend.config.mqtt.MqttGateway mqttGateway;
+
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
     private String brokerUrl;
 
@@ -81,6 +84,19 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     }
 
     private final long serviceStartupTimestampMs = System.currentTimeMillis();
+
+    private EdgeNode resolveEdgeNode(String nodeIdent) {
+        if (nodeIdent == null || nodeIdent.isBlank()) {
+            return null;
+        }
+        try {
+            EdgeNode byId = edgeNodeRepository.findById(UUID.fromString(nodeIdent)).orElse(null);
+            if (byId != null) {
+                return byId;
+            }
+        } catch (IllegalArgumentException ignored) {}
+        return edgeNodeRepository.findByNodeCode(nodeIdent).orElse(null);
+    }
 
     private NodeHealthTracker getTracker(String nodeCode) {
         return trackers.computeIfAbsent(nodeCode, k -> new NodeHealthTracker());
@@ -302,16 +318,15 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 if ("broadcast".equalsIgnoreCase(nodeIdent) || "unknown".equalsIgnoreCase(nodeIdent)) {
                     return;
                 }
+                boolean isInbound = "IN".equalsIgnoreCase(direction) || "INBOUND".equalsIgnoreCase(direction);
+                if (!isInbound) {
+                    return;
+                }
 
                 NodeHealthTracker tracker = trackers.get(nodeIdent);
                 EdgeNode matchedNode = null;
                 if (tracker == null) {
-                    matchedNode = edgeNodeRepository.findByNodeCode(nodeIdent).orElse(null);
-                    if (matchedNode == null) {
-                        try {
-                            matchedNode = edgeNodeRepository.findById(UUID.fromString(nodeIdent)).orElse(null);
-                        } catch (Exception ignored) {}
-                    }
+                    matchedNode = resolveEdgeNode(nodeIdent);
                     if (matchedNode != null) {
                         tracker = trackers.computeIfAbsent(matchedNode.getNodeCode(), k -> new NodeHealthTracker());
                         tracker.isOnline.set(matchedNode.getStatus() == EdgeNodeStatus.ONLINE);
@@ -320,24 +335,34 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     }
                 }
                 if (tracker != null) {
-                    tracker.lastPingAt = OffsetDateTime.now();
+                    if (matchedNode == null && topic.endsWith("/status") && parts.length == 4) {
+                        matchedNode = resolveEdgeNode(nodeIdent);
+                    }
+                    boolean isSelfBridgedNodeStatus = topic.endsWith("/status") && parts.length == 4
+                            && matchedNode != null
+                            && nodeIdent.equalsIgnoreCase(matchedNode.getNodeCode())
+                            && !nodeIdent.equalsIgnoreCase(matchedNode.getId().toString());
+                    if (!isSelfBridgedNodeStatus) {
+                        tracker.lastPingAt = OffsetDateTime.now();
+                    }
 
                     // Auto-recovery: Nếu node đang OFFLINE trong DB thì tự động khôi phục sang ONLINE khi nhận tin
-                    if (tracker.isOnline.compareAndSet(false, true)) {
+                    boolean becameOnline = !isSelfBridgedNodeStatus && tracker.isOnline.compareAndSet(false, true);
+                    if (becameOnline || (!isSelfBridgedNodeStatus && matchedNode != null && matchedNode.getStatus() != EdgeNodeStatus.ONLINE)) {
                         if (matchedNode == null) {
-                            matchedNode = edgeNodeRepository.findByNodeCode(nodeIdent).orElse(null);
-                            if (matchedNode == null) {
-                                try {
-                                    matchedNode = edgeNodeRepository.findById(UUID.fromString(nodeIdent)).orElse(null);
-                                } catch (Exception ignored) {}
-                            }
+                            matchedNode = resolveEdgeNode(nodeIdent);
                         }
-                        if (matchedNode != null && matchedNode.getStatus() != EdgeNodeStatus.ONLINE) {
-                            matchedNode.setStatus(EdgeNodeStatus.ONLINE);
+                        if (matchedNode != null) {
+                            trackers.putIfAbsent(matchedNode.getNodeCode(), tracker);
+                            trackers.putIfAbsent(matchedNode.getId().toString(), tracker);
+                            tracker.isOnline.set(true);
+                            if (matchedNode.getStatus() != EdgeNodeStatus.ONLINE) {
+                                matchedNode.setStatus(EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(matchedNode);
+                                log.info("[PHO-038 Dead Man's Snitch] Node {} revived to ONLINE via received packet on topic {}",
+                                        matchedNode.getNodeCode(), topic);
+                            }
                             cascadeNodeStatusToDevices(matchedNode, com.hesta.backend.enums.DeviceStatus.ONLINE);
-                            edgeNodeRepository.save(matchedNode);
-                            log.info("[PHO-038 Dead Man's Snitch] Node {} revived to ONLINE via received packet on topic {}", 
-                                    matchedNode.getNodeCode(), topic);
                         }
                     }
                 }
@@ -372,6 +397,20 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
                     log.warn("[PHO-038 Dead Man's Snitch] Node {} timed out (>60s without heartbeat, last seen {}s ago). Status marked OFFLINE.",
                             node.getNodeCode(), elapsedSeconds);
+                } else if (elapsedSeconds <= 60) {
+                    if (node.getStatus() != EdgeNodeStatus.ONLINE) {
+                        node.setStatus(EdgeNodeStatus.ONLINE);
+                        edgeNodeRepository.save(node);
+                    }
+                    t.isOnline.set(true);
+                    cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
+                    if (mqttGateway != null && node.getNodeCode() != null && !node.getNodeCode().equalsIgnoreCase(node.getId().toString())) {
+                        try {
+                            mqttGateway.sendToMqtt("hesta/nodes/" + node.getNodeCode() + "/status", 0, "ONLINE");
+                        } catch (Exception ex) {
+                            log.debug("Failed to bridge status heartbeat for node {}: {}", node.getNodeCode(), ex.getMessage());
+                        }
+                    }
                 }
             } else if (uptimeMs > 60000 && node.getStatus() == EdgeNodeStatus.ONLINE) {
                 // Node trong DB ghi ONLINE nhưng qua 60s kể từ server start vẫn không gửi 1 ping nào -> đánh OFFLINE
@@ -406,8 +445,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             // The watchdog runs on a scheduler thread: without a transaction the lazy room/home of each device
             // cannot load, the broadcast fails and the loop stops after the first device.
             if (transactionManager != null) {
-                new org.springframework.transaction.support.TransactionTemplate(transactionManager)
-                        .executeWithoutResult(status -> cascade.run());
+                org.springframework.transaction.support.TransactionTemplate tx =
+                        new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+                tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+                tx.executeWithoutResult(status -> cascade.run());
             } else {
                 cascade.run();
             }
