@@ -280,4 +280,53 @@ class TelemetryServiceImplTest {
         assertEquals(200.0, updatedState.get("lux"));
         assertEquals(true, updatedState.get("power"));
     }
+
+    @Test
+    void processTelemetry_WhenTransactionSynchronizationActive_DefersRealtimePublishUntilAfterCommit() {
+        UUID homeId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        UUID nodeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+
+        Home home = Home.builder().id(homeId).name("Test Home").build();
+        Room room = Room.builder().id(roomId).name("Living Room").home(home).build();
+        EdgeNode node = EdgeNode.builder().id(nodeId).nodeCode("ESP32-001").home(home).status(EdgeNodeStatus.ONLINE).build();
+        Device device = Device.builder()
+                .id(deviceId)
+                .name("MOTION-01")
+                .deviceType("MOTION_SENSOR")
+                .room(room)
+                .node(node)
+                .status(DeviceStatus.ONLINE)
+                .currentState(new HashMap<>())
+                .build();
+
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+        when(sensorReadingRepository.save(any(SensorReading.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TelemetryPayload payload = TelemetryPayload.builder()
+                .nodeId("ESP32-001")
+                .deviceId(deviceId.toString())
+                .metricType("MOTION_SENSOR")
+                .value(BigDecimal.ZERO)
+                .unit("boolean")
+                .build();
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            telemetryService.processTelemetry("hesta/nodes/ESP32-001/devices/" + deviceId + "/telemetry", payload);
+
+            // Must NOT publish inside the active DB transaction (prevents inner @Transactional rollback-only leaks)
+            verify(realtimeEventPublisher, never()).publish(any());
+
+            for (org.springframework.transaction.support.TransactionSynchronization sync :
+                    org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()) {
+                sync.afterCommit();
+            }
+
+            verify(realtimeEventPublisher, times(1)).publish(any());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
 }

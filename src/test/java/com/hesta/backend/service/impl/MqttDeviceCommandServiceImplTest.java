@@ -2,8 +2,11 @@ package com.hesta.backend.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
+import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.EdgeNodeStatus;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.DeviceRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -441,6 +444,44 @@ class MqttDeviceCommandServiceImplTest {
 
         assertFalse(MqttDeviceCommandServiceImpl.commandDeviceMap.isEmpty());
         assertTrue(MqttDeviceCommandServiceImpl.commandDeviceMap.containsValue(deviceId));
+    }
+
+    @Test
+    @DisplayName("SET_BRIGHTNESS rejected with DEVICE_OFFLINE and no MQTT/save when device status is OFFLINE, UNKNOWN, or ERROR")
+    void testSendCommand_SetBrightness_RejectedWhenDeviceUnavailable() {
+        for (DeviceStatus status : new DeviceStatus[]{DeviceStatus.OFFLINE, DeviceStatus.UNKNOWN, DeviceStatus.ERROR}) {
+            ledDevice.setStatus(status);
+            when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+            CommandResult result = commandService
+                    .sendCommand(deviceId, "SET_BRIGHTNESS", Map.of("brightness", 80), StateChangeSource.MANUAL)
+                    .join();
+
+            assertNotNull(result);
+            assertFalse(result.isSuccess(), "Expected failure for status " + status);
+            assertEquals("DEVICE_OFFLINE", result.getErrorCode());
+        }
+
+        verify(mqttGateway, never()).sendToMqtt(anyString(), anyInt(), anyString());
+        verify(deviceRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("SET_BRIGHTNESS rejected with DEVICE_OFFLINE and no MQTT/save when device is ONLINE but EdgeNode is OFFLINE")
+    void testSendCommand_SetBrightness_RejectedWhenEdgeNodeOffline() {
+        ledDevice.setStatus(DeviceStatus.ONLINE);
+        ledDevice.getNode().setStatus(EdgeNodeStatus.OFFLINE);
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        CommandResult result = commandService
+                .sendCommand(deviceId, "SET_BRIGHTNESS", Map.of("brightness", 80), StateChangeSource.MANUAL)
+                .join();
+
+        assertNotNull(result);
+        assertFalse(result.isSuccess());
+        assertEquals("DEVICE_OFFLINE", result.getErrorCode());
+        verify(mqttGateway, never()).sendToMqtt(anyString(), anyInt(), anyString());
+        verify(deviceRepository, never()).save(any());
     }
 }
 

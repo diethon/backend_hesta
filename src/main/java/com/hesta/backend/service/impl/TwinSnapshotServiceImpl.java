@@ -32,7 +32,7 @@ public class TwinSnapshotServiceImpl implements TwinSnapshotService {
     private final TwinSnapshotMapper mapper;
 
     @Override
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public TwinHomeSnapshotResponse getSnapshot(UUID userId, UUID homeId) {
         Home home = homeAuthorizationService.requireAccess(userId, homeId);
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);

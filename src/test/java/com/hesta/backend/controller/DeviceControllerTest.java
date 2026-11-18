@@ -144,6 +144,34 @@ class DeviceControllerTest {
     }
 
     @Test
+    void sendCommand_deviceOffline_returnsConflictAndErrorCode1048() throws Exception {
+        CommandResult result = CommandResult.builder()
+                .commandId(UUID.randomUUID().toString())
+                .success(false)
+                .status("FAILED")
+                .errorCode("DEVICE_OFFLINE")
+                .message("Thiết bị đang ngoại tuyến hoặc chưa kết nối")
+                .build();
+        when(deviceAccessValidator.canAccessDevice(userId, deviceId)).thenReturn(true);
+        when(deviceAccessValidator.canControlDevice(userId, deviceId)).thenReturn(true);
+        when(deviceCommandService.sendCommand(eq(deviceId), eq("SET_BRIGHTNESS"), any(), eq(StateChangeSource.MANUAL)))
+                .thenReturn(CompletableFuture.completedFuture(result));
+
+        MvcResult mvcResult = mvc.perform(post("/api/v1/devices/{deviceId}/command", deviceId)
+                        .with(authentication(auth()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"SET_BRIGHTNESS\",\"parameters\":{\"brightness\":80}}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mvc.perform(asyncDispatch(mvcResult))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(1048))
+                .andExpect(jsonPath("$.result.success").value(false))
+                .andExpect(jsonPath("$.result.errorCode").value("DEVICE_OFFLINE"));
+    }
+
+    @Test
     void cancelAutomation_authenticated_returnsTimestamp() throws Exception {
         OffsetDateTime now = OffsetDateTime.now();
         when(manualControlService.cancelAutomation(userId, deviceId)).thenReturn(now);

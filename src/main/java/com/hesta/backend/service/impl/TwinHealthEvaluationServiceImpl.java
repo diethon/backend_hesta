@@ -97,7 +97,8 @@ public class TwinHealthEvaluationServiceImpl implements TwinHealthEvaluationServ
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setReadOnly(true);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        // Keep READ_COMMITTED: REPEATABLE_READ leaks via SET SESSION CHARACTERISTICS on transaction poolers (port 6543).
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         return Objects.requireNonNull(transaction.execute(status -> query.get()));
     }
 
