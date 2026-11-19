@@ -350,7 +350,7 @@ public class DeviceServiceImpl implements DeviceService {
 
 
             boolean isGateOrDoor = device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType() || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
 
             Map<String, Object> prevState = device.getCurrentState() != null ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
 
@@ -1561,7 +1561,6 @@ public class DeviceServiceImpl implements DeviceService {
     public com.hesta.backend.dto.response.HomeCapabilitiesResponse getHomeCapabilities(UUID userId, UUID homeId) {
 
         checkHomeAccess(userId, homeId);
-        List<Device> devices = deviceRepository.findByHomeId(homeId);
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
         List<Device> devices = deviceRepository.findByHomeId(homeId).stream()
                 .filter(d -> !d.isDeleted())
