@@ -45,9 +45,10 @@ class TwinSnapshotServiceTest {
     @ParameterizedTest
     @EnumSource(HomeRole.class)
     void getSnapshot_activeHomeMember_returnsMappedSnapshot(HomeRole role) {
-        when(homeRepository.findById(fixture.home.getId())).thenReturn(Optional.of(fixture.home));
-        when(homeMemberRepository.findByHomeIdAndUserId(fixture.home.getId(), userId))
-                .thenReturn(Optional.of(HomeMember.builder().role(role).status(MemberStatus.ACTIVE).build()));
+        HomeMember member = HomeMember.builder().home(fixture.home).role(role).status(MemberStatus.ACTIVE).build();
+        when(homeMemberRepository.findWithHomeByHomeIdAndUserId(fixture.home.getId(), userId)).thenReturn(Optional.of(member));
+        // No servlet request in unit tests, so the access context does its own membership lookup.
+        when(homeMemberRepository.findByHomeIdAndUserId(fixture.home.getId(), userId)).thenReturn(Optional.of(member));
         when(roomRepository.findByHomeId(fixture.home.getId())).thenReturn(fixture.rooms);
         when(twinSnapshotRepository.findDevicesByHomeId(fixture.home.getId())).thenReturn(fixture.devices);
         when(twinSnapshotRepository.findLatestReadingsByHomeId(fixture.home.getId())).thenReturn(fixture.readings);
@@ -61,16 +62,15 @@ class TwinSnapshotServiceTest {
 
     @Test
     void getSnapshot_nonMember_deniesAccessBeforeReadingNodes() {
-        when(homeRepository.findById(fixture.home.getId())).thenReturn(Optional.of(fixture.home));
-        when(homeMemberRepository.findByHomeIdAndUserId(fixture.home.getId(), userId)).thenReturn(Optional.empty());
+        when(homeRepository.existsById(fixture.home.getId())).thenReturn(true);
+        when(homeMemberRepository.findWithHomeByHomeIdAndUserId(fixture.home.getId(), userId)).thenReturn(Optional.empty());
         assertDenied(userId, ErrorCode.UNAUTHORIZED);
     }
 
     @Test
     void getSnapshot_disabledOwner_deniesAccessBeforeReadingNodes() {
-        when(homeRepository.findById(fixture.home.getId())).thenReturn(Optional.of(fixture.home));
-        when(homeMemberRepository.findByHomeIdAndUserId(fixture.home.getId(), userId))
-                .thenReturn(Optional.of(HomeMember.builder().role(HomeRole.OWNER).status(MemberStatus.DISABLED).build()));
+        when(homeMemberRepository.findWithHomeByHomeIdAndUserId(fixture.home.getId(), userId))
+                .thenReturn(Optional.of(HomeMember.builder().home(fixture.home).role(HomeRole.OWNER).status(MemberStatus.DISABLED).build()));
         assertDenied(userId, ErrorCode.UNAUTHORIZED);
     }
 
@@ -82,7 +82,8 @@ class TwinSnapshotServiceTest {
 
     @Test
     void getSnapshot_missingHome_returnsNotFound() {
-        when(homeRepository.findById(fixture.home.getId())).thenReturn(Optional.empty());
+        when(homeMemberRepository.findWithHomeByHomeIdAndUserId(fixture.home.getId(), userId)).thenReturn(Optional.empty());
+        when(homeRepository.existsById(fixture.home.getId())).thenReturn(false);
         assertDenied(userId, ErrorCode.HOME_NOT_FOUND);
     }
 

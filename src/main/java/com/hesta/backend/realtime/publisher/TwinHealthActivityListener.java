@@ -5,6 +5,7 @@ import com.hesta.backend.dto.command.SensorReadingUpdatedEvent;
 import com.hesta.backend.service.TwinHealthEvaluationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.annotation.Order;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -14,13 +15,16 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class TwinHealthActivityListener {
     private final TwinHealthEvaluationService evaluator;
 
+    // Async: see AsyncConfig#deviceStateEventExecutor (running here held two DB connections per command).
     @Order(1)
+    @Async("deviceStateEventExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void deviceChanged(DeviceStateChangedEvent event) {
         evaluator.evaluateDevice(event.payload().deviceId());
     }
 
     @Order(1)
+    @Async("deviceStateEventExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void sensorChanged(SensorReadingUpdatedEvent event) {
         evaluator.evaluateSensor(event.payload().deviceId(), event.payload().metricType());

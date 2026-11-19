@@ -18,4 +18,5 @@ public class DevicePublicPreviewResponse {
     private String model;
     private String serialNumber;
     private String status;
+    private String nodeCode;
 }

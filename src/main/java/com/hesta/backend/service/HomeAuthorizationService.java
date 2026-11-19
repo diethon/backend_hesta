@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 public class HomeAuthorizationService {
 
     private static final String REQUEST_ATTR_ACCESS_CONTEXT = "HESTA_MEMBER_ACCESS_CONTEXT_CACHE";
+    private static final String REQUEST_ATTR_MEMBERSHIP = "HESTA_MEMBERSHIP:";
 
     private final HomeRepository homeRepository;
     private final HomeMemberRepository homeMemberRepository;
@@ -109,7 +110,9 @@ public class HomeAuthorizationService {
             return cache.get(cacheKey);
         }
 
-        Optional<HomeMember> membershipOpt = homeMemberRepository.findByHomeIdAndUserId(homeId, userId);
+        // requireAccess usually ran first in this request; reuse its membership row (only scalar fields are read below).
+        Optional<HomeMember> membershipOpt = rememberedMembership(homeId, userId)
+                .or(() -> homeMemberRepository.findByHomeIdAndUserId(homeId, userId));
         if (membershipOpt.isEmpty()) {
             MemberAccessContext unauthCtx = new MemberAccessContext(
                     homeId, userId, null, null, null, null, Collections.emptyMap(), Collections.emptyMap()
@@ -323,14 +326,14 @@ public class HomeAuthorizationService {
         if (homeId == null) {
             throw new AppException(ErrorCode.HOME_NOT_FOUND);
         }
-        Home home = homeRepository.findById(homeId)
-                .orElseThrow(() -> new AppException(ErrorCode.HOME_NOT_FOUND));
-        HomeMember membership = homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
-                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+        HomeMember membership = homeMemberRepository.findWithHomeByHomeIdAndUserId(homeId, userId)
+                .orElseThrow(() -> new AppException(
+                        homeRepository.existsById(homeId) ? ErrorCode.UNAUTHORIZED : ErrorCode.HOME_NOT_FOUND));
+        rememberMembership(homeId, userId, membership);
         if (membership.getStatus() != MemberStatus.ACTIVE) {
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
-        return new AuthorizedHome(home, membership);
+        return new AuthorizedHome(membership.getHome(), membership);
     }
 
     @SuppressWarnings("unchecked")
@@ -346,6 +349,22 @@ public class HomeAuthorizationService {
         Map<String, MemberAccessContext> newCache = new ConcurrentHashMap<>();
         attrs.setAttribute(REQUEST_ATTR_ACCESS_CONTEXT, newCache, RequestAttributes.SCOPE_REQUEST);
         return newCache;
+    }
+
+    private void rememberMembership(UUID homeId, UUID userId, HomeMember membership) {
+        RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs != null) {
+            attrs.setAttribute(REQUEST_ATTR_MEMBERSHIP + homeId + ":" + userId, membership, RequestAttributes.SCOPE_REQUEST);
+        }
+    }
+
+    private Optional<HomeMember> rememberedMembership(UUID homeId, UUID userId) {
+        RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs == null) {
+            return Optional.empty();
+        }
+        Object cached = attrs.getAttribute(REQUEST_ATTR_MEMBERSHIP + homeId + ":" + userId, RequestAttributes.SCOPE_REQUEST);
+        return cached instanceof HomeMember member ? Optional.of(member) : Optional.empty();
     }
 
     private record AuthorizedHome(Home home, HomeMember membership) {

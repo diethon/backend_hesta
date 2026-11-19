@@ -123,7 +123,7 @@ public class DeviceController {
                 .message("Đã khôi phục tự động hóa").build());
     }
 
-    @PreAuthorize("@deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/automation/extend")
     public ResponseEntity<ApiResponse<OffsetDateTime>> extendAutomation(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -306,7 +306,7 @@ public class DeviceController {
                 .body(csv);
     }
 
-    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/analytics/uptime")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceUptimeResponse>> getDeviceUptime(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -319,7 +319,7 @@ public class DeviceController {
                 .build());
     }
 
-    @PreAuthorize("@deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/health")
     public ResponseEntity<ApiResponse<com.hesta.backend.dto.response.DeviceHealthResponse>> getDeviceHealth(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -331,7 +331,7 @@ public class DeviceController {
                 .build());
     }
 
-@PreAuthorize("@deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -348,10 +348,10 @@ public class DeviceController {
             params.remove("action");
         }
         return deviceCommandService.sendCommand(deviceId, actionStr, params, StateChangeSource.MANUAL)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder().result(result).build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, null));
     }
 
-@PreAuthorize("@deviceAccessValidator.canControlRoom(principal.id, #roomId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
     @PostMapping("/rooms/{roomId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<List<CommandResult>>>> sendRoomCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,

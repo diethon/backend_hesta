@@ -76,6 +76,7 @@ public class DemandResponseServiceImpl implements DemandResponseService {
 
         // 1. SAFETY: Cảm biến báo cháy, báo khói, rò rỉ gas, rò nước, khóa an toàn
         if (type.contains("SMOKE") || type.contains("GAS") || type.contains("FIRE") ||
+            type.contains("FLAME") ||
             type.contains("LEAK") || type.contains("LOCK") || name.contains("BÁO CHÁY") ||
             name.contains("RÒ RỈ") || name.contains("KHÓA CỬA")) {
             return DevicePriorityCategory.SAFETY;

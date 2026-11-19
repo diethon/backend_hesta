@@ -34,6 +34,12 @@ public class FallIncidentServiceImpl implements FallIncidentService {
     @Autowired(required = false)
     private com.hesta.backend.repository.HomeMemberRepository homeMemberRepository;
 
+    @Autowired(required = false)
+    private com.hesta.backend.repository.DeviceRepository deviceRepository;
+
+    @Autowired(required = false)
+    private com.hesta.backend.repository.EdgeNodeRepository edgeNodeRepository;
+
     /** Per-user destination; clients subscribe to "/user" + this. */
     public static final String USER_FALL_DESTINATION = "/topic/fall";
 
@@ -79,9 +85,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
         dedupCache.entrySet().removeIf(e -> nowMs - e.getValue() > 60000);
 
         UUID incidentId = UUID.randomUUID();
-        UUID homeId = (eventDTO.getHomeId() != null && !eventDTO.getHomeId().isBlank())
-                ? UUID.fromString(eventDTO.getHomeId())
-                : UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID homeId = resolveHomeId(eventDTO);
 
         FallIncidentType incidentType = FallIncidentType.ACCIDENTAL_FALL;
         if (eventDTO.getIncidentClassification() != null) {
@@ -128,7 +132,7 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             broadcastRealtime(incident);
             if (mqttGateway != null) {
                 try {
-                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"FULL_SIREN\",\"mode\":\"CONTINUOUS_12V\",\"durationSec\":60}");
+                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"CRITICAL_SOS\",\"mode\":\"CONTINUOUS_12V\",\"durationSec\":60}");
                     log.info("[MQTT SIREN] Kích hoạt còi hú 12V trên ESP32 (Giai đoạn 2: FULL_SIREN 60s)");
                 } catch (Exception e) {
                     log.warn("[MQTT SIREN] Không thể gửi lệnh tới MQTT còi: {}", e.getMessage());
@@ -186,6 +190,14 @@ public class FallIncidentServiceImpl implements FallIncidentService {
             saveToDatabase(incident, incident.getResolutionNote());
             broadcastRealtime(incident);
             activeIncidents.remove(incidentId);
+            if (mqttGateway != null) {
+                try {
+                    mqttGateway.sendToMqtt("hesta/actuators/siren", "{\"command\":\"STOP\"}");
+                    log.info("[MQTT SIREN] Tắt còi hú trên ESP32 sau khi xử lý xong");
+                } catch (Exception e) {
+                    log.warn("[MQTT SIREN] Không thể gửi lệnh tắt còi: {}", e.getMessage());
+                }
+            }
             return incident;
         }
         return null;
@@ -196,6 +208,46 @@ public class FallIncidentServiceImpl implements FallIncidentService {
         return activeIncidents.values().stream()
                 .filter(i -> homeId == null || i.getHomeId().equals(homeId))
                 .toList();
+    }
+
+    private UUID resolveHomeId(FallIncidentEventDTO eventDTO) {
+        if (eventDTO.getHomeId() != null && !eventDTO.getHomeId().isBlank()) {
+            try {
+                return UUID.fromString(eventDTO.getHomeId().trim());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        String devId = eventDTO.getDeviceId();
+        if (deviceRepository != null && devId != null && !devId.isBlank()) {
+            try {
+                UUID devUuid = UUID.fromString(devId.trim());
+                var devOpt = deviceRepository.findByIdWithNode(devUuid);
+                if (devOpt.isPresent() && devOpt.get().getHome() != null) {
+                    return devOpt.get().getHome().getId();
+                }
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (edgeNodeRepository != null) {
+            if (devId != null && !devId.isBlank()) {
+                var byCode = edgeNodeRepository.findByNodeCodeWithHome(devId.trim());
+                if (byCode.isPresent() && byCode.get().getHome() != null) {
+                    return byCode.get().getHome().getId();
+                }
+            }
+            List<com.hesta.backend.entity.EdgeNode> allNodes = edgeNodeRepository.findAllWithHome();
+            for (var n : allNodes) {
+                if (n.getStatus() == com.hesta.backend.enums.EdgeNodeStatus.ONLINE && n.getHome() != null) {
+                    return n.getHome().getId();
+                }
+            }
+            for (var n : allNodes) {
+                if (n.getHome() != null) {
+                    return n.getHome().getId();
+                }
+            }
+        }
+        return UUID.fromString("00000000-0000-0000-0000-000000000001");
     }
 
     private void saveToDatabase(FallIncidentResponseDTO dto, String note) {

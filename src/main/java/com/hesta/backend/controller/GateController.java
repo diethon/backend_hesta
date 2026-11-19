@@ -30,11 +30,7 @@ public class GateController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return gateService.sendCommand(userId, deviceId, request)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Gửi lệnh điều khiển cổng thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Gửi lệnh điều khiển cổng thành công"));
     }
 
     @PostMapping("/open")
@@ -45,11 +41,7 @@ public class GateController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return gateService.open(userId, deviceId, nodeId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Gửi lệnh mở cổng thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Gửi lệnh mở cổng thành công"));
     }
 
     @PostMapping("/close")
@@ -60,11 +52,7 @@ public class GateController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return gateService.close(userId, deviceId, nodeId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Gửi lệnh đóng cổng thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Gửi lệnh đóng cổng thành công"));
     }
 
     @PostMapping("/stop")
@@ -75,11 +63,7 @@ public class GateController {
 
         UUID userId = userDetails != null ? userDetails.getId() : null;
         return gateService.stop(userId, deviceId, nodeId)
-                .thenApply(result -> ResponseEntity.ok(ApiResponse.<CommandResult>builder()
-                        .code(1000)
-                        .message("Gửi lệnh dừng cổng thành công")
-                        .result(result)
-                        .build()));
+                .thenApply(result -> CommandResponseHelper.toResponseEntity(result, "Gửi lệnh dừng cổng thành công"));
     }
 
     @GetMapping("/state")

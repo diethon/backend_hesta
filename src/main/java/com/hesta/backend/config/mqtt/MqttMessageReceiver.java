@@ -158,22 +158,32 @@ public class MqttMessageReceiver {
             }
 
             // =====================================================
-            // 6. DEVICE STATUS
+            // 6. DIAGNOSTICS PONG
+            // =====================================================
+
+            else if (topic.endsWith("/pong")) {
+
+                handlePongMessage(nodeCode, payload);
+
+            }
+
+            // =====================================================
+            // 7. OTA STATUS / ACK (must precede /status check!)
+            // =====================================================
+
+            else if (topic.contains("/ota/") && !topic.endsWith("/ota/notify") && !topic.endsWith("/ota/abort")) {
+
+                handleOtaMessage(topic, payload);
+
+            }
+
+            // =====================================================
+            // 8. DEVICE / NODE STATUS
             // =====================================================
 
             else if (topic.endsWith("/status")) {
 
                 handleDeviceStatus(topic, payload);
-
-            }
-
-            // =====================================================
-            // 7. OTA STATUS / ACK
-            // =====================================================
-
-            else if (topic.contains("/ota/")) {
-
-                handleOtaMessage(topic, payload);
 
             }
 
@@ -428,6 +438,16 @@ public class MqttMessageReceiver {
             data.put("MOTION_SENSOR", value);
             data.put("motion", value);
             data.put("motionDetected", value);
+        } else if ("flame_sensor".equalsIgnoreCase(metricType) || "flame".equalsIgnoreCase(metricType) || "fire".equalsIgnoreCase(metricType)) {
+            data.put("FLAME_SENSOR", value);
+            data.put("flame", value);
+            data.put("fire", value);
+            data.put("flameDetected", value);
+        } else if ("smoke_sensor".equalsIgnoreCase(metricType) || "smoke".equalsIgnoreCase(metricType) || "gas".equalsIgnoreCase(metricType)) {
+            data.put("SMOKE_SENSOR", value);
+            data.put("smoke", value);
+            data.put("gas", value);
+            data.put("smokeDetected", value);
         }
     }
 
@@ -884,8 +904,11 @@ public class MqttMessageReceiver {
     // =============================================================
 
     private String extractNodeCodeFromTopic(String topic) {
+        if (topic == null || topic.isBlank()) {
+            return null;
+        }
         String[] parts = topic.split("/");
-        if (parts.length >= 6 && "nodes".equals(parts[1])) {
+        if (parts.length >= 3 && "nodes".equals(parts[1]) && !parts[2].isBlank()) {
             return parts[2];
         }
         return null;
@@ -925,6 +948,47 @@ public class MqttMessageReceiver {
 
         return null;
     }
+    private java.util.Optional<EdgeNode> resolveEdgeNode(String nodeIdent) {
+        if (nodeIdent == null || nodeIdent.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            java.util.Optional<EdgeNode> byId = edgeNodeRepository.findById(UUID.fromString(nodeIdent));
+            if (byId.isPresent()) {
+                return byId;
+            }
+        } catch (IllegalArgumentException ignored) {}
+        return edgeNodeRepository.findByNodeCode(nodeIdent);
+    }
+
+    private boolean isOnlinePayload(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return true;
+        }
+        String trimmed = payload.trim();
+        if (trimmed.startsWith("{")) {
+            try {
+                Map<String, Object> data = objectMapper.readValue(trimmed, new TypeReference<Map<String, Object>>() {});
+                Object val = data.get("status");
+                if (val == null) {
+                    val = data.get("state");
+                }
+                if (val == null) {
+                    return true;
+                }
+                if (val instanceof Boolean b) {
+                    return b;
+                }
+                String strVal = val.toString().trim();
+                return "ONLINE".equalsIgnoreCase(strVal) || "ON".equalsIgnoreCase(strVal) || "TRUE".equalsIgnoreCase(strVal);
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        String unquoted = trimmed.replace("\"", "").trim();
+        return "ONLINE".equalsIgnoreCase(unquoted) || "1".equals(unquoted) || "TRUE".equalsIgnoreCase(unquoted);
+    }
+
     private void handleCatalog(String topic, String payload) {
         log.info("Processing catalog. Topic: [{}]", topic);
         try {
@@ -932,7 +996,7 @@ public class MqttMessageReceiver {
             String[] parts = topic.split("/");
             if (parts.length >= 4) {
                 String nodeId = parts[2];
-                java.util.Optional<EdgeNode> nodeOpt = edgeNodeRepository.findByNodeCode(nodeId);
+                java.util.Optional<EdgeNode> nodeOpt = resolveEdgeNode(nodeId);
                 if (nodeOpt.isPresent()) {
                     EdgeNode node = nodeOpt.get();
                     List<Map<String, Object>> supportedTypes = objectMapper.readValue(payload, new TypeReference<List<Map<String, Object>>>() {});
@@ -952,12 +1016,20 @@ public class MqttMessageReceiver {
         log.info("Processing EdgeNode registration. Topic: [{}], Payload: [{}]", topic, payload);
         try {
             String nodeCode = null;
+            String firmwareVersion = null;
+            String deviceType = null;
             try {
                 Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
                 if (data.containsKey("nodeId") && data.get("nodeId") != null) {
                     nodeCode = data.get("nodeId").toString();
                 } else if (data.containsKey("nodeCode") && data.get("nodeCode") != null) {
                     nodeCode = data.get("nodeCode").toString();
+                }
+                if (data.get("firmwareVersion") != null && !data.get("firmwareVersion").toString().isBlank()) {
+                    firmwareVersion = data.get("firmwareVersion").toString().trim();
+                }
+                if (data.get("deviceType") != null && !data.get("deviceType").toString().isBlank()) {
+                    deviceType = data.get("deviceType").toString().trim();
                 }
             } catch (Exception ignored) {}
 
@@ -970,8 +1042,16 @@ public class MqttMessageReceiver {
 
             if (nodeCode != null && !nodeCode.isBlank()) {
                 final String finalNodeCode = nodeCode;
-                edgeNodeRepository.findByNodeCode(finalNodeCode).ifPresent(node -> {
+                final String finalFw = firmwareVersion;
+                final String finalType = deviceType;
+                resolveEdgeNode(finalNodeCode).ifPresent(node -> {
                     node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                    if (finalFw != null) {
+                        node.setFirmwareVersion(finalFw);
+                    }
+                    if (finalType != null) {
+                        node.setDeviceType(finalType);
+                    }
                     edgeNodeRepository.save(node);
                     log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
                     cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
@@ -985,17 +1065,17 @@ public class MqttMessageReceiver {
     private void handleDeviceStatus(String topic, String payload) {
         log.info("Processing status. Topic: [{}], Status: [{}]", topic, payload);
         try {
+            boolean online = isOnlinePayload(payload);
             String[] parts = topic.split("/");
             if (parts.length == 4 && "nodes".equals(parts[1]) && "status".equals(parts[3])) {
                 String nodeCode = parts[2];
-                String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
-                com.hesta.backend.enums.EdgeNodeStatus nodeStatus = "ONLINE".equals(statusStr)
+                com.hesta.backend.enums.EdgeNodeStatus nodeStatus = online
                         ? com.hesta.backend.enums.EdgeNodeStatus.ONLINE
                         : com.hesta.backend.enums.EdgeNodeStatus.OFFLINE;
-                com.hesta.backend.enums.DeviceStatus nodeDevStatus = "ONLINE".equals(statusStr)
+                com.hesta.backend.enums.DeviceStatus nodeDevStatus = online
                         ? com.hesta.backend.enums.DeviceStatus.ONLINE
                         : com.hesta.backend.enums.DeviceStatus.OFFLINE;
-                edgeNodeRepository.findByNodeCode(nodeCode).ifPresent(n -> {
+                resolveEdgeNode(nodeCode).ifPresent(n -> {
                     n.setStatus(nodeStatus);
                     edgeNodeRepository.save(n);
                     log.info("Updated node {} status to {}", nodeCode, nodeStatus);
@@ -1008,34 +1088,62 @@ public class MqttMessageReceiver {
             String nodeCode = extractNodeCodeFromTopic(topic);
             if (deviceIdStr == null) return;
 
-            String statusStr = payload != null ? payload.trim().replace("\"", "").toUpperCase() : "ONLINE";
-            com.hesta.backend.enums.DeviceStatus devStatus = "ONLINE".equals(statusStr)
+            com.hesta.backend.enums.DeviceStatus devStatus = online
                     ? com.hesta.backend.enums.DeviceStatus.ONLINE
                     : com.hesta.backend.enums.DeviceStatus.OFFLINE;
 
-            java.util.Optional<com.hesta.backend.entity.Device> devOpt;
-            try {
-                devOpt = devices.findById(UUID.fromString(deviceIdStr));
-            } catch (IllegalArgumentException e) {
-                devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+            java.util.Optional<com.hesta.backend.entity.Device> devOpt = resolveDevice(topic, deviceIdStr, nodeCode);
+            if (devOpt.isEmpty()) {
+                try {
+                    devOpt = devices.findById(UUID.fromString(deviceIdStr));
+                } catch (IllegalArgumentException e) {
+                    devOpt = devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr);
+                }
             }
 
             devOpt.ifPresent(device -> {
+                if (devStatus == com.hesta.backend.enums.DeviceStatus.OFFLINE
+                        && nodeCode != null && !nodeCode.isBlank()
+                        && device.getNode() != null) {
+                    EdgeNode boundNode = device.getNode();
+                    boolean matchesNode = nodeCode.equalsIgnoreCase(boundNode.getNodeCode())
+                            || (boundNode.getId() != null && nodeCode.equalsIgnoreCase(boundNode.getId().toString()));
+                    if (!matchesNode) {
+                        log.warn("Ignoring foreign OFFLINE status for device {} from topic node {} (bound node: {} / {})",
+                                device.getId(), nodeCode, boundNode.getNodeCode(), boundNode.getId());
+                        return;
+                    }
+                }
+
                 boolean statusChanged = device.getStatus() != devStatus;
-                device.setStatus(devStatus);
-                devices.save(device);
-                // A heartbeat that changes nothing must not broadcast: its snapshot can be older than a command
+                // A heartbeat that changes nothing must not save or broadcast: its snapshot can be older than a command
                 // committed meanwhile and would flip other screens back. Freshness is handled by twin health.
                 if (statusChanged) {
+                    device.setStatus(devStatus);
+                    devices.save(device);
                     log.info("Updated device {} status to {}", device.getId(), devStatus);
                     publishDeviceStateChanged(device);
                 }
 
-                if (device.getNode() != null && devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
-                    EdgeNode node = device.getNode();
-                    if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
-                        node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
-                        edgeNodeRepository.save(node);
+                if (devStatus == com.hesta.backend.enums.DeviceStatus.ONLINE) {
+                    if (nodeCode != null && !nodeCode.isBlank()) {
+                        resolveEdgeNode(nodeCode).ifPresent(n -> {
+                            if (n.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                                n.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(n);
+                            }
+                        });
+                    }
+                    if (device.getNode() != null) {
+                        try {
+                            EdgeNode node = device.getNode();
+                            if (node.getStatus() != com.hesta.backend.enums.EdgeNodeStatus.ONLINE) {
+                                node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.ONLINE);
+                                edgeNodeRepository.save(node);
+                            }
+                        } catch (Exception ex) {
+                            log.debug("Could not verify node status for device {}: {}", device.getId(), ex.getMessage());
+                        }
                     }
                 }
             });
@@ -1044,17 +1152,27 @@ public class MqttMessageReceiver {
         }
     }
 
+    private void handlePongMessage(String nodeCode, String payload) {
+        if (diagnosticsService == null) return;
+        diagnosticsService.handlePong(nodeCode, payload);
+    }
+
     private void handleOtaMessage(String topic, String payload) {
         if (otaCampaignService == null) return;
         try {
             String nodeCode = extractNodeCodeFromTopic(topic);
             Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            String campaignId = data.get("campaignId") != null ? data.get("campaignId").toString() : null;
             String version = data.getOrDefault("version", "").toString();
             String status = data.getOrDefault("status", "").toString();
-            boolean success = "SUCCESS".equalsIgnoreCase(status) || "OK".equalsIgnoreCase(status);
-            String error = data.getOrDefault("error", "").toString();
-            otaCampaignService.handleNodeOtaResult(nodeCode, version, success, error);
-            log.info("Processed OTA status for node [{}]: success={}, version={}", nodeCode, success, version);
+            Integer progress = null;
+            if (data.get("progress") instanceof Number num) {
+                progress = num.intValue();
+            }
+            String error = data.get("error") != null ? data.get("error").toString() : "";
+            otaCampaignService.handleNodeOtaResult(nodeCode, campaignId, version, status, progress, error);
+            log.info("Processed OTA status for node [{}]: campaignId={}, status={}, version={}",
+                    nodeCode, campaignId, status, version);
         } catch (Exception e) {
             log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
         }
