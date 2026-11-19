@@ -218,6 +218,43 @@ class AutomationEngineTest {
         verifyNoInteractions(sceneExecutionService);
     }
 
+    @Test
+    void deviceCommandsAreSentWithNoTransactionOpen() {
+        java.util.concurrent.atomic.AtomicInteger open = TransactionCounter.install(engine);
+        int[] openWhileSending = {-1};
+        when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), anyMap(), eq(StateChangeSource.AUTOMATION)))
+                .thenAnswer(invocation -> {
+                    openWhileSending[0] = open.get();
+                    return CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build());
+                });
+        when(executionRepository.save(any())).thenAnswer(invocation -> {
+            assertThat(open.get()).as("result is saved inside a transaction").isEqualTo(1);
+            return invocation.getArgument(0);
+        });
+
+        var response = engine.process(homeId, event(35));
+
+        assertThat(response.getExecutions().getFirst().getStatus()).isEqualTo("SUCCESS");
+        assertThat(openWhileSending[0]).as("no DB transaction held while waiting for the ACK").isZero();
+        assertThat(open.get()).isZero();
+    }
+
+    /** Fake transaction manager that counts open transactions, injected into a service's transactionManager field. */
+    static final class TransactionCounter {
+        static java.util.concurrent.atomic.AtomicInteger install(Object service) {
+            var open = new java.util.concurrent.atomic.AtomicInteger();
+            var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+            when(manager.getTransaction(any())).thenAnswer(invocation -> {
+                open.incrementAndGet();
+                return mock(org.springframework.transaction.TransactionStatus.class);
+            });
+            lenient().doAnswer(invocation -> open.decrementAndGet()).when(manager).commit(any());
+            lenient().doAnswer(invocation -> open.decrementAndGet()).when(manager).rollback(any());
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "transactionManager", manager);
+            return open;
+        }
+    }
+
     private AutomationEventRequest report(int temperature) {
         AutomationEventRequest event = event(temperature);
         event.setStateReport(true);

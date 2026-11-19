@@ -152,7 +152,10 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // 1. Anti-spam click window: Chặn click spam (RGB/Dimming 60ms để kéo mượt, Relay nguồn 400ms)
         boolean isColorOrDimmer = "SET_RGB".equalsIgnoreCase(action)
                 || "SET_BRIGHTNESS".equalsIgnoreCase(action)
-                || "SET_COLOR".equalsIgnoreCase(action);
+                || "SET_COLOR".equalsIgnoreCase(action)
+                || "SET_SPEED".equalsIgnoreCase(action)
+                || "SET_FAN_SPEED".equalsIgnoreCase(action)
+                || "SET_FAN".equalsIgnoreCase(action);
         long antiSpamWindowMs = isColorOrDimmer ? 60L : 400L;
         if (lastStartTime != null && (now - lastStartTime < antiSpamWindowMs)) {
             // Only human double-clicks are spam; scenes/automations queue their next command after the ACK.
@@ -222,6 +225,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         
         String resolvedNodeCode = "unknown";
         try {
+            
             String nodeCode = "unknown";
             String nodeIdStr = null;
             String localId = deviceId.toString();
@@ -305,13 +309,27 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             } else {
                 targetTopics.add(String.format("%s/unknown/devices/%s/command", topicPrefix, routingDevice));
             }
+            if (device != null) {
+                if (nodeCode != null && !"unknown".equalsIgnoreCase(nodeCode) && device.getId() != null && !device.getId().toString().equals(localId)) {
+                    targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeCode, device.getId()));
+                    if (nodeIdStr != null && !nodeIdStr.equalsIgnoreCase(nodeCode)) {
+                        targetTopics.add(String.format("%s/%s/devices/%s/command", topicPrefix, nodeIdStr, device.getId()));
+                    }
+                }
+                if (device.getMqttTopic() != null && !device.getMqttTopic().isBlank()) {
+                    targetTopics.add(device.getMqttTopic());
+                    if (!device.getMqttTopic().endsWith("/command")) {
+                        targetTopics.add(device.getMqttTopic() + "/command");
+                    }
+                }
+            }
 
             Map<String, Object> effectiveParams = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
 
             // Normalize action and parameters for devices (including Air Conditioner and Gate)
             String normalizedAction = normalizeAction(device, action, effectiveParams);
             boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
                     || "OPEN".equalsIgnoreCase(normalizedAction)
                     || "CLOSE".equalsIgnoreCase(normalizedAction)
                     || "STOP".equalsIgnoreCase(normalizedAction);
@@ -391,9 +409,53 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 colorMap.put("b", b);
                 effectiveParams.put("color", colorMap);
             }
+
+            // Normalization & extraction for Fan speed (Mức 1, 2, 3)
+            boolean isFanDevice = (device != null && device.getDeviceType() != null &&
+                    ("FAN".equalsIgnoreCase(device.getDeviceType()) || "SMART_FAN".equalsIgnoreCase(device.getDeviceType()) || "QUAT".equalsIgnoreCase(device.getDeviceType())));
+            boolean isFanCommand = isFanDevice
+                    || "SET_SPEED".equalsIgnoreCase(normalizedAction)
+                    || "SET_FAN_SPEED".equalsIgnoreCase(normalizedAction)
+                    || "SET_FAN".equalsIgnoreCase(normalizedAction)
+                    || effectiveParams.containsKey("speed")
+                    || effectiveParams.containsKey("fan_speed")
+                    || effectiveParams.containsKey("fanSpeed");
+
+            if (isFanCommand && !isAcDevice(device, normalizedAction, effectiveParams)) {
+                int fanSpeedVal = 1;
+                Object spdObj = effectiveParams.get("speed");
+                if (spdObj == null) spdObj = effectiveParams.get("fan_speed");
+                if (spdObj == null) spdObj = effectiveParams.get("fanSpeed");
+                if (spdObj == null) spdObj = effectiveParams.get("level");
+                if (spdObj == null) spdObj = effectiveParams.get("fan");
+
+                if (spdObj != null) {
+                    String sStr = spdObj.toString().trim().toUpperCase();
+                    if ("1".equals(sStr) || "LOW".equals(sStr)) fanSpeedVal = 1;
+                    else if ("2".equals(sStr) || "MED".equals(sStr) || "MEDIUM".equals(sStr)) fanSpeedVal = 2;
+                    else if ("3".equals(sStr) || "HIGH".equals(sStr) || "MAX".equals(sStr)) fanSpeedVal = 3;
+                    else if ("0".equals(sStr) || "OFF".equals(sStr)) fanSpeedVal = 0;
+                    else {
+                        try {
+                            fanSpeedVal = Math.max(0, Math.min(3, Integer.parseInt(sStr)));
+                        } catch (Exception ignored) {
+                            fanSpeedVal = 1;
+                        }
+                    }
+                } else if ("POWER_OFF".equalsIgnoreCase(normalizedAction) || "TURN_OFF".equalsIgnoreCase(normalizedAction)) {
+                    fanSpeedVal = 0;
+                }
+
+                effectiveParams.put("speed", fanSpeedVal);
+                effectiveParams.put("fan_speed", fanSpeedVal);
+                effectiveParams.put("fanSpeed", fanSpeedVal);
+                effectiveParams.put("fan", fanSpeedVal == 1 ? "LOW" : (fanSpeedVal == 2 ? "MED" : (fanSpeedVal == 3 ? "HIGH" : "OFF")));
+                effectiveParams.put("power", fanSpeedVal > 0 ? "ON" : "OFF");
+            }
+
             Map<String, Object> payload = new HashMap<>();
             if (isGateOrDoor) {
-                // Keep payload compact for the ESP32's small PubSubClient buffer; commandId lets it ACK this exact command.
+                // Keep payload compact so PubSubClient on ESP32 does not overflow its 128-byte buffer
                 payload.put("action", normalizedAction);
                 payload.put("commandId", commandId);
             } else {
@@ -416,6 +478,14 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     payload.put("r", effectiveParams.get("r"));
                     payload.put("g", effectiveParams.get("g"));
                     payload.put("b", effectiveParams.get("b"));
+                }
+
+                if (isFanCommand && !isAcDevice(device, normalizedAction, effectiveParams)) {
+                    payload.put("speed", effectiveParams.get("speed"));
+                    payload.put("fan_speed", effectiveParams.get("fan_speed"));
+                    payload.put("fanSpeed", effectiveParams.get("fanSpeed"));
+                    payload.put("fan", effectiveParams.get("fan"));
+                    payload.put("power", "ON".equals(effectiveParams.get("power")));
                 }
 
                 // Normalization helpers for AC fields
@@ -445,7 +515,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
             final Map<String, Object> optimisticState = device != null && device.getCurrentState() != null
                     ? new HashMap<>(device.getCurrentState()) : null;
-            
+
             long metricStartTime = System.currentTimeMillis();
             final String targetNodeCode = nodeCode;
             boolean isPowerCommand = "TURN_ON".equalsIgnoreCase(normalizedAction)
@@ -578,6 +648,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         }
     }
 
+    private boolean isAcDevice(Device device, String action, Map<String, Object> parameters) {
+        if (device != null && device.getDeviceType() != null) {
+            String dt = device.getDeviceType().trim().toUpperCase();
+            if ("AIR_CONDITIONER".equals(dt) || "AC".equals(dt)) return true;
+            if ("FAN".equals(dt) || "SMART_FAN".equals(dt) || "QUAT".equals(dt)) return false;
+        }
+        return parameters != null && (parameters.containsKey("temperature") || parameters.containsKey("temp") || (parameters.containsKey("fan") && parameters.containsKey("mode")));
+    }
+
     private String normalizeAction(Device device, String action, Map<String, Object> parameters) {
         if (action == null) return "UNKNOWN";
         String act = action.trim().toUpperCase();
@@ -586,12 +665,17 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             return "SET_RGB";
         }
 
-        boolean isAc = (device != null && device.getDeviceType() != null &&
-                ("AIR_CONDITIONER".equalsIgnoreCase(device.getDeviceType()) || "AC".equalsIgnoreCase(device.getDeviceType())))
-                || (parameters != null && (parameters.containsKey("temperature") || parameters.containsKey("temp") || parameters.containsKey("fan")));
+        boolean isFan = (device != null && device.getDeviceType() != null &&
+                ("FAN".equalsIgnoreCase(device.getDeviceType()) || "SMART_FAN".equalsIgnoreCase(device.getDeviceType()) || "QUAT".equalsIgnoreCase(device.getDeviceType())))
+                || "SET_SPEED".equalsIgnoreCase(act)
+                || "SET_FAN_SPEED".equalsIgnoreCase(act)
+                || "FAN_SPEED".equalsIgnoreCase(act)
+                || "SPEED".equalsIgnoreCase(act);
+
+        boolean isAc = !isFan && isAcDevice(device, act, parameters);
 
         boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
+                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
                 || "OPEN".equalsIgnoreCase(act)
                 || "CLOSE".equalsIgnoreCase(act)
                 || "STOP".equalsIgnoreCase(act)
@@ -603,6 +687,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             switch (act) {
                 case "GATE_OPEN":
                 case "OPEN":
+                case "UNLOCK":
+                case "OPEN_GATE":
+                case "POWER_OFF":
                 case "TURN_ON":
                     return "OPEN";
                 case "GATE_CLOSE":
@@ -611,7 +698,30 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     return "CLOSE";
                 case "GATE_STOP":
                 case "STOP":
+                case "STOP_GATE":
                     return "STOP";
+                default:
+                    return act;
+            }
+        }
+
+        if (isFan) {
+            switch (act) {
+                case "SET_FAN_SPEED":
+                case "FAN_SPEED":
+                case "SPEED":
+                case "SET_SPEED":
+                    return "SET_SPEED";
+                case "SET_FAN":
+                    return "SET_FAN";
+                case "FAN_ON":
+                case "TURN_ON":
+                case "POWER_ON":
+                    return "TURN_ON";
+                case "FAN_OFF":
+                case "TURN_OFF":
+                case "POWER_OFF":
+                    return "TURN_OFF";
                 default:
                     return act;
             }
@@ -649,6 +759,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             case "MO":
                 return "TURN_ON";
             case "POWER_ON":
+            case "MOTOR_ON":
+            case "FAN_ON":
                 return "POWER_ON";
             case "TURN_OFF":
             case "OFF":
@@ -657,6 +769,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             case "DONG":
                 return "TURN_OFF";
             case "POWER_OFF":
+            case "MOTOR_OFF":
+            case "FAN_OFF":
                 return "POWER_OFF";
             case "SET_POWER":
                 if (parameters != null && parameters.containsKey("power")) {
@@ -743,10 +857,23 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 case "POWER_ON":
                 case "TURN_ON":
                     currentState.put("power", "ON");
+                    if (device != null && device.getDeviceType() != null && "FAN".equalsIgnoreCase(device.getDeviceType())) {
+                        Object curSpd = currentState.get("speed");
+                        if (curSpd == null || "0".equals(curSpd.toString())) {
+                            currentState.put("speed", 1);
+                            currentState.put("fanSpeed", 1);
+                            currentState.put("fan", "LOW");
+                        }
+                    }
                     break;
                 case "POWER_OFF":
                 case "TURN_OFF":
                     currentState.put("power", "OFF");
+                    if (device != null && device.getDeviceType() != null && "FAN".equalsIgnoreCase(device.getDeviceType())) {
+                        currentState.put("speed", 0);
+                        currentState.put("fanSpeed", 0);
+                        currentState.put("fan", "OFF");
+                    }
                     break;
                 case "SET_POWER":
                     if (parameters != null && parameters.containsKey("power")) {
@@ -817,11 +944,37 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     if (brDec - amtBrDec >= 0) currentState.put("brightness", brDec - amtBrDec);
                     else currentState.put("brightness", 0);
                     break;
+                case "SET_SPEED":
+                case "SET_FAN_SPEED":
                 case "SET_FAN":
-                    if (parameters != null && (parameters.containsKey("fan") || parameters.containsKey("speed"))) {
-                        Object f = parameters.containsKey("fan") ? parameters.get("fan") : parameters.get("speed");
-                        currentState.put("fan", f != null ? f.toString().toUpperCase() : "AUTO");
+                    int spd = 1;
+                    if (parameters != null) {
+                        Object spdObj = parameters.get("speed");
+                        if (spdObj == null) spdObj = parameters.get("fan_speed");
+                        if (spdObj == null) spdObj = parameters.get("fanSpeed");
+                        if (spdObj == null) spdObj = parameters.get("level");
+                        if (spdObj == null) spdObj = parameters.get("fan");
+
+                        if (spdObj != null) {
+                            String sStr = spdObj.toString().trim().toUpperCase();
+                            if ("1".equals(sStr) || "LOW".equals(sStr)) spd = 1;
+                            else if ("2".equals(sStr) || "MED".equals(sStr) || "MEDIUM".equals(sStr)) spd = 2;
+                            else if ("3".equals(sStr) || "HIGH".equals(sStr) || "MAX".equals(sStr)) spd = 3;
+                            else if ("0".equals(sStr) || "OFF".equals(sStr)) spd = 0;
+                            else {
+                                try {
+                                    spd = Math.max(0, Math.min(3, Integer.parseInt(sStr)));
+                                } catch (Exception ignored) {
+                                    spd = 1;
+                                }
+                            }
+                        }
                     }
+                    currentState.put("speed", spd);
+                    currentState.put("fanSpeed", spd);
+                    currentState.put("fan", spd == 1 ? "LOW" : (spd == 2 ? "MED" : (spd == 3 ? "HIGH" : "OFF")));
+                    currentState.put("power", spd > 0 ? "ON" : "OFF");
+                    currentState.put("state", spd > 0 ? "ON" : "OFF");
                     break;
                 case "SET_MODE":
                     if (parameters != null && parameters.containsKey("mode")) {
@@ -921,6 +1074,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     if (parameters != null) {
                         Object br = parameters.containsKey("brightness") ? parameters.get("brightness") : parameters.get("level");
                         if (br != null) {
+                            currentState.put("brightness", br);
                             try {
                                 int brInt = Math.max(0, Math.min(100, Integer.parseInt(br.toString())));
                                 currentState.put("brightness", brInt);
@@ -942,6 +1096,41 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 case "STOP":
                     currentState.put("state", "STOPPED");
                     break;
+                case "VOL_UP":
+                case "VOLUME_UP":
+                    currentState.put("lastButton", "VOL_UP");
+                    currentState.put("mute", false);
+                    break;
+                case "VOL_DOWN":
+                case "VOLUME_DOWN":
+                    currentState.put("lastButton", "VOL_DOWN");
+                    break;
+                case "MUTE":
+                    currentState.put("lastButton", "MUTE");
+                    Object curMute = currentState.get("mute");
+                    boolean muteBool = Boolean.TRUE.equals(curMute) || "true".equalsIgnoreCase(String.valueOf(curMute));
+                    currentState.put("mute", !muteBool);
+                    break;
+                case "CH_UP":
+                case "CHANNEL_UP":
+                    currentState.put("lastButton", "CH_UP");
+                    break;
+                case "CH_DOWN":
+                case "CHANNEL_DOWN":
+                    currentState.put("lastButton", "CH_DOWN");
+                    break;
+                case "SET_CHANNEL":
+                    currentState.put("lastButton", "SET_CHANNEL");
+                    if (parameters != null && parameters.containsKey("channel")) {
+                        currentState.put("channel", parameters.get("channel"));
+                    }
+                    break;
+                case "SEND_BUTTON":
+                case "PRESS_BUTTON":
+                    if (parameters != null && parameters.containsKey("button")) {
+                        currentState.put("lastButton", parameters.get("button"));
+                    }
+                    break;
                 default:
                     if (parameters != null && !parameters.isEmpty()) {
                         currentState.putAll(parameters);
@@ -950,7 +1139,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
 
             boolean isGateOrDoor = device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
             if (isGateOrDoor) {
                 Object stateVal = currentState.get("state");
                 currentState.clear();

@@ -59,6 +59,31 @@ public class MockDeviceCommandServiceImpl implements DeviceCommandService {
         if ("TURN_ON".equals(action)) ackState.put("power", "ON");
         if ("TURN_OFF".equals(action)) ackState.put("power", "OFF");
         
+        if ("SET_SPEED".equalsIgnoreCase(action) || "SET_FAN".equalsIgnoreCase(action) || "SET_FAN_SPEED".equalsIgnoreCase(action)) {
+            int spd = 1;
+            if (parameters != null) {
+                Object sObj = parameters.get("speed");
+                if (sObj == null) sObj = parameters.get("fan_speed");
+                if (sObj == null) sObj = parameters.get("fanSpeed");
+                if (sObj == null) sObj = parameters.get("level");
+                if (sObj == null) sObj = parameters.get("fan");
+                if (sObj != null) {
+                    String sStr = sObj.toString().trim().toUpperCase();
+                    if ("1".equals(sStr) || "LOW".equals(sStr)) spd = 1;
+                    else if ("2".equals(sStr) || "MED".equals(sStr) || "MEDIUM".equals(sStr)) spd = 2;
+                    else if ("3".equals(sStr) || "HIGH".equals(sStr) || "MAX".equals(sStr)) spd = 3;
+                    else if ("0".equals(sStr) || "OFF".equals(sStr)) spd = 0;
+                    else {
+                        try { spd = Math.max(0, Math.min(3, Integer.parseInt(sStr))); } catch (Exception ignored) {}
+                    }
+                }
+            }
+            ackState.put("speed", spd);
+            ackState.put("fanSpeed", spd);
+            ackState.put("fan", spd == 1 ? "LOW" : (spd == 2 ? "MED" : (spd == 3 ? "HIGH" : "OFF")));
+            ackState.put("power", spd > 0 ? "ON" : "OFF");
+        }
+
         if ("SET_COLOR".equals(action)) {
             ackState.put("power", "ON");
             Map<String, Object> colorState = new HashMap<>();

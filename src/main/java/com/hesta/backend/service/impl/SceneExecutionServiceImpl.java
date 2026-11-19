@@ -68,11 +68,14 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     @Autowired(required = false) private PlatformTransactionManager transactionManager;
     @Autowired(required = false) private RealtimeEventPublisher realtimeEventPublisher;
 
+    // execute/executeScheduled/executeFromAutomation are deliberately not @Transactional: see runAndRecord.
     @Override
-    @Transactional
     public SceneExecutionResponse execute(UUID userId, UUID homeId, UUID sceneId) {
-        requireRunAccess(userId, homeId, sceneId);
-        return runAndRecord(find(homeId, sceneId), userId, "MANUAL", StateChangeSource.SCENE);
+        inTx(() -> {
+            requireRunAccess(userId, homeId, sceneId);
+            return null;
+        });
+        return runAndRecord(homeId, sceneId, userId, "MANUAL", StateChangeSource.SCENE);
     }
 
     @Override
@@ -128,11 +131,8 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
             int succeeded = commandBatchRunner.run(plan.commands(), StateChangeSource.SCENE,
                     () -> publishUpdate(homeId, toResponse(execution)));
             complete(execution, plan, succeeded);
-            result = tx.execute(status -> {
-                SceneExecution saved = executionRepository.save(execution);
-                recordExecution(saved.getScene(), userId, toResponse(saved));
-                return toResponse(saved);
-            });
+            result = tx.execute(status -> toResponse(executionRepository.save(execution)));
+            recordExecution(execution.getScene(), userId, result); // own REQUIRES_NEW: never nest it inside tx
         } catch (RuntimeException failure) {
             // Never leave a run PENDING forever: the client is waiting for a final status.
             log.warn("Scene execution {} failed in background", executionId, failure);
@@ -155,15 +155,13 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     }
 
     @Override
-    @Transactional
     public SceneExecutionResponse executeScheduled(UUID homeId, UUID sceneId) {
-        return runAndRecord(find(homeId, sceneId), null, "SCHEDULE", StateChangeSource.SCHEDULE);
+        return runAndRecord(homeId, sceneId, null, "SCHEDULE", StateChangeSource.SCHEDULE);
     }
 
     @Override
-    @Transactional
     public SceneExecutionResponse executeFromAutomation(UUID homeId, UUID sceneId) {
-        return runAndRecord(find(homeId, sceneId), null, "AUTOMATION", StateChangeSource.AUTOMATION);
+        return runAndRecord(homeId, sceneId, null, "AUTOMATION", StateChangeSource.AUTOMATION);
     }
 
     @Override
@@ -181,10 +179,28 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
                 .map(this::toResponse).toList();
     }
 
-    private SceneExecutionResponse runAndRecord(Scene scene, UUID userId, String trigger, StateChangeSource source) {
-        SceneExecutionResponse result = run(scene, trigger, source);
-        recordExecution(scene, userId, result);
+    /**
+     * Short transactions on both sides of the device commands: holding one while devices ACK (up to the command
+     * timeout each) would pin a pooled DB connection per running scene and starve every other request.
+     */
+    private SceneExecutionResponse runAndRecord(UUID homeId, UUID sceneId, UUID userId, String trigger, StateChangeSource source) {
+        SceneExecution execution = SceneExecution.builder().triggerSource(trigger).startedAt(OffsetDateTime.now()).build();
+        Plan plan = inTx(() -> {
+            Scene scene = find(homeId, sceneId);
+            if (!scene.isEnabled()) throw new AppException(ErrorCode.SCENE_DISABLED);
+            execution.setScene(scene);
+            return plan(scene, trigger);
+        });
+        execution.setResultDetail(plan.details());
+        complete(execution, plan, commandBatchRunner.run(plan.commands(), source));
+        SceneExecutionResponse result = inTx(() -> toResponse(executionRepository.save(execution)));
+        recordExecution(execution.getScene(), userId, result); // own REQUIRES_NEW: never nest it inside inTx
         return result;
+    }
+
+    /** Runs {@code work} in its own short transaction; plain unit tests have no transaction manager. */
+    private <T> T inTx(java.util.function.Supplier<T> work) {
+        return transactionManager == null ? work.get() : new TransactionTemplate(transactionManager).execute(status -> work.get());
     }
 
     private void recordExecution(Scene scene, UUID userId, SceneExecutionResponse result) {
@@ -193,21 +209,6 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
         } catch (RuntimeException recordingFailure) {
             log.warn("Could not record scene execution {}", result.getId(), recordingFailure);
         }
-    }
-
-    private SceneExecutionResponse run(Scene scene, String trigger, StateChangeSource source) {
-        if (!scene.isEnabled()) throw new AppException(ErrorCode.SCENE_DISABLED);
-        SceneExecution execution = SceneExecution.builder().scene(scene).triggerSource(trigger)
-                .startedAt(OffsetDateTime.now()).build();
-        runCommands(execution, source, null);
-        return toResponse(executionRepository.save(execution));
-    }
-
-    /** Sends the scene's commands and writes resultDetail, status and completedAt into {@code execution}. */
-    private void runCommands(SceneExecution execution, StateChangeSource source, Runnable afterEachRound) {
-        Plan plan = plan(execution.getScene(), execution.getTriggerSource());
-        execution.setResultDetail(plan.details());
-        complete(execution, plan, commandBatchRunner.run(plan.commands(), source, afterEachRound));
     }
 
     /** The scene's device commands, each with its (still empty) result row. Needs an open session for lazy devices. */

@@ -125,6 +125,33 @@ class SceneExecutionServiceTest {
     }
 
     @Test
+    void scheduledSceneSendsCommandsWithNoTransactionOpen() {
+        var open = AutomationEngineTest.TransactionCounter.install(service);
+        Device device = Device.builder().id(UUID.randomUUID()).build();
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenAnswer(invocation -> {
+            assertThat(open.get()).as("scene is read inside a transaction").isEqualTo(1);
+            return Optional.of(scene);
+        });
+        int[] openWhileSending = {-1};
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCHEDULE)).thenAnswer(invocation -> {
+            openWhileSending[0] = open.get();
+            return CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build());
+        });
+        when(executions.save(any())).thenAnswer(invocation -> {
+            assertThat(open.get()).as("result is saved inside a transaction").isEqualTo(1);
+            return invocation.getArgument(0);
+        });
+
+        var result = service.executeScheduled(homeId, sceneId);
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(openWhileSending[0]).as("no DB transaction held while waiting for the ACK").isZero();
+        assertThat(open.get()).isZero();
+    }
+
+    @Test
     void refusesDisabledSceneWithoutSendingCommands() {
         Scene scene = Scene.builder().id(sceneId).enabled(false).build();
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));

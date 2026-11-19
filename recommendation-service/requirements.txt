@@ -1,0 +1,12 @@
+# Pinned: model files are pickled with these exact versions; another scikit-learn cannot load them.
+fastapi==0.159.1
+starlette==1.9.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pandas==3.0.6
+scikit-learn==1.9.1
+scipy==1.18.1
+joblib==1.6.0
+psycopg2-binary==2.9.13
+httpx==0.28.1
+numpy==2.5.4
