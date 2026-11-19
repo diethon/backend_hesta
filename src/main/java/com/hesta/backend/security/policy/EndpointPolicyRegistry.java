@@ -40,6 +40,7 @@ public final class EndpointPolicyRegistry {
         CLASS_POLICIES.put("DeviceController", AccessPolicyType.HOME_ACCESS);
         CLASS_POLICIES.put("AirConditionerController", AccessPolicyType.DEVICE_LEVEL);
         CLASS_POLICIES.put("GateController", AccessPolicyType.DEVICE_LEVEL);
+        CLASS_POLICIES.put("DoorController", AccessPolicyType.DEVICE_LEVEL);
         CLASS_POLICIES.put("DeviceGroupController", AccessPolicyType.HOME_ACCESS);
         CLASS_POLICIES.put("DeviceOnboardingController", AccessPolicyType.HOME_ACCESS);
         CLASS_POLICIES.put("SceneController", AccessPolicyType.HOME_ACCESS);
