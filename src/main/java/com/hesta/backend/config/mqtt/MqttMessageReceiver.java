@@ -438,6 +438,16 @@ public class MqttMessageReceiver {
             data.put("MOTION_SENSOR", value);
             data.put("motion", value);
             data.put("motionDetected", value);
+        } else if ("flame_sensor".equalsIgnoreCase(metricType) || "flame".equalsIgnoreCase(metricType) || "fire".equalsIgnoreCase(metricType)) {
+            data.put("FLAME_SENSOR", value);
+            data.put("flame", value);
+            data.put("fire", value);
+            data.put("flameDetected", value);
+        } else if ("smoke_sensor".equalsIgnoreCase(metricType) || "smoke".equalsIgnoreCase(metricType) || "gas".equalsIgnoreCase(metricType)) {
+            data.put("SMOKE_SENSOR", value);
+            data.put("smoke", value);
+            data.put("gas", value);
+            data.put("smokeDetected", value);
         }
     }
 

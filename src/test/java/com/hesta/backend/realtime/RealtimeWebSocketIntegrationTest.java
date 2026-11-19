@@ -13,6 +13,7 @@ import com.hesta.backend.realtime.publisher.RealtimeEventPublisherImpl;
 import com.hesta.backend.realtime.security.RealtimeWebSocketChannelInterceptor;
 import com.hesta.backend.realtime.transport.RealtimeDestinations;
 import com.hesta.backend.realtime.transport.WebSocketRealtimeTransport;
+import com.hesta.backend.realtime.transport.WebSocketSessionManager;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.security.CustomUserDetailsService;
 import com.hesta.backend.security.CustomAccessDeniedHandler;
@@ -82,6 +83,12 @@ class RealtimeWebSocketIntegrationTest {
     @MockitoBean
     private RealtimeSubscriptionService subscriptionService;
 
+    @MockitoBean
+    private com.hesta.backend.repository.HomeMemberRepository homeMemberRepository;
+
+    @MockitoBean
+    private com.hesta.backend.service.HomeAuthorizationService homeAuthorizationService;
+
     @Autowired
     private RealtimeEventPublisher realtimeEventPublisher;
 
@@ -124,7 +131,7 @@ class RealtimeWebSocketIntegrationTest {
         doAnswer(invocation -> {
             subscriptionAuthorized.countDown();
             return null;
-        }).when(subscriptionService).authorizeSubscription(userId, subscribedHomeId);
+        }).when(subscriptionService).authorizeSubscription(userId, subscribedHomeId, RealtimeDestinations.homeEvents(subscribedHomeId));
 
         stompSession = connect(ACCESS_TOKEN);
         BlockingQueue<JsonNode> receivedEvents = new LinkedBlockingQueue<>();
@@ -154,7 +161,7 @@ class RealtimeWebSocketIntegrationTest {
         assertThat(received.path("type").asText()).isEqualTo("DEVICE_STATE_CHANGED");
         assertThat(received.path("homeId").asText()).isEqualTo(subscribedHomeId.toString());
         assertThat(received.path("data").path("value").asText()).isEqualTo("subscribed-home");
-        verify(subscriptionService).authorizeSubscription(userId, subscribedHomeId);
+        verify(subscriptionService).authorizeSubscription(userId, subscribedHomeId, RealtimeDestinations.homeEvents(subscribedHomeId));
     }
 
     @Test
@@ -222,6 +229,7 @@ class RealtimeWebSocketIntegrationTest {
             RealtimeWebSocketConfig.class,
             RealtimeWebSocketChannelInterceptor.class,
             WebSocketRealtimeTransport.class,
+            WebSocketSessionManager.class,
             RealtimeEventPublisherImpl.class,
             SecurityConfig.class,
             InternalApiKeyFilter.class,

@@ -1,12 +1,23 @@
 ### ====================================================================
-### HESTA Smart Home - Device Command API Test Suite
+### HESTA Smart Home - Máy Bơm Nước (Water Pump / Motor) Test Suite
+### ====================================================================
+### Cấu hình thiết bị theo ESP32 Fan_Motor.ino:
+### - Node ID:   664017ce-c045-4b0e-9a26-f9f95f996803
+### - Device ID: f0000000-0000-4000-8000-000000000105
+### - MQTT Topics:
+###   + Lệnh (Subscribe):     hesta/nodes/{{nodeId}}/devices/{{deviceId}}/command
+###   + Trạng thái (Publish): hesta/nodes/{{nodeId}}/devices/{{deviceId}}/state
+###   + Xác nhận (ACK):       hesta/nodes/{{nodeId}}/devices/{{deviceId}}/ack
 ### ====================================================================
 
 @baseUrl = http://localhost:8080
-@deviceId = f803473e-8f7f-4dcd-8001-5ce1fc2f4dc4
-#@token =
+@deviceId = 664017ce-c045-4b0e-9a26-f9f95f996803
+@nodeId = 109441d8-b6bf-4a18-bdf8-9279b7a1548d
+#@token = 
 
+### ====================================================================
 ### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
+### ====================================================================
 POST {{baseUrl}}/api/v1/auth/login
 Content-Type: application/json
 
@@ -22,141 +33,148 @@ Content-Type: application/json
 %}
 
 ### ====================================================================
-### 0.1 Check Device Detail & Current State
+### 0.1 Xem thông tin & trạng thái hiện tại của Máy Bơm Nước
 ### ====================================================================
-#GET {{baseUrl}}/api/v1/devices/{{deviceId}}
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}
 Authorization: Bearer {{token}}
-#
-#### ====================================================================
-#### 1. POWER_ON Command
+
+### ====================================================================
+### 1. BẬT MÁY BƠM NƯỚC (Action: TURN_ON)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "POWER_ON"
+  "action": "TURN_ON",
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 2. POWER_OFF Command
+### 2. TẮT MÁY BƠM NƯỚC (Action: TURN_OFF)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "POWER_OFF"
+  "action": "TURN_OFF",
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 3. SET_RGB Command (RED)
+### 3. BẬT MÁY BƠM NƯỚC (Action: POWER_ON)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "SET_RGB",
-  "r": 255,
-  "g": 0,
-  "b": 0
+  "action": "POWER_ON",
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 4. SET_RGB Command (GREEN)
+### 4. TẮT MÁY BƠM NƯỚC (Action: POWER_OFF)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "SET_RGB",
-  "r": 0,
-  "g": 255,
-  "b": 0
+  "action": "POWER_OFF",
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 5. SET_RGB Command (BLUE)
+### 5. CÀI ĐẶT NGUỒN MÁY BƠM (SET_POWER: power = true)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "SET_RGB",
-  "r": 0,
-  "g": 0,
-  "b": 255
+  "action": "SET_POWER",
+  "power": true,
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 6. SET_BRIGHTNESS Command (50%)
+### 6. CÀI ĐẶT NGUỒN MÁY BƠM (SET_POWER: power = false)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "SET_BRIGHTNESS",
-  "brightness": 50
+  "action": "SET_POWER",
+  "power": false,
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 7. Invalid RGB (r: 300 -> Expected: HTTP 400)
+### 7. LỆNH BẬT MOTOR RIÊNG BIỆT (Action: MOTOR_ON)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "SET_RGB",
-  "r": 300,
-  "g": 0,
-  "b": 0
+  "action": "MOTOR_ON",
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 8. Invalid Brightness (brightness: 150 -> Expected: HTTP 400)
+### 8. LỆNH TẮT MOTOR RIÊNG BIỆT (Action: MOTOR_OFF)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "SET_BRIGHTNESS",
-  "brightness": 150
+  "action": "MOTOR_OFF",
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 9. Invalid Action (UNKNOWN_ACTION -> Expected: HTTP 400)
+### 9. GỬI LỆNH TRỰC TIẾP QUA TARGET (target: "motor", power: true)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "UNKNOWN_ACTION"
+  "target": "motor",
+  "power": true,
+  "nodeId": "{{nodeId}}"
 }
 
 ### ====================================================================
-### 10. LEGACY LED TEST ENDPOINTS (Kept for integration verification)
+### 10. BẬT ĐỒNG THỜI CẢ QUẠT VÀ MÁY BƠM (Action: ALL_ON)
 ### ====================================================================
-###
-POST {{baseUrl}}/api/devices/led-strip/power/on
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
 
-###
-POST {{baseUrl}}/api/devices/led-strip/power/off
+{
+  "action": "ALL_ON",
+  "nodeId": "{{nodeId}}"
+}
 
-###
-POST {{baseUrl}}/api/devices/led-strip/rgb?r=255&g=0&b=0
+### ====================================================================
+### 11. TẮT ĐỒNG THỜI CẢ QUẠT VÀ MÁY BƠM (Action: ALL_OFF)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
 
-###
-POST {{baseUrl}}/api/devices/led-strip/rgb?r=0&g=255&b=0
+{
+  "action": "ALL_OFF",
+  "nodeId": "{{nodeId}}"
+}
 
-###
-POST {{baseUrl}}/api/devices/led-strip/rgb?r=0&g=0&b=255
-
-###
-POST {{baseUrl}}/api/devices/led-strip/brightness?brightness=50
+### ====================================================================
+### 12. LỊCH SỬ THAY ĐỔI TRẠNG THÁI CỦA MÁY BƠM NƯỚC
+### ====================================================================
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}/history
+Authorization: Bearer {{token}}
