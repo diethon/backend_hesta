@@ -102,15 +102,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — cho phép frontend gọi trực tiếp
-ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS — cho phép frontend gọi trực tiếp (hỗ trợ localhost, LAN IP và Public VPS domain)
+cors_kwargs: dict[str, Any] = {
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+    "allow_credentials": True,
+    "allow_origin_regex": r"^https?://.*$",
+}
+try:
+    # Hỗ trợ Chrome Private Network Access (PNA): gọi từ Public HTTPS domain (hesta.homes) -> Private LAN IP
+    app.add_middleware(CORSMiddleware, allow_private_network=True, **cors_kwargs)
+except TypeError:
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # --- API Key bảo vệ endpoint (nếu cần bảo vệ client ngoài, để trống = mở cho frontend web) ---
 VOICE_API_KEY = os.environ.get("VOICE_API_KEY", "")
