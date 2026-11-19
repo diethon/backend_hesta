@@ -1,5 +1,6 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.command.SensorReadingUpdatedEvent;
 import com.hesta.backend.dto.event.TelemetryAnomalyEvent;
 import com.hesta.backend.dto.request.TelemetryPayload;
 import com.hesta.backend.entity.Device;
@@ -7,6 +8,7 @@ import com.hesta.backend.entity.EdgeNode;
 import com.hesta.backend.entity.SensorReading;
 import com.hesta.backend.enums.DeviceStatus;
 import com.hesta.backend.enums.EdgeNodeStatus;
+import com.hesta.backend.mapper.TwinSnapshotMapper;
 import com.hesta.backend.realtime.model.RealtimeEvent;
 import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
@@ -43,6 +45,7 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final RealtimeEventPublisher realtimeEventPublisher;
     private final AnomalyDetectionService anomalyDetectionService;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final TwinSnapshotMapper twinSnapshotMapper;
 
     @Autowired
     public TelemetryServiceImpl(
@@ -51,7 +54,8 @@ public class TelemetryServiceImpl implements TelemetryService {
             EdgeNodeRepository edgeNodeRepository,
             RealtimeEventPublisher realtimeEventPublisher,
             @Autowired(required = false) AnomalyDetectionService anomalyDetectionService,
-            @Autowired(required = false) ApplicationEventPublisher applicationEventPublisher
+            @Autowired(required = false) ApplicationEventPublisher applicationEventPublisher,
+            @Autowired(required = false) TwinSnapshotMapper twinSnapshotMapper
     ) {
         this.deviceRepository = deviceRepository;
         this.sensorReadingRepository = sensorReadingRepository;
@@ -59,6 +63,7 @@ public class TelemetryServiceImpl implements TelemetryService {
         this.realtimeEventPublisher = realtimeEventPublisher;
         this.anomalyDetectionService = anomalyDetectionService;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.twinSnapshotMapper = twinSnapshotMapper;
     }
 
     /**
@@ -68,9 +73,20 @@ public class TelemetryServiceImpl implements TelemetryService {
             DeviceRepository deviceRepository,
             SensorReadingRepository sensorReadingRepository,
             EdgeNodeRepository edgeNodeRepository,
+            RealtimeEventPublisher realtimeEventPublisher,
+            AnomalyDetectionService anomalyDetectionService,
+            ApplicationEventPublisher applicationEventPublisher
+    ) {
+        this(deviceRepository, sensorReadingRepository, edgeNodeRepository, realtimeEventPublisher, anomalyDetectionService, applicationEventPublisher, null);
+    }
+
+    public TelemetryServiceImpl(
+            DeviceRepository deviceRepository,
+            SensorReadingRepository sensorReadingRepository,
+            EdgeNodeRepository edgeNodeRepository,
             RealtimeEventPublisher realtimeEventPublisher
     ) {
-        this(deviceRepository, sensorReadingRepository, edgeNodeRepository, realtimeEventPublisher, null, null);
+        this(deviceRepository, sensorReadingRepository, edgeNodeRepository, realtimeEventPublisher, null, null, null);
     }
 
     @Override
@@ -126,7 +142,12 @@ public class TelemetryServiceImpl implements TelemetryService {
             }
 
             // 5. Publish Realtime STOMP event if assigned to a home
-            publishRealtimeEvent(device, payload, reading.getRecordedAt());
+            if (device.getHome() != null && twinSnapshotMapper != null && applicationEventPublisher != null) {
+                var sensorPayload = twinSnapshotMapper.sensor(saved);
+                applicationEventPublisher.publishEvent(new SensorReadingUpdatedEvent(device.getHome().getId(), sensorPayload));
+            } else {
+                publishRealtimeEvent(device, payload, reading.getRecordedAt());
+            }
 
             // 6. Trigger Anomaly Detection after transaction commit
             if (applicationEventPublisher != null) {
@@ -200,20 +221,25 @@ public class TelemetryServiceImpl implements TelemetryService {
 
     private void publishRealtimeEvent(Device device, TelemetryPayload payload, OffsetDateTime recordedAt) {
         try {
-            if (device.getNode() != null
-                    && device.getRoom() != null
-                    && device.getRoom().getHome() != null) {
-                UUID homeId = device.getRoom().getHome().getId();
+            UUID homeId = device.getHome() != null ? device.getHome().getId()
+                    : (device.getRoom() != null && device.getRoom().getHome() != null ? device.getRoom().getHome().getId() : null);
+            if (homeId != null) {
                 UUID deviceId = device.getId();
+                UUID roomId = device.getRoom() != null ? device.getRoom().getId() : null;
 
-                Map<String, Object> eventData = Map.of(
-                        "deviceId", deviceId,
-                        "deviceName", device.getName(),
-                        "metricType", payload.getMetricType(),
-                        "value", payload.getValue(),
-                        "unit", payload.getUnit() != null ? payload.getUnit() : "",
-                        "recordedAt", recordedAt.toString()
-                );
+                Map<String, Object> eventData = new HashMap<>();
+                eventData.put("sensorId", deviceId + ":" + payload.getMetricType());
+                eventData.put("deviceId", deviceId.toString());
+                eventData.put("roomId", roomId != null ? roomId.toString() : null);
+                eventData.put("metricType", payload.getMetricType());
+                eventData.put("latestValue", payload.getValue());
+                eventData.put("unit", payload.getUnit() != null ? payload.getUnit() : "");
+                eventData.put("observedAt", recordedAt.toString());
+                eventData.put("healthStatus", "ACTIVE");
+                // Legacy fields for backward compatibility
+                eventData.put("deviceName", device.getName());
+                eventData.put("value", payload.getValue());
+                eventData.put("recordedAt", recordedAt.toString());
 
                 RealtimeEvent<Map<String, Object>> event = RealtimeEvent.create(
                         RealtimeEventType.SENSOR_READING_UPDATED,

@@ -335,6 +335,10 @@ public class MqttMessageReceiver {
             if (!map.containsKey("temperature")) {
                 extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "temp", "°C");
             }
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "humidity", "%");
+            if (!map.containsKey("humidity")) {
+                extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "humid", "%");
+            }
         } catch (Exception e) {
             log.warn("Failed to extract safety metrics from flat map payload: {}", e.getMessage());
         }
@@ -345,7 +349,9 @@ public class MqttMessageReceiver {
         Object valObj = map.get(metricKey);
         try {
             java.math.BigDecimal val = new java.math.BigDecimal(valObj.toString().trim());
-            String normalizedMetric = "temp".equalsIgnoreCase(metricKey) ? "temperature" : metricKey;
+            String normalizedMetric = "temp".equalsIgnoreCase(metricKey) ? "temperature"
+                    : "humid".equalsIgnoreCase(metricKey) ? "humidity"
+                    : metricKey;
             TelemetryPayload singlePayload = new TelemetryPayload(nodeCode, deviceIdStr, normalizedMetric, val, unit);
             telemetryService.processTelemetry(topic, singlePayload);
         } catch (Exception ex) {
