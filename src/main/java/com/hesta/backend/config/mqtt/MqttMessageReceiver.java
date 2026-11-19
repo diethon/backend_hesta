@@ -153,7 +153,7 @@ public class MqttMessageReceiver {
 
             else if (topic.endsWith("/ack") || topic.endsWith("/response")) {
 
-                handleCommandAck(payload);
+                handleCommandAck(topic, payload);
 
             }
 
@@ -645,6 +645,7 @@ public class MqttMessageReceiver {
     // =============================================================
 
     private void handleCommandAck(
+            String topic,
             String payload
     ) throws Exception {
 
@@ -674,9 +675,24 @@ public class MqttMessageReceiver {
                         : null;
 
         if (commandId == null || commandId.isBlank()) {
+            String fallbackDeviceId = data.get("deviceId") != null
+                    ? data.get("deviceId").toString()
+                    : extractDeviceIdFromTopic(topic);
+            if (fallbackDeviceId != null && !fallbackDeviceId.isBlank()) {
+                completeActiveCommandFromAckFallback(topic, fallbackDeviceId, data);
+                if (data.get("deviceId") == null) {
+                    data.put("deviceId", fallbackDeviceId);
+                }
+                if (data.containsKey("state")) {
+                    handleLateAckStateReconciliation(data);
+                }
+                log.info("Processed ACK without commandId via deviceId fallback: [{}]", fallbackDeviceId);
+                return;
+            }
 
             log.warn(
-                    "Received ACK without commandId. Payload: [{}]",
+                    "Received ACK without commandId or deviceId. Topic: [{}], Payload: [{}]",
+                    topic,
                     payload
             );
 
@@ -769,8 +785,15 @@ public class MqttMessageReceiver {
         } else {
 
             // =====================================================
-            // Late / duplicate ACK
+            // Late / duplicate ACK or mismatched commandId
             // =====================================================
+
+            String fallbackDeviceId = data.get("deviceId") != null
+                    ? data.get("deviceId").toString()
+                    : extractDeviceIdFromTopic(topic);
+            if (fallbackDeviceId != null && !fallbackDeviceId.isBlank()) {
+                completeActiveCommandFromAckFallback(topic, fallbackDeviceId, data);
+            }
 
             log.warn(
                     "Received late or duplicate ACK for commandId: [{}]. "
@@ -779,6 +802,28 @@ public class MqttMessageReceiver {
             );
 
             handleLateAckStateReconciliation(data);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void completeActiveCommandFromAckFallback(String topic, String deviceIdStr, Map<String, Object> data) {
+        String status = data.get("status") != null ? data.get("status").toString().trim().toUpperCase(java.util.Locale.ROOT) : "";
+        Object successObj = data.get("success");
+        boolean isFailure = Boolean.FALSE.equals(successObj)
+                || "false".equalsIgnoreCase(String.valueOf(successObj))
+                || "FAILED".equals(status)
+                || "ERROR".equals(status)
+                || "REJECTED".equals(status);
+        if (isFailure) {
+            return;
+        }
+        Map<String, Object> ackState = (data.get("state") instanceof Map<?, ?> m) ? (Map<String, Object>) m : data;
+        try {
+            MqttDeviceCommandServiceImpl.completeDeviceCommand(UUID.fromString(deviceIdStr), ackState);
+        } catch (IllegalArgumentException ignored) {
+            String nodeCode = extractNodeCodeFromTopic(topic);
+            devices.findByNodeCodeAndLocalId(nodeCode, deviceIdStr)
+                    .ifPresent(d -> MqttDeviceCommandServiceImpl.completeDeviceCommand(d.getId(), ackState));
         }
     }
 

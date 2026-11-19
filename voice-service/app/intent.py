@@ -228,13 +228,49 @@ def normalize_spoken_numbers(text: str) -> str:
 class IntentResult:
     """Kết quả mapping intent."""
     action: str                    # VD: "TURN_ON"
-    device_type: str               # VD: "light" hoặc "led_rgb"
+    device_type: str | None = None # VD: "light" hoặc "led_rgb" hoặc None nếu lệnh ngữ cảnh
     room: str | None = None        # VD: "phòng khách"
     parameters: dict[str, Any] = field(default_factory=dict)  # VD: {"temperature": 25}
     confidence: float = 0.0        # Điểm fuzzy matching (0-100)
     matched_pattern: str = ""      # Pattern đã khớp
     raw_text: str = ""             # Câu gốc
     device_name_hint: str = ""     # VD: "ngủ" (đèn ngủ), "trần" (đèn trần), "bàn" (đèn bàn)
+
+
+# Các mẫu câu hành động ngữ cảnh ngắn (Ellipsis / Pronoun Commands)
+# Dùng cho các câu thiếu chủ ngữ/thiết bị phụ thuộc vào DialogueState (VD: "tắt đi", "bật lên", "mở ra", "đóng lại", "dừng lại")
+CONTEXT_ACTION_PATTERNS = [
+    (
+        "TURN_OFF",
+        re.compile(
+            r"^(?:hay\s+)?(?:tat)(?:\s+(?:no|di|no\s+di|gium|ho|ngay|luon|thoi|lai|het))*\s*(?:di|thoi|nhe|nao)?$"
+        ),
+    ),
+    (
+        "TURN_ON",
+        re.compile(
+            r"^(?:hay\s+)?(?:bat)(?:\s+(?:no|di|len|no\s+len|gium|ho|ngay|luon|thoi|lai))*\s*(?:di|len|thoi|nhe|nao)?$"
+        ),
+    ),
+    (
+        "OPEN",
+        re.compile(
+            r"^(?:hay\s+)?(?:mo|keo\s+ra)(?:\s+(?:no|ra|di|gium|ho|ngay|luon))*\s*(?:ra|di|nhe|nao)?$"
+        ),
+    ),
+    (
+        "CLOSE",
+        re.compile(
+            r"^(?:hay\s+)?(?:dong|keo\s+vao|ha)(?:\s+(?:no|lai|vao|di|gium|ho|ngay|luon))*\s*(?:lai|vao|di|nhe|nao)?$"
+        ),
+    ),
+    (
+        "STOP",
+        re.compile(
+            r"^(?:hay\s+)?(?:dung|ngung)(?:\s+(?:lai|di|thoi|gium|ho|ngay|luon))*\s*(?:lai|di|thoi|nhe|nao)?$"
+        ),
+    ),
+]
 
 
 @dataclass
@@ -679,6 +715,24 @@ class IntentMapper:
         )
         mentions_all_devices_word = bool(re.search(r"\bthiet bi\b", remaining_norm))
 
+        # Nhận diện các câu lệnh thuần túy hành động / ngữ cảnh ngắn (Ellipsis / Pronoun Commands)
+        # Ví dụ: "tắt đi", "tắt nó đi", "tắt giùm", "bật đi", "bật lên", "mở ra", "đóng lại", "dừng lại"...
+        # Tránh việc "tắt đi" (tat di) bị fuzzy match nhầm sang "tắt điều hòa" (tat dieu hoa) do partial ratio!
+        if not has_explicit_device_noun and not mentions_all_devices_word:
+            for ctx_action, ctx_regex in CONTEXT_ACTION_PATTERNS:
+                if ctx_regex.match(remaining_norm):
+                    logger.info("Khớp lệnh ngữ cảnh ngắn: '%s' -> action=%s, device_type=None", remaining_norm, ctx_action)
+                    return IntentResult(
+                        action=ctx_action,
+                        device_type=None,
+                        room=room,
+                        parameters={},
+                        confidence=100.0,
+                        matched_pattern=remaining_for_match,
+                        raw_text=text,
+                        device_name_hint="",
+                    )
+
         if has_explicit_device_noun and not mentions_all_devices_word:
             candidate_entries = [
                 (orig, p_norm, idef)
@@ -717,11 +771,13 @@ class IntentMapper:
         action, params = self.extract_parameters(text, intent_def, mode_extracted=mode_extracted)
 
         # Bước 4: Trích xuất gợi ý tên thiết bị cụ thể (device_name_hint)
-        # Giúp phân biệt chính xác giữa 'đèn ngủ' và 'đèn trần' hoặc 'đèn led'
+        # Giúp phân biệt chính xác giữa 'đèn chiếu tv', 'đèn ngủ', 'đèn trần', 'đèn bàn'
         device_name_hint = ""
         text_lower = text.lower()
         if intent_def["device_type"] == "light":
-            if "đèn ngủ" in text_lower or (re.search(r'\bngủ\b', text_lower) and "phòng ngủ" not in text_lower):
+            if re.search(r'\b(?:chiếu\s+(?:tv|tivi|ti\s*vi)|chieu\s+(?:tv|tivi)|rọi\s+(?:tv|tivi)|roi\s+(?:tv|tivi)|hắt\s+(?:tv|tivi)|sau\s+(?:tv|tivi)|đèn\s+(?:tv|tivi)|den\s+(?:tv|tivi))\b', text_lower):
+                device_name_hint = "chiếu tv"
+            elif "đèn ngủ" in text_lower or (re.search(r'\bngủ\b', text_lower) and "phòng ngủ" not in text_lower):
                 device_name_hint = "ngủ"
             elif "đèn trần" in text_lower or (re.search(r'\btrần\b', text_lower) and "tầng trệt" not in text_lower):
                 device_name_hint = "trần"

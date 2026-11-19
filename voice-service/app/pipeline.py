@@ -302,7 +302,11 @@ class VoicePipeline:
             room, device_type, home_id = intent.room, intent.device_type, self.home_id
         else:
             room, device_type, home_id = self.dialogue_state.fill_missing(
-                intent.room, intent.device_type, self.home_id
+                intent.room,
+                intent.device_type,
+                self.home_id,
+                action=intent.action,
+                device_name_hint=getattr(intent, "device_name_hint", ""),
             )
 
         if not device_type:
@@ -320,6 +324,8 @@ class VoicePipeline:
         # 4. Device Resolution
         t0 = time.perf_counter()
         hint = getattr(intent, "device_name_hint", "")
+        if not hint and hasattr(self.dialogue_state, "get_hint_for"):
+            hint = self.dialogue_state.get_hint_for(room, device_type)
         mode_query = (intent.parameters or {}).get("mode")
 
         if mode_query and device_type == "light":
@@ -349,6 +355,8 @@ class VoicePipeline:
                 dev_type_vi = "đèn LED RGB"
         elif device_type == "light" and hint == "ngủ":
             dev_type_vi = "đèn ngủ"
+        elif device_type == "light" and ("chiếu tv" in hint or "chieu tv" in hint):
+            dev_type_vi = "đèn chiếu TV"
         else:
             dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
 
@@ -419,10 +427,15 @@ class VoicePipeline:
             hint=hint,
         )
 
+        effective_room = room
+        if effective_room is None and devices and len({d.room_name for d in devices if d.room_name}) == 1:
+            effective_room = devices[0].room_name
+
         if dispatch_result.successful_count > 0 and not is_compound_sub:
             self.dialogue_state.update(
-                room=room, device_type=device_type,
+                room=effective_room, device_type=device_type,
                 device_ids=device_ids, action=intent.action, home_id=home_id,
+                device_name_hint=hint,
             )
 
         err_code = None
@@ -522,17 +535,30 @@ class VoicePipeline:
                 for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
                     combined_durations[k] = max(combined_durations[k], r.step_durations.get(k, 0.0))
 
-        # Cập nhật dialogue_state tuần tự sau khi lệnh kép hoàn tất (tránh race condition giữa các thread)
-        for r in reversed(sub_results):
+        # Cập nhật dialogue_state tuần tự cho TẤT CẢ các lệnh con thành công trong lệnh kép
+        for r in sub_results:
             if r.success and r.intent and r.dispatch_result and r.dispatch_result.successful_count > 0:
+                hint_sub = getattr(r.intent, "device_name_hint", "")
+                if not hint_sub and hasattr(self.dialogue_state, "get_hint_for"):
+                    hint_sub = self.dialogue_state.get_hint_for(r.intent.room, r.intent.device_type)
+                sub_room = r.intent.room
+                if sub_room is None and r.dispatch_result.results:
+                    all_candidates = self.device_directory.resolve("", r.intent.device_type or "all", home_id=self.home_id)
+                    matched_devs = [
+                        d for d in all_candidates
+                        if d.device_id in [res.device_id for res in r.dispatch_result.results if res.success]
+                    ]
+                    dev_rooms = {d.room_name for d in matched_devs if d.room_name}
+                    if len(dev_rooms) == 1:
+                        sub_room = next(iter(dev_rooms))
                 self.dialogue_state.update(
-                    room=r.intent.room,
+                    room=sub_room,
                     device_type=r.intent.device_type,
                     device_ids=[d.device_id for d in r.dispatch_result.results if d.success],
                     action=r.intent.action,
                     home_id=self.home_id,
+                    device_name_hint=hint_sub,
                 )
-                break
 
         # Gộp thông báo xác nhận tự nhiên
         combined_message = combine_command_messages([(r.success, r.message) for r in sub_results])

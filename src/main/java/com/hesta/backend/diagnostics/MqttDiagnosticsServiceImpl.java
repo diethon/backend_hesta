@@ -369,8 +369,8 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             brokerConnected.set(true);
         }
 
-        // PHO-038 Dead Man's Snitch: cập nhật heartbeat khi nhận bản tin từ node (Fix Key Mismatch giữa nodeCode và UUID)
-        if (topic != null && topic.startsWith("hesta/nodes/")) {
+        // PHO-038 Dead Man's Snitch: chỉ cập nhật heartbeat & revive ONLINE khi nhận bản tin INBOUND từ node
+        if ("INBOUND".equals(normalizedDir) && topic != null && topic.startsWith("hesta/nodes/")) {
             String[] parts = topic.split("/");
             if (parts.length >= 3) {
                 String nodeIdent = parts[2];

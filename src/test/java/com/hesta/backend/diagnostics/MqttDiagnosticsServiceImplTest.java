@@ -25,8 +25,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -202,7 +201,7 @@ class MqttDiagnosticsServiceImplTest {
     }
 
     @Test
-    @DisplayName("Dead Man's Snitch: auto-revives node from OFFLINE to ONLINE upon receiving MQTT packet")
+    @DisplayName("Dead Man's Snitch: auto-revives node from OFFLINE to ONLINE upon receiving INBOUND MQTT packet")
     void testDeadMansSnitch_AutoRevivesOfflineToOnline() {
         node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.OFFLINE);
         when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
@@ -210,6 +209,17 @@ class MqttDiagnosticsServiceImplTest {
         diagnosticsService.recordPacket("hesta/nodes/" + nodeCode + "/devices/1/telemetry", "IN", 1, "{}");
 
         assertEquals(com.hesta.backend.enums.EdgeNodeStatus.ONLINE, node.getStatus());
+    }
+
+    @Test
+    @DisplayName("Dead Man's Snitch: OUTBOUND command packets must NOT revive an OFFLINE node")
+    void testDeadMansSnitch_OutboundPacketDoesNotReviveOfflineNode() {
+        node.setStatus(com.hesta.backend.enums.EdgeNodeStatus.OFFLINE);
+
+        diagnosticsService.recordPacket("hesta/nodes/" + nodeCode + "/devices/1/command", "OUT", 1, "{\"action\":\"TURN_ON\"}");
+
+        assertEquals(com.hesta.backend.enums.EdgeNodeStatus.OFFLINE, node.getStatus());
+        verify(edgeNodeRepository, never()).save(any());
     }
 
     @Test

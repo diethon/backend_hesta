@@ -114,6 +114,11 @@ class DispatchBatchResult:
             type_vi = "đèn ngủ"
             if room == "phòng ngủ":
                 room = None  # tự nhiên hơn: "Đã bật đèn ngủ" thay vì "Đã bật đèn ngủ phòng ngủ"
+        elif device_type == "light" and (
+            hint_lower in ("chiếu tv", "chieu tv", "chiếu tivi", "chieu tivi")
+            or any(k in pattern_lower for k in ("chiếu tv", "chieu tv", "chiếu tivi", "chieu tivi", "đèn tv", "đèn tivi", "den tv", "den tivi"))
+        ):
+            type_vi = "đèn chiếu TV"
         else:
             type_vi = {
                 "light": "đèn",
