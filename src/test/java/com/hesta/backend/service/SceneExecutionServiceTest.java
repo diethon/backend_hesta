@@ -167,7 +167,7 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(manualOverrideService.isActive(device.getId())).thenReturn(true);
+        when(manualOverrideService.getOverridesUntil(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(java.util.Map.of(device.getId(), java.time.OffsetDateTime.now().plusHours(1)));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         var result = service.executeScheduled(homeId, sceneId);
         assertThat(result.getStatus()).isEqualTo("SKIPPED");
