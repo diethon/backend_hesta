@@ -348,5 +348,72 @@ class MqttDeviceCommandServiceImplTest {
         assertTrue(result2.isSuccess());
         assertEquals("SUCCESS", result2.getStatus());
     }
+
+    @Test
+    @DisplayName("Fan: SET_SPEED with level 1, 2, 3 should update speed, fan, power and payload")
+    void testSendCommand_Fan_SpeedLevels() throws Exception {
+        EdgeNode node = EdgeNode.builder()
+                .id(UUID.fromString("a15a1879-a2e2-4640-800a-6bd30a90892c"))
+                .nodeCode("HESTA-APARTMENT-00377b16-F1")
+                .build();
+
+        Device fanDevice = Device.builder()
+                .id(deviceId)
+                .name("Smart Fan")
+                .deviceType("FAN")
+                .localId("fan_1")
+                .node(node)
+                .currentState(new HashMap<>())
+                .build();
+
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(fanDevice));
+
+        // 1. Test Mức 1 (Speed = 1)
+        Map<String, Object> params1 = new HashMap<>();
+        params1.put("speed", 1);
+        commandService.sendCommand(deviceId, "SET_SPEED", params1, StateChangeSource.MANUAL);
+
+        ArgumentCaptor<String> captor1 = ArgumentCaptor.forClass(String.class);
+        verify(mqttGateway, atLeastOnce()).sendToMqtt(anyString(), anyInt(), captor1.capture());
+
+        Map<String, Object> payload1 = objectMapper.readValue(captor1.getValue(), Map.class);
+        assertEquals("SET_SPEED", payload1.get("action"));
+        assertEquals(1, payload1.get("speed"));
+        assertEquals("LOW", payload1.get("fan"));
+        assertEquals(true, payload1.get("power"));
+        assertEquals(1, fanDevice.getCurrentState().get("speed"));
+        assertEquals("LOW", fanDevice.getCurrentState().get("fan"));
+        assertEquals("ON", fanDevice.getCurrentState().get("power"));
+
+        // 2. Test Mức 2 (Speed = 2)
+        Thread.sleep(70);
+        reset(mqttGateway);
+        Map<String, Object> params2 = new HashMap<>();
+        params2.put("speed", 2);
+        commandService.sendCommand(deviceId, "SET_SPEED", params2, StateChangeSource.MANUAL);
+
+        ArgumentCaptor<String> captor2 = ArgumentCaptor.forClass(String.class);
+        verify(mqttGateway, atLeastOnce()).sendToMqtt(anyString(), anyInt(), captor2.capture());
+
+        Map<String, Object> payload2 = objectMapper.readValue(captor2.getValue(), Map.class);
+        assertEquals(2, payload2.get("speed"));
+        assertEquals("MED", payload2.get("fan"));
+        assertEquals(2, fanDevice.getCurrentState().get("speed"));
+
+        // 3. Test Mức 3 (Speed = 3)
+        Thread.sleep(70);
+        reset(mqttGateway);
+        Map<String, Object> params3 = new HashMap<>();
+        params3.put("speed", 3);
+        commandService.sendCommand(deviceId, "SET_SPEED", params3, StateChangeSource.MANUAL);
+
+        ArgumentCaptor<String> captor3 = ArgumentCaptor.forClass(String.class);
+        verify(mqttGateway, atLeastOnce()).sendToMqtt(anyString(), anyInt(), captor3.capture());
+
+        Map<String, Object> payload3 = objectMapper.readValue(captor3.getValue(), Map.class);
+        assertEquals(3, payload3.get("speed"));
+        assertEquals("HIGH", payload3.get("fan"));
+        assertEquals(3, fanDevice.getCurrentState().get("speed"));
+    }
 }
 
