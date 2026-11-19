@@ -40,6 +40,7 @@ Thumbs.db
 ### Logs ###
 *.log
 logs/
+uploads/
 
 ### Env variables ###
 .env
@@ -72,7 +73,6 @@ diagram*.xml
 *.pt
 *.xlsx
 /scripts/
-/ai_hesta/
 fix_json.py
 fix_sensors.sql
 src/main/resources/application-local.properties

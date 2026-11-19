@@ -119,6 +119,12 @@ public enum ErrorCode {
     OTA_PACKAGE_NOT_FOUND(1600, "Firmware package not found", HttpStatus.NOT_FOUND),
     OTA_CAMPAIGN_CONFLICT(1601, "Active OTA campaign already exists for this device type", HttpStatus.CONFLICT),
     OTA_CAMPAIGN_NOT_FOUND(1602, "OTA campaign not found", HttpStatus.NOT_FOUND),
+    OTA_PACKAGE_INVALID(1603, "Gói firmware OTA không hợp lệ hoặc thiếu dữ liệu bắt buộc", HttpStatus.BAD_REQUEST),
+    OTA_FILE_TOO_LARGE(1604, "Tệp firmware OTA không được vượt quá 20 MB", HttpStatus.PAYLOAD_TOO_LARGE),
+    OTA_NO_TARGET_NODES(1605, "Không tìm thấy Edge Node trực tuyến phù hợp với loại thiết bị của bản firmware", HttpStatus.BAD_REQUEST),
+    OTA_FILE_STORAGE_FAILED(1606, "Không thể lưu trữ hoặc đọc tệp firmware trên máy chủ", HttpStatus.INTERNAL_SERVER_ERROR),
+    GATEWAY_DISCONNECTED(1610, "MQTT Broker hiện đang mất kết nối, không thể gửi gói tin xuống Node", HttpStatus.SERVICE_UNAVAILABLE),
+    PING_TIMEOUT(1611, "Edge Node không phản hồi gói tin MQTT Ping trong thời gian quy định", HttpStatus.GATEWAY_TIMEOUT),
     GUARDIAN_RULE_NOT_FOUND(1500, "Parental guardian rule not found", HttpStatus.NOT_FOUND),
     GUARDIAN_RULE_INVALID(1501, "Parental guardian rule parameters are invalid", HttpStatus.BAD_REQUEST),
 

@@ -5,10 +5,14 @@ import com.hesta.backend.ota.CreateOtaCampaignRequest;
 import com.hesta.backend.ota.FirmwarePackageDto;
 import com.hesta.backend.ota.OtaCampaignDto;
 import com.hesta.backend.ota.OtaCampaignService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +24,25 @@ import java.util.UUID;
 public class AdminOtaController {
 
     private final OtaCampaignService otaCampaignService;
+
+    @PostMapping(value = "/packages/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<FirmwarePackageDto>> uploadPackage(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("deviceType") String deviceType,
+            @RequestParam("version") String version,
+            @RequestParam(value = "releaseNotes", required = false) String releaseNotes,
+            HttpServletRequest request) {
+        String requestBaseUrl = ServletUriComponentsBuilder.fromRequestUri(request)
+                .replacePath(null)
+                .build()
+                .toUriString();
+        FirmwarePackageDto result = otaCampaignService.uploadPackage(file, deviceType, version, releaseNotes, requestBaseUrl);
+        return ResponseEntity.ok(ApiResponse.<FirmwarePackageDto>builder()
+                .code(1000)
+                .message("Tải lên tệp Firmware OTA thành công")
+                .result(result)
+                .build());
+    }
 
     @PostMapping("/packages")
     public ResponseEntity<ApiResponse<FirmwarePackageDto>> registerPackage(@RequestBody FirmwarePackageDto dto) {
