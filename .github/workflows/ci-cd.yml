@@ -17,7 +17,8 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Test and package
-        run: chmod +x mvnw && ./mvnw -B -ntp package
+        # Runner's preinstalled Maven: the wrapper download from Maven Central failed intermittently.
+        run: mvn -B -ntp package
       - name: Upload jar
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
