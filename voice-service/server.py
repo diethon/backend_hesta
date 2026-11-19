@@ -19,10 +19,11 @@ from pathlib import Path
 
 from typing import Any
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from app.tts_manager import clean_tts_text, detect_audio_mime, tts_manager
@@ -117,6 +118,7 @@ except TypeError:
 
 # --- API Key bảo vệ endpoint (nếu cần bảo vệ client ngoài, để trống = mở cho frontend web) ---
 VOICE_API_KEY = os.environ.get("VOICE_API_KEY", "")
+AI_CAMERA_UPSTREAM = os.environ.get("AI_CAMERA_UPSTREAM", "http://127.0.0.1:5000").rstrip("/")
 
 
 def _verify_api_key(x_api_key: str | None):
@@ -170,6 +172,79 @@ async def health_check():
         pipelineReady=_pipeline is not None,
         tts=tts_manager.get_engine_status(),
     )
+
+
+async def _proxy_camera_json(method: str, path: str) -> Response:
+    """Proxy a short-lived JSON request to the local Orange Pi AI camera service."""
+    url = f"{AI_CAMERA_UPSTREAM}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(3.0)) as client:
+            upstream = await client.request(method, url)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"AI camera upstream unavailable: {exc}") from exc
+
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type", "application/json"),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/camera/video_feed")
+async def proxy_camera_video_feed():
+    """Stream live MJPEG frames from the local AI camera service without buffering."""
+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=None, write=10.0, pool=5.0))
+    upstream = None
+    try:
+        req = client.build_request("GET", f"{AI_CAMERA_UPSTREAM}/video_feed")
+        upstream = await client.send(req, stream=True)
+    except httpx.RequestError as exc:
+        await client.aclose()
+        raise HTTPException(status_code=503, detail=f"AI camera stream unavailable: {exc}") from exc
+
+    if upstream.status_code != 200:
+        status_code = upstream.status_code
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=status_code, detail="AI camera stream returned non-200 status")
+
+    content_type = upstream.headers.get("content-type", "multipart/x-mixed-replace; boundary=frame")
+
+    async def stream_chunks():
+        try:
+            async for chunk in upstream.aiter_bytes(chunk_size=16384):
+                yield chunk
+        except (asyncio.CancelledError, httpx.HTTPError):
+            pass
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        stream_chunks(),
+        media_type=content_type,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/camera/api/status")
+async def proxy_camera_status():
+    return await _proxy_camera_json("GET", "/api/status")
+
+
+@app.post("/camera/api/dismiss")
+async def proxy_camera_dismiss():
+    return await _proxy_camera_json("POST", "/api/dismiss")
+
+
+@app.post("/camera/api/trigger_demo_fall")
+async def proxy_camera_trigger_demo_fall():
+    return await _proxy_camera_json("POST", "/api/trigger_demo_fall")
 
 
 @app.post("/api/voice/warmup-room")

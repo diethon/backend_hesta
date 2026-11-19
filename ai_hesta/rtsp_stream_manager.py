@@ -51,8 +51,10 @@ class RTSPStreamManager:
         self.fps_frame_counter = 0
         self.fps_calc_ts = time.time()
         self._cap_generation = 0
-        
+
         self.lock = threading.Lock()
+        self.frame_seq = 0
+        self.frame_cond = threading.Condition(self.lock)
         self.worker_thread: Optional[threading.Thread] = None
         self.watchdog_thread: Optional[threading.Thread] = None
 
@@ -133,6 +135,16 @@ class RTSPStreamManager:
                 pass
         else:
             new_cap = cv2.VideoCapture(self.source)
+            try:
+                if isinstance(self.source, int):
+                    # Configure live USB webcam BEFORE BUFFERSIZE so V4L2 keeps buffer=1
+                    new_cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    new_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    new_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    new_cap.set(cv2.CAP_PROP_FPS, 30)
+                new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
 
         if new_cap is not None and new_cap.isOpened():
             ret, test_frame = new_cap.read()
@@ -147,8 +159,10 @@ class RTSPStreamManager:
                         return False
                     self.cap = new_cap
                     self.frame = test_frame
-                    self.last_valid_frame = test_frame.copy()
+                    self.last_valid_frame = test_frame
                     self.last_read_ts = time.time()
+                    self.frame_seq += 1
+                    self.frame_cond.notify_all()
                 self._set_status("ONLINE", "Capture connection opened successfully")
                 self.reconnect_count = 0
                 return True
@@ -203,8 +217,10 @@ class RTSPStreamManager:
 
             with self.lock:
                 self.frame = new_frame
-                self.last_valid_frame = new_frame.copy()
+                self.last_valid_frame = new_frame
                 self.last_read_ts = now
+                self.frame_seq += 1
+                self.frame_cond.notify_all()
                 self.fps_frame_counter += 1
                 
                 # Update FPS every 1.5s
@@ -221,8 +237,6 @@ class RTSPStreamManager:
                     if prop_fps and 5.0 <= prop_fps <= 60.0:
                         target_fps = prop_fps
                 time.sleep(1.0 / target_fps)
-            elif not self.is_rtsp:
-                time.sleep(0.01)
 
         with self.lock:
             old_cap = self.cap
@@ -256,17 +270,13 @@ class RTSPStreamManager:
                     except Exception:
                         pass
 
-    def read(self) -> Tuple[bool, np.ndarray]:
-        """
-        Returns (is_live: bool, frame: np.ndarray)
-        - When camera is ONLINE: returns (True, live_frame)
-        - When camera is OFFLINE / RECONNECTING: returns (False, freeze_frame_with_warning)
-        """
-        with self.lock:
-            status = self.status
-            is_live = (status == "ONLINE")
-            raw_frame = self.frame if is_live else self.last_valid_frame
-
+    def _format_output_frame(
+        self,
+        status: str,
+        is_live: bool,
+        raw_frame: Optional[np.ndarray],
+        reconnect_count: int
+    ) -> Tuple[bool, np.ndarray]:
         if raw_frame is not None:
             frame_out = raw_frame.copy()
         else:
@@ -280,21 +290,51 @@ class RTSPStreamManager:
             overlay = frame_out.copy()
             cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
             cv2.addWeighted(overlay, 0.55, frame_out, 0.45, 0, frame_out)
-            
+
             # Prominent warning banner
             banner_color = (0, 0, 220) if status == "OFFLINE" else (0, 165, 255)
             cv2.rectangle(frame_out, (30, h // 2 - 60), (w - 30, h // 2 + 60), (20, 20, 20), -1)
             cv2.rectangle(frame_out, (30, h // 2 - 60), (w - 30, h // 2 + 60), banner_color, 2)
-            
+
             title_text = "CAMERA MAT TIN HIEU (OFFLINE)" if status == "OFFLINE" else "DANG KET NOI LAI CAMERA..."
             cv2.putText(frame_out, title_text, (50, h // 2 - 15),
                         cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 255, 255), 2)
-            cv2.putText(frame_out, f"Nguon: {self.source} | Luot thu: {self.reconnect_count}",
+            cv2.putText(frame_out, f"Nguon: {self.source} | Luot thu: {reconnect_count}",
                         (50, h // 2 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
             cv2.putText(frame_out, "HESTA dang tu dong reconnect (Bufferless Auto-Failover)",
                         (50, h // 2 + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 255, 100), 1)
 
         return is_live, frame_out
+
+    def read(self) -> Tuple[bool, np.ndarray]:
+        """
+        Returns (is_live: bool, frame: np.ndarray)
+        - When camera is ONLINE: returns (True, live_frame)
+        - When camera is OFFLINE / RECONNECTING: returns (False, freeze_frame_with_warning)
+        """
+        with self.lock:
+            status = self.status
+            is_live = (status == "ONLINE")
+            raw_frame = self.frame if is_live else self.last_valid_frame
+            reconnect_count = self.reconnect_count
+
+        return self._format_output_frame(status, is_live, raw_frame, reconnect_count)
+
+    def read_next(self, last_seq: int, timeout: float = 0.5) -> Tuple[bool, np.ndarray, int]:
+        """Waits for a newer frame sequence than last_seq (up to timeout) to avoid busy-spinning."""
+        with self.frame_cond:
+            self.frame_cond.wait_for(
+                lambda: self.frame_seq != last_seq or not self.is_running,
+                timeout=timeout
+            )
+            status = self.status
+            is_live = (status == "ONLINE")
+            raw_frame = self.frame if is_live else self.last_valid_frame
+            reconnect_count = self.reconnect_count
+            seq = self.frame_seq
+
+        live, frame_out = self._format_output_frame(status, is_live, raw_frame, reconnect_count)
+        return live, frame_out, seq
 
     def get_health(self) -> Dict[str, Any]:
         with self.lock:
@@ -313,7 +353,9 @@ class RTSPStreamManager:
             }
 
     def stop(self):
-        self.is_running = False
+        with self.lock:
+            self.is_running = False
+            self.frame_cond.notify_all()
         if self.worker_thread and self.worker_thread.is_alive():
             self.worker_thread.join(timeout=2.0)
         if self.watchdog_thread and self.watchdog_thread.is_alive():

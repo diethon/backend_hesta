@@ -1,8 +1,10 @@
 package com.hesta.backend.controller;
 
 import com.hesta.backend.dto.request.ChangePasswordRequest;
+import com.hesta.backend.dto.request.UpdateNotificationPreferenceRequest;
 import com.hesta.backend.dto.request.UpdateProfileRequest;
 import com.hesta.backend.dto.response.ApiResponse;
+import com.hesta.backend.dto.response.NotificationPreferenceResponse;
 import com.hesta.backend.dto.response.UserResponse;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.UserService;
@@ -51,6 +53,26 @@ public class UserController {
                 .build();
 
         return ResponseEntity.ok(apiResponse);
+    }
+
+    @GetMapping("/me/notification-preferences")
+    public ResponseEntity<ApiResponse<NotificationPreferenceResponse>> getNotificationPreferences(
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        return ResponseEntity.ok(ApiResponse.<NotificationPreferenceResponse>builder()
+                .code(1000)
+                .result(userService.getNotificationPreferences(userDetails.getId()))
+                .build());
+    }
+
+    @PutMapping("/me/notification-preferences")
+    public ResponseEntity<ApiResponse<NotificationPreferenceResponse>> updateNotificationPreferences(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @Valid @RequestBody UpdateNotificationPreferenceRequest request) {
+        return ResponseEntity.ok(ApiResponse.<NotificationPreferenceResponse>builder()
+                .code(1000)
+                .message("Cập nhật cài đặt thông báo thành công")
+                .result(userService.updateNotificationPreferences(userDetails.getId(), request))
+                .build());
     }
 
     @PostMapping("/me/avatar")
