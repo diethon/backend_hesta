@@ -674,5 +674,46 @@ class TestVoiceBugRegressions:
         assert {d.device_id for d in r2.dispatch_result.results} == {"l-ms-1"}
         assert "đèn" in r2.message.lower()
 
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_tv_accent_light_not_confused_with_master_light(self, intents_file):
+        """Bật đèn phòng ngủ master xong ra lệnh 'bật đèn chiếu tivi' phải bật đèn chiếu TV, không nhầm sang đèn ngủ master."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        # Turn 1: Bật đèn phòng ngủ master
+        r1 = p.process_text("bật đèn phòng ngủ master")
+        assert r1.success is True
+        assert {d.device_id for d in r1.dispatch_result.results} == {"l-ms-1"}
+
+        # Turn 2: Bật đèn chiếu tivi (không nêu phòng khách, nhưng phải tìm ra Đèn chiếu TV l-pk-2)
+        r2 = p.process_text("bật đèn chiếu tivi")
+        assert r2.success is True
+        assert {d.device_id for d in r2.dispatch_result.results} == {"l-pk-2"}
+        assert "chiếu tv" in r2.message.lower() or "đèn chiếu tv" in r2.message.lower()
+
+        # Turn 3: 'tắt đi' phải tắt đèn chiếu TV
+        r3 = p.process_text("tắt đi")
+        assert r3.success is True
+        assert {d.device_id for d in r3.dispatch_result.results} == {"l-pk-2"}
+        assert "chiếu tv" in r3.message.lower() or "đèn chiếu tv" in r3.message.lower()
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_tv_accent_light_phrasings(self, intents_file):
+        """Kiểm tra các biến thể câu nói cho đèn chiếu tivi / tv."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        variants = [
+            ("bật đèn chiếu tv", "TURN_ON"),
+            ("tắt đèn chiếu tivi", "TURN_OFF"),
+            ("mở đèn tv", "TURN_ON"),
+            ("tắt đèn tivi", "TURN_OFF"),
+            ("bật đèn chiếu tivi phòng khách", "TURN_ON"),
+        ]
+        for utterance, expected_action in variants:
+            res = p.process_text(utterance)
+            assert res.success is True, f"Failed for utterance: {utterance}"
+            assert res.intent.action == expected_action
+            assert {d.device_id for d in res.dispatch_result.results} == {"l-pk-2"}
+
+
 
 

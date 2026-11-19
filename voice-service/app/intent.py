@@ -771,11 +771,13 @@ class IntentMapper:
         action, params = self.extract_parameters(text, intent_def, mode_extracted=mode_extracted)
 
         # Bước 4: Trích xuất gợi ý tên thiết bị cụ thể (device_name_hint)
-        # Giúp phân biệt chính xác giữa 'đèn ngủ' và 'đèn trần' hoặc 'đèn led'
+        # Giúp phân biệt chính xác giữa 'đèn chiếu tv', 'đèn ngủ', 'đèn trần', 'đèn bàn'
         device_name_hint = ""
         text_lower = text.lower()
         if intent_def["device_type"] == "light":
-            if "đèn ngủ" in text_lower or (re.search(r'\bngủ\b', text_lower) and "phòng ngủ" not in text_lower):
+            if re.search(r'\b(?:chiếu\s+(?:tv|tivi|ti\s*vi)|chieu\s+(?:tv|tivi)|rọi\s+(?:tv|tivi)|roi\s+(?:tv|tivi)|hắt\s+(?:tv|tivi)|sau\s+(?:tv|tivi)|đèn\s+(?:tv|tivi)|den\s+(?:tv|tivi))\b', text_lower):
+                device_name_hint = "chiếu tv"
+            elif "đèn ngủ" in text_lower or (re.search(r'\bngủ\b', text_lower) and "phòng ngủ" not in text_lower):
                 device_name_hint = "ngủ"
             elif "đèn trần" in text_lower or (re.search(r'\btrần\b', text_lower) and "tầng trệt" not in text_lower):
                 device_name_hint = "trần"

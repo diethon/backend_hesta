@@ -355,6 +355,8 @@ class VoicePipeline:
                 dev_type_vi = "đèn LED RGB"
         elif device_type == "light" and hint == "ngủ":
             dev_type_vi = "đèn ngủ"
+        elif device_type == "light" and ("chiếu tv" in hint or "chieu tv" in hint):
+            dev_type_vi = "đèn chiếu TV"
         else:
             dev_type_vi = DEVICE_TYPE_VI.get(device_type, device_type)
 
@@ -425,9 +427,13 @@ class VoicePipeline:
             hint=hint,
         )
 
+        effective_room = room
+        if effective_room is None and devices and len({d.room_name for d in devices if d.room_name}) == 1:
+            effective_room = devices[0].room_name
+
         if dispatch_result.successful_count > 0 and not is_compound_sub:
             self.dialogue_state.update(
-                room=room, device_type=device_type,
+                room=effective_room, device_type=device_type,
                 device_ids=device_ids, action=intent.action, home_id=home_id,
                 device_name_hint=hint,
             )
@@ -535,8 +541,18 @@ class VoicePipeline:
                 hint_sub = getattr(r.intent, "device_name_hint", "")
                 if not hint_sub and hasattr(self.dialogue_state, "get_hint_for"):
                     hint_sub = self.dialogue_state.get_hint_for(r.intent.room, r.intent.device_type)
+                sub_room = r.intent.room
+                if sub_room is None and r.dispatch_result.results:
+                    all_candidates = self.device_directory.resolve("", r.intent.device_type or "all", home_id=self.home_id)
+                    matched_devs = [
+                        d for d in all_candidates
+                        if d.device_id in [res.device_id for res in r.dispatch_result.results if res.success]
+                    ]
+                    dev_rooms = {d.room_name for d in matched_devs if d.room_name}
+                    if len(dev_rooms) == 1:
+                        sub_room = next(iter(dev_rooms))
                 self.dialogue_state.update(
-                    room=r.intent.room,
+                    room=sub_room,
                     device_type=r.intent.device_type,
                     device_ids=[d.device_id for d in r.dispatch_result.results if d.success],
                     action=r.intent.action,
