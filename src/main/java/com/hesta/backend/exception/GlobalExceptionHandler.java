@@ -68,13 +68,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Object>> handleMaxUploadSizeExceededException(
-            MaxUploadSizeExceededException exception) {
+            MaxUploadSizeExceededException exception,
+            jakarta.servlet.http.HttpServletRequest request) {
+        if (request != null && request.getRequestURI() != null && request.getRequestURI().contains("/ota/")) {
+            return errorResponse(ErrorCode.OTA_FILE_TOO_LARGE);
+        }
         return errorResponse(ErrorCode.AVATAR_FILE_TOO_LARGE);
     }
 
     @ExceptionHandler(MissingServletRequestPartException.class)
     public ResponseEntity<ApiResponse<Object>> handleMissingServletRequestPartException(
-            MissingServletRequestPartException exception) {
+            MissingServletRequestPartException exception,
+            jakarta.servlet.http.HttpServletRequest request) {
+        if (request != null && request.getRequestURI() != null && request.getRequestURI().contains("/ota/")) {
+            return errorResponse(ErrorCode.OTA_PACKAGE_INVALID);
+        }
         return errorResponse(ErrorCode.AVATAR_FILE_REQUIRED);
     }
 
