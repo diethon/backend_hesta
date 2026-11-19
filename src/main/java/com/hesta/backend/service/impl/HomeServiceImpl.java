@@ -160,7 +160,7 @@ public class HomeServiceImpl implements HomeService {
     public void createHomeRoom(UUID userId, UUID homeId, String roomName, String icon, java.math.BigDecimal layoutX, java.math.BigDecimal layoutY) {
         homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
-        
+
         Home home = homeRepository.findById(homeId).orElseThrow();
         Room room = Room.builder()
                 .home(home)
@@ -230,7 +230,7 @@ public class HomeServiceImpl implements HomeService {
     @Transactional
     public Map<String, Object> createHome(UUID userId, String homeName) {
         User user = userRepository.findById(userId).orElseThrow();
-        
+
         Home home = Home.builder()
                 .name(homeName)
                 .createdBy(user)
@@ -265,7 +265,6 @@ public class HomeServiceImpl implements HomeService {
     }
 
 
-
     @Override
 
     @Transactional
@@ -283,17 +282,14 @@ public class HomeServiceImpl implements HomeService {
         }
 
 
-
         Home home = homeRepository.findById(homeId)
 
                 .orElseThrow(() -> new AppException(ErrorCode.HOME_NOT_FOUND));
 
 
-
         home.setName(newName.trim());
 
         Home savedHome = homeRepository.save(home);
-
 
 
         return Map.of(
