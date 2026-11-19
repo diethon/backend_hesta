@@ -302,7 +302,11 @@ class VoicePipeline:
             room, device_type, home_id = intent.room, intent.device_type, self.home_id
         else:
             room, device_type, home_id = self.dialogue_state.fill_missing(
-                intent.room, intent.device_type, self.home_id
+                intent.room,
+                intent.device_type,
+                self.home_id,
+                action=intent.action,
+                device_name_hint=getattr(intent, "device_name_hint", ""),
             )
 
         if not device_type:
@@ -320,6 +324,8 @@ class VoicePipeline:
         # 4. Device Resolution
         t0 = time.perf_counter()
         hint = getattr(intent, "device_name_hint", "")
+        if not hint and hasattr(self.dialogue_state, "get_hint_for"):
+            hint = self.dialogue_state.get_hint_for(room, device_type)
         mode_query = (intent.parameters or {}).get("mode")
 
         if mode_query and device_type == "light":
@@ -423,6 +429,7 @@ class VoicePipeline:
             self.dialogue_state.update(
                 room=room, device_type=device_type,
                 device_ids=device_ids, action=intent.action, home_id=home_id,
+                device_name_hint=hint,
             )
 
         err_code = None
@@ -522,17 +529,20 @@ class VoicePipeline:
                 for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
                     combined_durations[k] = max(combined_durations[k], r.step_durations.get(k, 0.0))
 
-        # Cập nhật dialogue_state tuần tự sau khi lệnh kép hoàn tất (tránh race condition giữa các thread)
-        for r in reversed(sub_results):
+        # Cập nhật dialogue_state tuần tự cho TẤT CẢ các lệnh con thành công trong lệnh kép
+        for r in sub_results:
             if r.success and r.intent and r.dispatch_result and r.dispatch_result.successful_count > 0:
+                hint_sub = getattr(r.intent, "device_name_hint", "")
+                if not hint_sub and hasattr(self.dialogue_state, "get_hint_for"):
+                    hint_sub = self.dialogue_state.get_hint_for(r.intent.room, r.intent.device_type)
                 self.dialogue_state.update(
                     room=r.intent.room,
                     device_type=r.intent.device_type,
                     device_ids=[d.device_id for d in r.dispatch_result.results if d.success],
                     action=r.intent.action,
                     home_id=self.home_id,
+                    device_name_hint=hint_sub,
                 )
-                break
 
         # Gộp thông báo xác nhận tự nhiên
         combined_message = combine_command_messages([(r.success, r.message) for r in sub_results])

@@ -253,4 +253,24 @@ class MqttMessageReceiverTest {
         verify(deviceService).updateDeviceStateFromMqtt(isNull(), eq(deviceId.toString()), anyMap());
         org.junit.jupiter.api.Assertions.assertFalse(com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.commandDeviceMap.containsKey(commandId));
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void ackWithoutCommandIdCompletesActiveCommandByTopicDeviceId() {
+        UUID deviceId = UUID.randomUUID();
+        var waiting = new java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>();
+        var active = (java.util.Map<UUID, java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>>)
+                org.springframework.test.util.ReflectionTestUtils.getField(
+                        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
+        active.put(deviceId, waiting);
+
+        String payload = "{\"status\":\"OK\",\"state\":{\"power\":\"OFF\"}}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/devices/" + deviceId + "/ack")
+                .build());
+
+        org.junit.jupiter.api.Assertions.assertTrue(waiting.isDone());
+        org.junit.jupiter.api.Assertions.assertTrue(waiting.join().isSuccess());
+        verify(deviceService).updateDeviceStateFromMqtt(isNull(), eq(deviceId.toString()), anyMap());
+    }
 }

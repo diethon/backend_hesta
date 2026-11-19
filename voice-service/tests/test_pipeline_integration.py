@@ -526,6 +526,8 @@ class TestVoiceBugRegressions:
             {"id": "rgb-con-1", "name": "Đèn ngủ", "deviceType": "LED_RGB", "roomName": child_room_name, "homeId": "h-real"},
             {"id": "ac-con-1", "name": "Điều hòa DAIKIN", "deviceType": "AIR_CONDITIONER", "roomName": child_room_name, "homeId": "h-real"},
             {"id": "p-gd-1", "name": "Máy bơm nước", "deviceType": "WATER_PUMP", "roomName": "Garden", "homeId": "h-real"},
+            {"id": "g-01", "name": "Cổng chính", "deviceType": "GATE", "roomName": "Sân", "homeId": "h-real"},
+            {"id": "cur-01", "name": "Rèm phòng ngủ master", "deviceType": "CURTAIN", "roomName": "Phòng ngủ master", "homeId": "h-real"},
         ]
         transport = make_mock_backend_transport(devices=real_devices)
         client = httpx.Client(base_url="http://localhost:8080", transport=transport)
@@ -605,4 +607,72 @@ class TestVoiceBugRegressions:
         assert r_comp3.success is True
         assert len(r_comp3.sub_results) == 2
         assert {d.device_id for d in r_comp3.dispatch_result.results} == {"l-ms-1", "ac-con-1"}
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_multi_turn_tat_di_inherits_light_not_ac(self, intents_file):
+        """Bật đèn phòng ngủ master -> 'tắt đi' phải tắt đèn master, không được nhầm thành điều hòa."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        # Turn 1: Bật đèn phòng ngủ master
+        r1 = p.process_text("bật đèn phòng ngủ master")
+        assert r1.success is True
+        assert {d.device_id for d in r1.dispatch_result.results} == {"l-ms-1"}
+        assert r1.intent.device_type == "light"
+
+        # Turn 2: 'tắt đi'
+        r2 = p.process_text("tắt đi")
+        assert r2.success is True
+        assert r2.intent.action == "TURN_OFF"
+        assert {d.device_id for d in r2.dispatch_result.results} == {"l-ms-1"}
+        assert "điều hòa" not in r2.message.lower()
+        assert "đèn" in r2.message.lower()
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_multi_turn_compound_then_tat_den_di(self, intents_file):
+        """Turn 1: 'bật đèn ngủ master và đóng cổng' -> Turn 2: 'tắt đèn đi' phải tắt đèn ngủ master."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        # Turn 1: Lệnh kép
+        r1 = p.process_text("bật đèn ngủ master và đóng cổng")
+        assert r1.success is True
+        assert len(r1.sub_results) == 2
+        assert {d.device_id for d in r1.dispatch_result.results} == {"l-ms-1", "g-01"}
+
+        # Turn 2: 'tắt đèn đi' (thiếu room) -> phải kế thừa room 'phòng ngủ master' và hint 'ngủ'
+        r2 = p.process_text("tắt đèn đi")
+        assert r2.success is True
+        assert {d.device_id for d in r2.dispatch_result.results} == {"l-ms-1"}
+        assert "đèn" in r2.message.lower()
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_multi_turn_compound_then_mo_ra(self, intents_file):
+        """Turn 1: 'bật đèn ngủ master và đóng cổng' -> Turn 2: 'mở ra' phải mở cổng."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        # Turn 1: Lệnh kép
+        r1 = p.process_text("bật đèn ngủ master và đóng cổng")
+        assert r1.success is True
+
+        # Turn 2: 'mở ra' (thiếu device_type & room, action=OPEN) -> phải chọn cổng
+        r2 = p.process_text("mở ra")
+        assert r2.success is True
+        assert {d.device_id for d in r2.dispatch_result.results} == {"g-01"}
+        assert "cổng" in r2.message.lower()
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_multi_turn_compound_then_tat_di(self, intents_file):
+        """Turn 1: 'bật đèn ngủ master và đóng cổng' -> Turn 2: 'tắt đi' phải tắt đèn ngủ master."""
+        p = self._build_real_layout_pipeline(intents_file)
+
+        # Turn 1: Lệnh kép
+        r1 = p.process_text("bật đèn ngủ master và đóng cổng")
+        assert r1.success is True
+
+        # Turn 2: 'tắt đi' (thiếu device_type & room, action=TURN_OFF) -> trong số cổng và đèn, đèn có thể tắt
+        r2 = p.process_text("tắt đi")
+        assert r2.success is True
+        assert {d.device_id for d in r2.dispatch_result.results} == {"l-ms-1"}
+        assert "đèn" in r2.message.lower()
+
+
 

@@ -104,6 +104,8 @@ public class MqttConfig {
         String[] topics = {
                 topicPrefix + "/+/devices/+/state",
                 topicPrefix + "/+/devices/+/ack",
+                topicPrefix + "/+/devices/+/response",
+                topicPrefix + "/+/response",
                 topicPrefix + "/+/devices/+/sensor",
                 topicPrefix + "/+/devices/+/status",
                 topicPrefix + "/+/devices/+/telemetry",
