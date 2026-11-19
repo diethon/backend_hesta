@@ -1290,7 +1290,7 @@ public class DeviceServiceImpl implements DeviceService {
 
                 }
 
-                case "GATE", "ROLLING_DOOR" -> {
+                case "GATE", "ROLLING_DOOR", "DOOR", "CURTAIN" -> {
 
                     result.put("GATE", List.of("OPEN", "CLOSE", "STOP", "GATE_OPEN", "GATE_CLOSE", "GATE_STOP"));
 
