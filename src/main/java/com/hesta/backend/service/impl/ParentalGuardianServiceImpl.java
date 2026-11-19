@@ -352,6 +352,8 @@ public class ParentalGuardianServiceImpl implements ParentalGuardianService {
     }
 
     // AFTER_COMMIT runs after the publisher's transaction ended: without a new one, saves here would never be committed.
+    // Async: see AsyncConfig#deviceStateEventExecutor (running here held two DB connections per command).
+    @org.springframework.scheduling.annotation.Async("deviceStateEventExecutor")
     @org.springframework.transaction.event.TransactionalEventListener(phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void onDeviceStateChangedEvent(com.hesta.backend.dto.command.DeviceStateChangedEvent event) {

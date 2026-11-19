@@ -106,6 +106,26 @@ class RecommendationServiceTest {
     }
 
     @Test
+    void callsMlServiceWithNoTransactionOpen() {
+        var open = AutomationEngineTest.TransactionCounter.install(service);
+        when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
+        when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenAnswer(invocation -> {
+            assertThat(open.get()).as("proposals are filtered and saved inside a transaction").isEqualTo(1);
+            return List.of();
+        });
+        int[] openDuringMlCall = {-1};
+        when(mlServiceClient.generateRecommendations(eq(homeId), any(), any(), anyDouble())).thenAnswer(invocation -> {
+            openDuringMlCall[0] = open.get();
+            return List.of();
+        });
+
+        service.generateForSystem(homeId, OffsetDateTime.now().minusDays(14), OffsetDateTime.now());
+
+        assertThat(openDuringMlCall[0]).as("no DB transaction held during the slow ML call").isZero();
+        assertThat(open.get()).isZero();
+    }
+
+    @Test
     void skipsProposalsBelowConfidenceThreshold() {
         when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
         when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());

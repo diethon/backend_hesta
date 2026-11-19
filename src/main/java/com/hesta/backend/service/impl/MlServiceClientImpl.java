@@ -28,7 +28,7 @@ public class MlServiceClientImpl implements MlServiceClient {
     @org.springframework.beans.factory.annotation.Autowired
     public MlServiceClientImpl(
             @Value("${hesta.ml-service.url:http://localhost:8000}") String baseUrl,
-            @Value("${hesta.ml-service.timeout-ms:5000}") int timeoutMs,
+            @Value("${hesta.ml-service.timeout-ms:30000}") int timeoutMs,
             @Value("${hesta.ml-service.train-timeout-ms:300000}") int trainTimeoutMs,
             @Value("${hesta.recommendation.confidence-threshold:0.80}") double defaultThreshold,
             @Value("${hesta.ml-service.api-key:}") String apiKey,
