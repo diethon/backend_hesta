@@ -10,7 +10,8 @@ from app.pipeline import (
     build_habit_dataset,
     circular_minute_difference,
     circular_mean_time,
-    cluster_timestamps_by_habit
+    cluster_timestamps_by_habit,
+    user_actions,
 )
 
 class TestPipeline(unittest.TestCase):
@@ -127,6 +128,18 @@ def changing_events(days=56, seed=7):
         if d >= days - 21 and rng.random() < 0.95:
             rows.append(event('L3', 'TURN_ON', day + timedelta(hours=21, minutes=int(rng.integers(-10, 11)))))
     return pd.concat([synthetic_events(days=days, seed=seed), pd.DataFrame(rows)], ignore_index=True)
+
+
+class TestUserActions(unittest.TestCase):
+    def test_sensor_devices_are_not_habits(self):
+        at = datetime(2026, 1, 1, 7, 0)
+        df = pd.DataFrame([
+            event('L1', 'TURN_ON', at),
+            event('S1', 'TURN_ON', at, device_type='LIGHT_SENSOR'),
+            event('S2', 'TURN_ON', at, device_type='MOTION_SENSOR'),
+            event('U1', 'TURN_ON', at, device_type=None),
+        ])
+        self.assertEqual(sorted(user_actions(df)['device_id']), ['L1', 'U1'])
 
 
 if __name__ == '__main__':

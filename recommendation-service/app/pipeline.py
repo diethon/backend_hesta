@@ -258,6 +258,8 @@ def user_actions(df: pd.DataFrame) -> pd.DataFrame:
         & (df['action'].isin(ACTION_LABELS))
         & (df['device_id'].notna())
         & (df['event_source'].astype(str).str.upper().isin(HUMAN_SOURCES))
+        # Sensors report the world, nobody "turns on" a light sensor as a habit (all types end in SENSOR).
+        & (~df['device_type'].fillna('').astype(str).str.upper().str.contains('SENSOR'))
     ].copy()
 
 
