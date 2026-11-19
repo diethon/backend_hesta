@@ -12,38 +12,38 @@
 
 @baseUrl = http://localhost:8080
 @deviceId = 6643cf42-bb8e-434e-a440-743afe06c457
-@nodeId = 664017ce-c045-4b0e-9a26-f9f95f996803
-@token = 
+@nodeId = 109441d8-b6bf-4a18-bdf8-9279b7a1548d
+#@token = 
 
 ### ====================================================================
-### 0. (Tùy chọn) Đăng nhập để lấy JWT Bearer Token nếu bật Security
+### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
 ### ====================================================================
-#POST {{baseUrl}}/api/v1/auth/login
-#Content-Type: application/json
-#
-#{
-#  "email": "test_user@hesta.com",
-#  "password": "Password123!"
-#}
-#
-#> {%
-#    if (response.body && response.body.result && response.body.result.accessToken) {
-#        client.global.set("token", response.body.result.accessToken);
-#    }
-#%}
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@gmail.com",
+  "password": "123123123"
+}
+
+> {%
+    if (response.body && response.body.result && response.body.result.accessToken) {
+        client.global.set("token", response.body.result.accessToken);
+    }
+%}
 
 ### ====================================================================
 ### 0.1 Xem thông tin & trạng thái hiện tại của Quạt
 ### ====================================================================
 GET {{baseUrl}}/api/v1/devices/{{deviceId}}
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 ### ====================================================================
 ### 1. BẬT QUẠT (Action: TURN_ON)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "TURN_ON",
@@ -55,7 +55,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "TURN_OFF",
@@ -67,7 +67,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "POWER_ON",
@@ -79,7 +79,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "POWER_OFF",
@@ -91,7 +91,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_POWER",
@@ -104,7 +104,7 @@ Content-Type: application/json
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_POWER",
@@ -113,11 +113,76 @@ Content-Type: application/json
 }
 
 ### ====================================================================
-### 7. CÀI ĐẶT TỐC ĐỘ QUẠT (SET_FAN: HIGH) -> Bật Quạt
+### 7. CÀI ĐẶT TỐC ĐỘ QUẠT MỨC 1 (SET_SPEED: speed = 1 - Thấp / LOW)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_SPEED",
+  "speed": 1,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 8. CÀI ĐẶT TỐC ĐỘ QUẠT MỨC 2 (SET_SPEED: speed = 2 - Trung bình / MED)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_SPEED",
+  "speed": 2,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 9. CÀI ĐẶT TỐC ĐỘ QUẠT MỨC 3 (SET_SPEED: speed = 3 - Cao / HIGH)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_SPEED",
+  "speed": 3,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 10. CÀI ĐẶT TỐC ĐỘ QUẠT QUA SET_FAN (MỨC 1 / LOW)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_FAN",
+  "fan": 1,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 11. CÀI ĐẶT TỐC ĐỘ QUẠT QUA SET_FAN (MỨC 2 / MED)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_FAN",
+  "fan": 2,
+  "nodeId": "{{nodeId}}"
+}
+
+### ====================================================================
+### 12. CÀI ĐẶT TỐC ĐỘ QUẠT QUA SET_FAN (MỨC 3 / HIGH)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_FAN",
@@ -126,11 +191,11 @@ Content-Type: application/json
 }
 
 ### ====================================================================
-### 8. CÀI ĐẶT TỐC ĐỘ QUẠT (SET_FAN: OFF) -> Tắt Quạt
+### 13. TẮT QUẠT QUA SET_FAN (fan: OFF hoặc speed: 0)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "action": "SET_FAN",
@@ -139,11 +204,11 @@ Content-Type: application/json
 }
 
 ### ====================================================================
-### 9. GỬI LỆNH TRỰC TIẾP QUA TARGET (target: "fan", power: true)
+### 14. GỬI LỆNH TRỰC TIẾP QUA TARGET (target: "fan", power: true)
 ### ====================================================================
 POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
 Content-Type: application/json
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
 
 {
   "target": "fan",
@@ -152,7 +217,7 @@ Content-Type: application/json
 }
 
 ### ====================================================================
-### 10. LỊCH SỬ THAY ĐỔI TRẠNG THÁI CỦA QUẠT
+### 15. LỊCH SỬ THAY ĐỔI TRẠNG THÁI CỦA QUẠT
 ### ====================================================================
 GET {{baseUrl}}/api/v1/devices/{{deviceId}}/history
-#Authorization: Bearer {{token}}
+Authorization: Bearer {{token}}
