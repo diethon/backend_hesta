@@ -13,11 +13,14 @@ public class EmailService {
 
     private final JavaMailSender mailSender;
     private final String fromEmail;
+    private final String frontendUrl;
 
     public EmailService(JavaMailSender mailSender,
-                        @Value("${spring.mail.username}") String fromEmail) {
+                        @Value("${spring.mail.username}") String fromEmail,
+                        @Value("${app.frontend-url}") String frontendUrl) {
         this.mailSender = mailSender;
         this.fromEmail = fromEmail;
+        this.frontendUrl = frontendUrl;
     }
 
     /**
@@ -101,7 +104,7 @@ public class EmailService {
      */
     public boolean sendInvitationEmail(String to, String inviterName, String homeName, String inviteCode, String inviteToken) {
         String subject = "Lời mời tham gia nhà thông minh - HESTA";
-        String link = "http://localhost:5173/join?token=" + inviteToken;
+        String link = frontendUrl + "/join?token=" + inviteToken;
 
         log.info("Preparing invitation email: to={}, inviter={}, home={}, token={}", to, inviterName, homeName, inviteToken);
         
