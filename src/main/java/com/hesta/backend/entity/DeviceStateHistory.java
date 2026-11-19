@@ -12,7 +12,9 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "device_state_history")
+@Table(name = "device_state_history", indexes = {
+    @Index(name = "idx_dsh_device_changed_at", columnList = "device_id, changed_at DESC")
+})
 @Getter
 @Setter
 @NoArgsConstructor

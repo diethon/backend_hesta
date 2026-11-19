@@ -47,6 +47,7 @@ class DeviceInfo:
     room_name: str
     home_id: str
     settings: dict[str, Any] = field(default_factory=dict)
+    status: str = "ONLINE"
 
 
 # Ngữ cảnh ánh sáng gợi ý mặc định (Built-in Mood Presets) đồng bộ với Frontend
@@ -163,6 +164,8 @@ class DeviceDirectory:
 
         # Cache: (home_id, room_name_lower, device_type_lower) → list[DeviceInfo]
         self._cache: dict[tuple[str, str, str], list[DeviceInfo]] = {}
+        # Room aliases suy luận tự động từ tên thiết bị (vd: "đèn phòng ngủ của con" -> "phòng ngủ 2 giường")
+        self._room_aliases: dict[str, str] = {}
         # Raw list for rebuild
         self._raw_devices: list[dict[str, Any]] = []
         self._lock = threading.Lock()
@@ -197,7 +200,7 @@ class DeviceDirectory:
             "door_lock": {"door_lock", "smart_lock", "lock"},
             "water_heater": {"water_heater", "boiler"},
             "water_pump": {"water_pump", "pump"},
-            "curtain": {"curtain", "blind", "shade"},
+            "curtain": {"curtain", "blind", "shade", "curtain_motor", "motorized_curtain", "rem", "rem_cua", "rem_2_manh"},
             "gate": {"gate", "rolling_door", "garage_door"},
             "socket": {"socket", "plug", "outlet"},
             "speaker": {"speaker", "audio"},
@@ -235,15 +238,20 @@ class DeviceDirectory:
                         types_to_register.add("fan")
                     if any(w in db_name for w in ["điều hòa", "điều hoà", "máy lạnh", "ac"]):
                         types_to_register.add("air_conditioner")
-                    if any(w in db_name for w in ["khóa", "khoá", "cửa"]):
+                    is_gate_or_curtain = (
+                        db_type in TYPE_ALIASES["gate"]
+                        or db_type in TYPE_ALIASES["curtain"]
+                        or any(w in db_name for w in ["cổng", "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage", "rèm", "màn"])
+                    )
+                    if not is_gate_or_curtain and any(w in db_name for w in ["khóa", "khoá", "cửa"]):
                         types_to_register.add("door_lock")
-                    if any(w in db_name for w in ["cổng"]):
+                    if any(w in db_name for w in ["cổng", "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage"]):
                         types_to_register.add("gate")
                     if any(w in db_name for w in ["nóng lạnh", "bình nóng", "nước nóng"]):
                         types_to_register.add("water_heater")
                     if any(w in db_name for w in ["bơm", "máy bơm"]):
                         types_to_register.add("water_pump")
-                    if any(w in db_name for w in ["rèm", "màn"]):
+                    if any(w in db_name for w in ["rèm", "màn", "curtain"]):
                         types_to_register.add("curtain")
 
                 # Nếu nó là bộ điều khiển hồng ngoại (IR_REMOTE), phân loại thêm dựa vào tên
@@ -256,6 +264,7 @@ class DeviceDirectory:
                         types_to_register.add("fan")
 
                 dev_settings = dev.get("settings") if isinstance(dev.get("settings"), dict) else {}
+                dev_status = str(dev.get("status", "ONLINE")).upper()
                 for t in types_to_register:
                     info = DeviceInfo(
                         device_id=str(dev["id"]),
@@ -264,6 +273,7 @@ class DeviceDirectory:
                         room_name=str(dev.get("roomName", dev.get("room", ""))).strip().lower(),
                         home_id=str(dev.get("homeId", dev.get("home_id", ""))),
                         settings=dev_settings,
+                        status=dev_status,
                     )
                     key = (info.home_id, info.room_name, t)
                     if key not in cache:
@@ -273,6 +283,29 @@ class DeviceDirectory:
                 logger.warning("Bỏ qua thiết bị lỗi dữ liệu: %s — %s", dev, e)
 
         return cache
+
+    def _build_room_aliases(self, devices: list[dict[str, Any]]) -> dict[str, str]:
+        """Tự động học ánh xạ alias phòng từ tên thiết bị bên trong phòng đó.
+        Ví dụ: Thiết bị 'Đèn phòng ngủ của con' nằm trong 'Phòng ngủ 2 giường'
+        → ánh xạ 'phong ngu cua con' → 'phong ngu 2 giuong'.
+        """
+        import re
+
+        aliases: dict[str, str] = {}
+        for dev in devices:
+            if not isinstance(dev, dict):
+                continue
+            r_raw = str(dev.get("roomName", dev.get("room", ""))).strip()
+            if not r_raw or r_raw.lower() in {"null", "none", "unknown"}:
+                continue
+            r_norm = strip_vietnamese_tones(r_raw.lower())
+            d_name = str(dev.get("name", "")).strip().lower()
+            m = re.search(r"(phòng\s+(?:ngủ|của)\s+[\w\sÀ-ỹ]+)$", d_name)
+            if m:
+                phrase_norm = strip_vietnamese_tones(m.group(1).strip())
+                if phrase_norm and phrase_norm != r_norm and phrase_norm != "phong ngu":
+                    aliases[phrase_norm] = r_norm
+        return aliases
 
     def refresh(self, home_id: str = "") -> bool:
         """Làm mới cache bằng cách gọi API backend.
@@ -304,10 +337,12 @@ class DeviceDirectory:
                 devices = devices.get("data", devices.get("devices", []))
 
             new_cache = self._build_cache(devices)
+            new_aliases = self._build_room_aliases(devices)
 
             with self._lock:
                 self._raw_devices = devices
                 self._cache = new_cache
+                self._room_aliases = new_aliases
                 self._last_refresh_time = time.time()
 
             logger.info("Device cache refreshed: %d thiết bị, %d nhóm", len(devices), len(new_cache))
@@ -345,13 +380,19 @@ class DeviceDirectory:
         d_type = device_type.strip().lower()
         key = (home_id, r_name, d_type)
         r_norm = strip_vietnamese_tones(r_name) if r_name else ""
+        r_alias_norm = self._room_aliases.get(r_norm, "") if r_norm else ""
 
         def _room_matches(cached_room: str) -> bool:
             if not r_name:
                 return True
             if cached_room == r_name:
                 return True
-            return strip_vietnamese_tones(cached_room) == r_norm
+            c_norm = strip_vietnamese_tones(cached_room)
+            if c_norm == r_norm:
+                return True
+            if r_alias_norm and c_norm == r_alias_norm:
+                return True
+            return False
 
         def _filter_hint(devs: list[DeviceInfo]) -> list[DeviceInfo]:
             if not device_name_hint or len(devs) <= 1:

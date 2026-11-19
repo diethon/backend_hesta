@@ -1,5 +1,6 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.response.EnergyAnalyticsResponse;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.DeviceStateHistory;
@@ -187,5 +188,57 @@ class EnergyAnalyticsServiceImplTest {
         assertThat(response.getTimeSeries()).hasSize(24);
         // Effective wattage = 40W * 0.5 = 20W. 2 hours on = (20W * 2h) / 1000 = 0.04 kWh
         assertThat(response.getSummary().getTotalKwh()).isCloseTo(0.04, org.assertj.core.data.Offset.offset(0.01));
+    }
+
+    @Test
+    void getHomeEnergyAnalytics_cachesResponse_andEvictsOnEvent() {
+        UUID userId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(Collections.emptyList());
+
+        // First call populates cache
+        EnergyAnalyticsResponse first = energyAnalyticsService.getHomeEnergyAnalytics(userId, homeId, "30D");
+        // Second call should hit in-memory cache directly without querying repository again
+        EnergyAnalyticsResponse second = energyAnalyticsService.getHomeEnergyAnalytics(userId, homeId, "30D");
+
+        assertThat(first).isSameAs(second);
+        verify(deviceRepository, times(1)).findByHomeIdWithRoomAndNode(homeId);
+
+        // Evict via event
+        energyAnalyticsService.onDeviceStateChanged(new DeviceStateChangedEvent(homeId, null));
+
+        // Third call should re-query
+        EnergyAnalyticsResponse third = energyAnalyticsService.getHomeEnergyAnalytics(userId, homeId, "30D");
+        assertThat(third).isNotNull();
+        verify(deviceRepository, times(2)).findByHomeIdWithRoomAndNode(homeId);
+    }
+
+    @Test
+    void getHomeEnergyAnalytics_offlineDeviceDoesNotAccumulateUnboundedEnergy() {
+        UUID userId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+
+        Room room = Room.builder().id(UUID.randomUUID()).name("Living Room").build();
+        Device offlineAc = Device.builder()
+                .id(deviceId)
+                .name("Offline AC")
+                .deviceType("AIR_CONDITIONER")
+                .status(DeviceStatus.OFFLINE)
+                .room(room)
+                .currentState(Map.of("power", "ON"))
+                .updatedAt(OffsetDateTime.now().minusDays(8))
+                .build();
+
+        when(deviceRepository.findByHomeIdWithRoomAndNode(homeId)).thenReturn(List.of(offlineAc));
+        when(historyRepository.findByDeviceIdsAndChangedAtBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        EnergyAnalyticsResponse response = energyAnalyticsService.getHomeEnergyAnalytics(userId, homeId, "30D");
+
+        assertThat(response).isNotNull();
+        assertThat(response.getSummary().getTotalKwh()).isEqualTo(0.0);
+        assertThat(response.getSummary().getCurrentTier()).isEqualTo(1);
     }
 }

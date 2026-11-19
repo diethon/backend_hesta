@@ -12,6 +12,7 @@ Luồng multi-turn:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,12 @@ from app.dialogue_state import DialogueState
 from app.splitter import split_compound_command, combine_command_messages
 
 logger = logging.getLogger(__name__)
+
+# Từ khóa nhận diện lệnh điều khiển toàn bộ thiết bị / cả nhà (word-boundary để tránh match nhầm chuỗi con)
+_ALL_KEYWORDS_RE = re.compile(
+    r"\b(?:tất cả|tat ca|toàn bộ|toan bo|cả nhà|ca nha|hết|het|các|cac|mọi|moi|trong nhà|trong nha)\b",
+    re.IGNORECASE,
+)
 
 # Bản dịch device_type → tiếng Việt để hiển thị lỗi cho người dùng
 DEVICE_TYPE_VI = {
@@ -59,6 +66,8 @@ class PipelineResult:
     total_duration_ms: float = 0.0
     step_durations: dict[str, float] = field(default_factory=dict)
     error: str = ""
+    error_code: str | None = None
+    status: str = "SUCCESS"
     sub_results: list[PipelineResult] = field(default_factory=list)
 
 
@@ -248,7 +257,13 @@ class VoicePipeline:
         )
         return res
 
-    def _execute_single_command(self, text: str, custom_rooms: list[str]) -> PipelineResult:
+    def _execute_single_command(
+        self,
+        text: str,
+        custom_rooms: list[str],
+        user_id: str = "",
+        is_compound_sub: bool = False,
+    ) -> PipelineResult:
         """Thực thi một câu lệnh đơn lẻ (Mapping -> Dialogue State -> Resolve -> Dispatch)."""
         t_start = time.perf_counter()
         step_durations: dict[str, float] = {}
@@ -263,14 +278,32 @@ class VoicePipeline:
                 success=False,
                 message=f"Không hiểu lệnh: \"{text}\".",
                 transcript=text,
+                error_code="INTENT_NOT_FOUND",
+                status="FAILED",
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
 
-        # 2. Fill missing từ dialogue state (multi-turn)
-        room, device_type, home_id = self.dialogue_state.fill_missing(
-            intent.room, intent.device_type, self.home_id
+        # 2. Nhận diện lệnh điều khiển toàn bộ ("tất cả", "toàn bộ", "hết", "cả nhà"...)
+        # PHẢI chạy trước fill_missing() để "tắt toàn bộ đèn" không bị kế thừa nhầm
+        # phòng từ câu lệnh trước trong dialogue_state (TTL 45s).
+        is_all = (
+            intent.device_type == "all"
+            or "hết" in (intent.matched_pattern or "").lower()
+            or bool(_ALL_KEYWORDS_RE.search(text))
         )
+
+        # 3. Fill missing từ dialogue state (multi-turn)
+        if is_all and intent.room is None:
+            # Lệnh toàn bộ không nêu phòng (VD: "tắt toàn bộ đèn", "bật tất cả đèn") → áp dụng toàn nhà
+            room, device_type, home_id = None, intent.device_type, self.home_id
+        elif is_compound_sub and intent.room is not None and intent.device_type is not None:
+            # Lệnh con trong chuỗi lệnh kép đã có đủ phòng & loại thiết bị → không phụ thuộc dialogue_state
+            room, device_type, home_id = intent.room, intent.device_type, self.home_id
+        else:
+            room, device_type, home_id = self.dialogue_state.fill_missing(
+                intent.room, intent.device_type, self.home_id
+            )
 
         if not device_type:
             return PipelineResult(
@@ -278,20 +311,14 @@ class VoicePipeline:
                 message="Không xác định được loại thiết bị.",
                 transcript=text,
                 intent=intent,
+                error_code="DEVICE_TYPE_UNKNOWN",
+                status="FAILED",
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
             )
 
-        # 3. Device Resolution
+        # 4. Device Resolution
         t0 = time.perf_counter()
-        is_all = (
-            device_type == "all"
-            or "hết" in (intent.matched_pattern or "").lower()
-            or any(kw in text.lower() for kw in [
-                "tất cả", "tat ca", "toàn bộ", "toan bo", "cả nhà", "ca nha",
-                "hết", "het", "các", "cac", "mọi", "moi"
-            ])
-        )
         hint = getattr(intent, "device_name_hint", "")
         mode_query = (intent.parameters or {}).get("mode")
 
@@ -382,7 +409,7 @@ class VoicePipeline:
         t0 = time.perf_counter()
         device_ids = [d.device_id for d in devices]
         dispatch_result = self.dispatcher.dispatch_batch(
-            device_ids, intent.action, intent.parameters or None
+            device_ids, intent.action, intent.parameters or None, user_id=user_id
         )
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
@@ -392,29 +419,67 @@ class VoicePipeline:
             hint=hint,
         )
 
-        if dispatch_result.all_success:
+        if dispatch_result.successful_count > 0 and not is_compound_sub:
             self.dialogue_state.update(
                 room=room, device_type=device_type,
                 device_ids=device_ids, action=intent.action, home_id=home_id,
             )
 
+        err_code = None
+        status = "SUCCESS"
+        is_partial = (not dispatch_result.all_success) and (dispatch_result.successful_count > 0)
+        failed_results = [r for r in dispatch_result.results if not r.success]
+        only_permission_skips = (
+            is_partial
+            and bool(failed_results)
+            and all(
+                r.error_code in ("ACCESS_DENIED", "UNAUTHORIZED") or r.status_code in (401, 403, 404)
+                for r in failed_results
+            )
+        )
+        if not dispatch_result.all_success and not only_permission_skips:
+            err_codes = {r.error_code for r in dispatch_result.results if r.error_code}
+            if "ACCESS_DENIED" in err_codes or any(r.status_code == 403 for r in dispatch_result.results):
+                err_code = "ACCESS_DENIED"
+                status = "ACCESS_DENIED"
+            elif "UNAUTHORIZED" in err_codes or any(r.status_code == 401 for r in dispatch_result.results):
+                err_code = "UNAUTHORIZED"
+                status = "ACCESS_DENIED"
+            elif "DEVICE_OFFLINE" in err_codes:
+                err_code = "DEVICE_OFFLINE"
+                status = "DEVICE_OFFLINE"
+            elif "GATEWAY_DISCONNECTED" in err_codes:
+                err_code = "GATEWAY_DISCONNECTED"
+                status = "GATEWAY_DISCONNECTED"
+            elif "CONNECTION_ERROR" in err_codes or any("timed out" in (r.error_message or "").lower() for r in dispatch_result.results):
+                err_code = "TIMEOUT"
+                status = "TIMEOUT"
+            else:
+                err_code = "FAILED"
+                status = "FAILED"
+            if is_partial:
+                status = "PARTIAL_SUCCESS"
+
         total_ms = (time.perf_counter() - t_start) * 1000
 
         return PipelineResult(
-            success=dispatch_result.all_success,
+            success=dispatch_result.all_success or is_partial,
             message=message,
             transcript=text,
             intent=intent,
             dispatch_result=dispatch_result,
             total_duration_ms=round(total_ms, 1),
             step_durations=step_durations,
+            error_code=err_code,
+            status=status,
         )
 
-    def process_text(self, text: str) -> PipelineResult:
+    def process_text(self, text: str, user_id: str = "") -> PipelineResult:
         """Xử lý lệnh từ text (hỗ trợ cả lệnh đơn và chuỗi lệnh kép).
 
         Args:
             text: câu lệnh tiếng Việt
+            user_id: ID người dùng ra lệnh (để kiểm tra phân quyền RBAC)
 
         Returns:
             PipelineResult
@@ -424,12 +489,14 @@ class VoicePipeline:
         sub_commands = split_compound_command(text, custom_rooms=known_rooms)
 
         if len(sub_commands) <= 1:
-            res = self._execute_single_command(text, custom_rooms=known_rooms)
+            res = self._execute_single_command(text, custom_rooms=known_rooms, user_id=user_id)
             res.transcript = text
             res.total_duration_ms = round((time.perf_counter() - t_start) * 1000, 1)
             return res
 
-        # Xử lý chuỗi câu lệnh kép (compound commands)
+        # Xử lý chuỗi câu lệnh kép (compound commands) chạy song song qua ThreadPoolExecutor
+        import concurrent.futures
+
         sub_results: list[PipelineResult] = []
         combined_durations: dict[str, float] = {
             "intent_ms": 0.0,
@@ -437,11 +504,35 @@ class VoicePipeline:
             "dispatch_ms": 0.0,
         }
 
-        for sub_cmd in sub_commands:
-            r = self._execute_single_command(sub_cmd, custom_rooms=known_rooms)
-            sub_results.append(r)
-            for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
-                combined_durations[k] += r.step_durations.get(k, 0.0)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(sub_commands))) as executor:
+            future_to_idx = {
+                executor.submit(
+                    self._execute_single_command,
+                    sub_cmd,
+                    custom_rooms=known_rooms,
+                    user_id=user_id,
+                    is_compound_sub=True,
+                ): idx
+                for idx, sub_cmd in enumerate(sub_commands)
+            }
+            ordered_futures = sorted(future_to_idx.keys(), key=lambda f: future_to_idx[f])
+            for fut in ordered_futures:
+                r = fut.result()
+                sub_results.append(r)
+                for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
+                    combined_durations[k] = max(combined_durations[k], r.step_durations.get(k, 0.0))
+
+        # Cập nhật dialogue_state tuần tự sau khi lệnh kép hoàn tất (tránh race condition giữa các thread)
+        for r in reversed(sub_results):
+            if r.success and r.intent and r.dispatch_result and r.dispatch_result.successful_count > 0:
+                self.dialogue_state.update(
+                    room=r.intent.room,
+                    device_type=r.intent.device_type,
+                    device_ids=[d.device_id for d in r.dispatch_result.results if d.success],
+                    action=r.intent.action,
+                    home_id=self.home_id,
+                )
+                break
 
         # Gộp thông báo xác nhận tự nhiên
         combined_message = combine_command_messages([(r.success, r.message) for r in sub_results])

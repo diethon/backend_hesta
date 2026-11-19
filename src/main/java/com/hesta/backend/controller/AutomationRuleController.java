@@ -3,6 +3,9 @@ package com.hesta.backend.controller;
 import com.hesta.backend.dto.request.*;
 import com.hesta.backend.dto.response.*;
 import com.hesta.backend.security.CustomUserDetails;
+import com.hesta.backend.enums.AccessScope;
+import com.hesta.backend.exception.AppException;
+import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.service.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -100,16 +103,13 @@ public class AutomationRuleController {
     public ResponseEntity<ApiResponse<AutomationEngineResponse>> processEvent(
             @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
             @Valid @RequestBody AutomationEventRequest request) {
-        homeAuthorizationService.requireAccess(user.getId(), homeId);
-        return ok("Đã xử lý sự kiện tự động hóa", automationEngine.process(homeId, request));
-    }
-
-    @PostMapping("/{ruleId}/test")
-    public ResponseEntity<ApiResponse<AutomationTestResponse>> testRule(
-            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID homeId,
-            @PathVariable UUID ruleId, @Valid @RequestBody AutomationEventRequest request) {
+        // Injected events can carry emergency flags that bypass manual override and cooldown.
         homeAuthorizationService.requireSceneManagement(user.getId(), homeId);
-        return ok("Đã chạy thử quy tắc", automationEngine.testRule(homeId, ruleId, request));
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, user.getId());
+        if (!ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
+        return ok("Đã xử lý sự kiện tự động hóa", automationEngine.process(homeId, request));
     }
 
     private <T> ResponseEntity<ApiResponse<T>> ok(String message, T result) {

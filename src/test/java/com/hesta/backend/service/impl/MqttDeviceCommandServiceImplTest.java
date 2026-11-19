@@ -2,8 +2,11 @@ package com.hesta.backend.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
+import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.EdgeNode;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.EdgeNodeStatus;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.DeviceRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +48,7 @@ class MqttDeviceCommandServiceImplTest {
     @BeforeEach
     void setUp() {
         MqttDeviceCommandServiceImpl.pendingCommands.clear();
+        MqttDeviceCommandServiceImpl.commandDeviceMap.clear();
         java.lang.reflect.Field f = org.springframework.util.ReflectionUtils.findField(MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
         if (f != null) {
             f.setAccessible(true);
@@ -271,17 +275,91 @@ class MqttDeviceCommandServiceImplTest {
         ledDevice.setRoom(room);
 
         when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+        com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtime =
+                mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        ReflectionTestUtils.setField(commandService, "realtimeEventPublisher", realtime);
 
-        commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+        // Production runs inside sendCommand's @Transactional: the AFTER_COMMIT listener does the broadcast.
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.MANUAL);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
 
         ArgumentCaptor<com.hesta.backend.dto.command.DeviceStateChangedEvent> eventCaptor =
                 ArgumentCaptor.forClass(com.hesta.backend.dto.command.DeviceStateChangedEvent.class);
         verify(mockPublisher, times(1)).publishEvent(eventCaptor.capture());
+        verifyNoInteractions(realtime); // no second, pre-commit copy of the same change
 
         com.hesta.backend.dto.command.DeviceStateChangedEvent capturedEvent = eventCaptor.getValue();
         assertEquals(homeId, capturedEvent.homeId());
         assertEquals(deviceId, capturedEvent.payload().deviceId());
         assertEquals("ON", capturedEvent.payload().currentState().path("power").asText());
+    }
+
+    @Test
+    @DisplayName("Realtime: without a transaction (chained scene command) the change is broadcast directly, once")
+    void testSendCommand_NoTransactionBroadcastsDirectlyOnce() {
+        org.springframework.context.ApplicationEventPublisher mockPublisher = mock(org.springframework.context.ApplicationEventPublisher.class);
+        com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtime =
+                mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        ReflectionTestUtils.setField(commandService, "applicationEventPublisher", mockPublisher);
+        ReflectionTestUtils.setField(commandService, "realtimeEventPublisher", realtime);
+        ledDevice.setRoom(com.hesta.backend.entity.Room.builder()
+                .home(com.hesta.backend.entity.Home.builder().id(UUID.randomUUID()).build()).build());
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        commandService.sendCommand(deviceId, "POWER_ON", new HashMap<>(), StateChangeSource.SCENE);
+
+        verify(realtime, times(1)).publish(any());
+        verifyNoInteractions(mockPublisher);
+    }
+
+    @Test
+    @DisplayName("Timeout: the assumed state is reverted and broadcast so other screens show the real state")
+    void testSendCommand_TimeoutRevertsOptimisticState() {
+        com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtime =
+                mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        ReflectionTestUtils.setField(commandService, "realtimeEventPublisher", realtime);
+        ReflectionTestUtils.setField(commandService, "transactionManager",
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+        ReflectionTestUtils.setField(commandService, "commandTimeoutMs", 50L);
+        ledDevice.setRoom(com.hesta.backend.entity.Room.builder()
+                .home(com.hesta.backend.entity.Home.builder().id(UUID.randomUUID()).build()).build());
+        ledDevice.setCurrentState(new HashMap<>(Map.of("power", "OFF")));
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        com.hesta.backend.dto.command.CommandResult result = commandService
+                .sendCommand(deviceId, "TURN_ON", new HashMap<>(), StateChangeSource.MANUAL).join();
+
+        assertEquals("TIMEOUT", result.getStatus());
+        assertEquals("OFF", ledDevice.getCurrentState().get("power"));
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        ArgumentCaptor<com.hesta.backend.realtime.model.RealtimeEvent> sent =
+                ArgumentCaptor.forClass(com.hesta.backend.realtime.model.RealtimeEvent.class);
+        verify(realtime, times(2)).publish(sent.capture()); // optimistic ON, then the correction
+        var correction = (com.hesta.backend.dto.response.TwinDeviceSnapshotResponse) sent.getAllValues().get(1).data();
+        assertEquals("OFF", correction.currentState().path("power").asText());
+    }
+
+    @Test
+    @DisplayName("Timeout: a newer state (e.g. a late device report) is never overwritten by the revert")
+    void testSendCommand_TimeoutKeepsNewerState() {
+        ReflectionTestUtils.setField(commandService, "transactionManager",
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+        ReflectionTestUtils.setField(commandService, "commandTimeoutMs", 50L);
+        ledDevice.setCurrentState(new HashMap<>(Map.of("power", "OFF")));
+        Device reloaded = Device.builder().id(deviceId).deviceType("LED")
+                .currentState(new HashMap<>(Map.of("power", "ON", "brightness", 40))).build();
+        when(deviceRepository.findByIdWithNode(deviceId))
+                .thenReturn(Optional.of(ledDevice))
+                .thenReturn(Optional.of(reloaded));
+
+        commandService.sendCommand(deviceId, "TURN_ON", new HashMap<>(), StateChangeSource.MANUAL).join();
+
+        assertEquals("ON", reloaded.getCurrentState().get("power"));
+        verify(deviceRepository, never()).save(reloaded);
     }
 
     @Test
@@ -349,6 +427,62 @@ class MqttDeviceCommandServiceImplTest {
         assertEquals("SUCCESS", result2.getStatus());
     }
 
+    @Test
+    @DisplayName("Gate: sendCommand registers commandId in commandDeviceMap")
+    void testSendCommand_Gate_PopulatesCommandDeviceMap() {
+        Device gateDevice = Device.builder()
+                .id(deviceId)
+                .name("Main Gate")
+                .deviceType("GATE")
+                .localId("gate_1")
+                .node(EdgeNode.builder().id(UUID.randomUUID()).nodeCode("HESTA-GATE-01").build())
+                .currentState(new HashMap<>())
+                .build();
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(gateDevice));
+
+        commandService.sendCommand(deviceId, "CLOSE", new HashMap<>(), StateChangeSource.VOICE);
+
+        assertFalse(MqttDeviceCommandServiceImpl.commandDeviceMap.isEmpty());
+        assertTrue(MqttDeviceCommandServiceImpl.commandDeviceMap.containsValue(deviceId));
+    }
+
+    @Test
+    @DisplayName("SET_BRIGHTNESS rejected with DEVICE_OFFLINE and no MQTT/save when device status is OFFLINE, UNKNOWN, or ERROR")
+    void testSendCommand_SetBrightness_RejectedWhenDeviceUnavailable() {
+        for (DeviceStatus status : new DeviceStatus[]{DeviceStatus.OFFLINE, DeviceStatus.UNKNOWN, DeviceStatus.ERROR}) {
+            ledDevice.setStatus(status);
+            when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+            CommandResult result = commandService
+                    .sendCommand(deviceId, "SET_BRIGHTNESS", Map.of("brightness", 80), StateChangeSource.MANUAL)
+                    .join();
+
+            assertNotNull(result);
+            assertFalse(result.isSuccess(), "Expected failure for status " + status);
+            assertEquals("DEVICE_OFFLINE", result.getErrorCode());
+        }
+
+        verify(mqttGateway, never()).sendToMqtt(anyString(), anyInt(), anyString());
+        verify(deviceRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("SET_BRIGHTNESS rejected with DEVICE_OFFLINE and no MQTT/save when device is ONLINE but EdgeNode is OFFLINE")
+    void testSendCommand_SetBrightness_RejectedWhenEdgeNodeOffline() {
+        ledDevice.setStatus(DeviceStatus.ONLINE);
+        ledDevice.getNode().setStatus(EdgeNodeStatus.OFFLINE);
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+
+        CommandResult result = commandService
+                .sendCommand(deviceId, "SET_BRIGHTNESS", Map.of("brightness", 80), StateChangeSource.MANUAL)
+                .join();
+
+        assertNotNull(result);
+        assertFalse(result.isSuccess());
+        assertEquals("DEVICE_OFFLINE", result.getErrorCode());
+        verify(mqttGateway, never()).sendToMqtt(anyString(), anyInt(), anyString());
+        verify(deviceRepository, never()).save(any());
+    }
     @Test
     @DisplayName("Fan: SET_SPEED with level 1, 2, 3 should update speed, fan, power and payload")
     void testSendCommand_Fan_SpeedLevels() throws Exception {

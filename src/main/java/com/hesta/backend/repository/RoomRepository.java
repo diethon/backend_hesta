@@ -24,4 +24,4 @@ public interface RoomRepository extends JpaRepository<Room, UUID> {
 
     @Query("SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END FROM Room r JOIN HomeMember hm ON r.home.id = hm.home.id WHERE r.id = :roomId AND hm.user.id = :userId")
     boolean hasAccessToRoom(@Param("roomId") UUID roomId, @Param("userId") UUID userId);
-}
+}

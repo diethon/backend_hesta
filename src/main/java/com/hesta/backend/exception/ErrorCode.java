@@ -47,6 +47,7 @@ public enum ErrorCode {
     AUTOMATION_ACTION_INVALID(1206, "Automation action is invalid", HttpStatus.BAD_REQUEST),
     AUTOMATION_DEVICE_HOME_MISMATCH(1207, "Automation device must belong to the rule home", HttpStatus.BAD_REQUEST),
     AUTOMATION_EVENT_INVALID(1208, "Automation event is invalid", HttpStatus.BAD_REQUEST),
+    AUTOMATION_SCHEDULE_REQUIRED(1209, "Quy tắc hẹn giờ cần ít nhất một giờ chạy đang bật", HttpStatus.BAD_REQUEST),
     BEHAVIOR_DATASET_INVALID(1300, "Behavior dataset request is invalid", HttpStatus.BAD_REQUEST),
     BEHAVIOR_DEVICE_REQUIRED(1301, "At least one device is required to generate behavior data", HttpStatus.BAD_REQUEST),
     RECOMMENDATION_NOT_FOUND(1302, "Recommendation not found", HttpStatus.NOT_FOUND),
@@ -98,6 +99,7 @@ public enum ErrorCode {
     AC_FAN_INVALID(1038, "Tốc độ quạt không hợp lệ. Các mức hợp lệ: AUTO, LOW, MID, HIGH", HttpStatus.BAD_REQUEST),
     AC_TIMER_INVALID(1039, "Thời gian hẹn giờ không hợp lệ (giờ từ 0 đến 24)", HttpStatus.BAD_REQUEST),
     GATE_ACTION_INVALID(1040, "Hành động điều khiển cổng không hợp lệ. Các hành động hợp lệ: OPEN, CLOSE, STOP", HttpStatus.BAD_REQUEST),
+    DEVICE_OFFLINE(1048, "Thiết bị đang ngoại tuyến hoặc chưa kết nối", HttpStatus.CONFLICT),
     // Notification Core
     NOTIFICATION_EVENT_INVALID(1025, "Dữ liệu thông báo không hợp lệ", HttpStatus.BAD_REQUEST),
 
@@ -117,8 +119,32 @@ public enum ErrorCode {
     OTA_PACKAGE_NOT_FOUND(1600, "Firmware package not found", HttpStatus.NOT_FOUND),
     OTA_CAMPAIGN_CONFLICT(1601, "Active OTA campaign already exists for this device type", HttpStatus.CONFLICT),
     OTA_CAMPAIGN_NOT_FOUND(1602, "OTA campaign not found", HttpStatus.NOT_FOUND),
+    OTA_PACKAGE_INVALID(1603, "Gói firmware OTA không hợp lệ hoặc thiếu dữ liệu bắt buộc", HttpStatus.BAD_REQUEST),
+    OTA_FILE_TOO_LARGE(1604, "Tệp firmware OTA không được vượt quá 20 MB", HttpStatus.PAYLOAD_TOO_LARGE),
+    OTA_NO_TARGET_NODES(1605, "Không tìm thấy Edge Node trực tuyến phù hợp với loại thiết bị của bản firmware", HttpStatus.BAD_REQUEST),
+    OTA_FILE_STORAGE_FAILED(1606, "Không thể lưu trữ hoặc đọc tệp firmware trên máy chủ", HttpStatus.INTERNAL_SERVER_ERROR),
+    GATEWAY_DISCONNECTED(1610, "MQTT Broker hiện đang mất kết nối, không thể gửi gói tin xuống Node", HttpStatus.SERVICE_UNAVAILABLE),
+    PING_TIMEOUT(1611, "Edge Node không phản hồi gói tin MQTT Ping trong thời gian quy định", HttpStatus.GATEWAY_TIMEOUT),
     GUARDIAN_RULE_NOT_FOUND(1500, "Parental guardian rule not found", HttpStatus.NOT_FOUND),
-    GUARDIAN_RULE_INVALID(1501, "Parental guardian rule parameters are invalid", HttpStatus.BAD_REQUEST);
+    GUARDIAN_RULE_INVALID(1501, "Parental guardian rule parameters are invalid", HttpStatus.BAD_REQUEST),
+
+    // Home membership & ownership protection
+    CANNOT_REMOVE_OWNER(1053, "Không thể xóa chủ nhà", HttpStatus.FORBIDDEN),
+    CANNOT_CHANGE_OWNER_ROLE(1054, "Không thể thay đổi vai trò của chủ nhà", HttpStatus.FORBIDDEN),
+    CANNOT_REMOVE_SELF(1055, "Bạn không thể tự xóa chính mình khỏi nhà", HttpStatus.BAD_REQUEST),
+    LAST_OWNER_REQUIRED(1056, "Ngôi nhà phải có ít nhất một chủ nhà đang hoạt động", HttpStatus.BAD_REQUEST),
+    MEMBER_NOT_FOUND(1057, "Không tìm thấy thành viên trong nhà", HttpStatus.NOT_FOUND),
+    MEMBER_ACCESS_CONFLICT(1058, "Cấu hình phân quyền đã bị thay đổi bởi người khác", HttpStatus.CONFLICT),
+    INVALID_ACCESS_PAYLOAD(1059, "Dữ liệu phân quyền không hợp lệ", HttpStatus.BAD_REQUEST),
+    CANNOT_MODIFY_OWNER_ACCESS(1060, "Không thể thay đổi quyền của chủ nhà", HttpStatus.CONFLICT),
+    STALE_ACCESS_VERSION(1061, "Phiên bản cấu hình phân quyền đã cũ. Vui lòng tải lại dữ liệu", HttpStatus.CONFLICT),
+    FEATURE_DISABLED(1062, "Chưa bật quyền tùy chỉnh", HttpStatus.CONFLICT),
+    MEMBER_ALREADY_EXISTS(1063, "Người dùng này đã là thành viên của ngôi nhà", HttpStatus.CONFLICT),
+    INVITATION_ALREADY_EXISTS(1064, "Đã có lời mời đang chờ xử lý cho email này", HttpStatus.CONFLICT),
+
+    // Anomaly detection & management
+    ANOMALY_NOT_FOUND(1700, "Bất thường không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
+    ANOMALY_INVALID_STATUS(1701, "Trạng thái bất thường không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST);
 
 
     private final int code;

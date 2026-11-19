@@ -136,11 +136,13 @@ public class HomeController {
 
             @PathVariable UUID homeId,
 
-            @RequestParam(required = false) String email) {
+            @RequestParam(required = false) String email,
+
+            @RequestBody(required = false) com.hesta.backend.dto.access.CreateInvitationRequest request) {
 
 
 
-        Map<String, Object> result = homeService.generateInvitation(userDetails.getId(), homeId, email);
+        Map<String, Object> result = homeService.generateInvitation(userDetails.getId(), homeId, email, request);
 
 
 

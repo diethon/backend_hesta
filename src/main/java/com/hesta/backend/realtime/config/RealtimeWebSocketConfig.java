@@ -2,6 +2,7 @@ package com.hesta.backend.realtime.config;
 
 import com.hesta.backend.realtime.security.RealtimeWebSocketChannelInterceptor;
 import com.hesta.backend.realtime.transport.RealtimeDestinations;
+import com.hesta.backend.realtime.transport.WebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -25,15 +26,18 @@ public class RealtimeWebSocketConfig implements WebSocketMessageBrokerConfigurer
     private final RealtimeWebSocketChannelInterceptor channelInterceptor;
     private final WebSocketRealtimeProperties properties;
     private final TaskScheduler heartbeatTaskScheduler;
+    private final WebSocketSessionManager webSocketSessionManager;
 
     public RealtimeWebSocketConfig(
             RealtimeWebSocketChannelInterceptor channelInterceptor,
             WebSocketRealtimeProperties properties,
-            @Qualifier("realtimeHeartbeatTaskScheduler") TaskScheduler heartbeatTaskScheduler
+            @Qualifier("realtimeHeartbeatTaskScheduler") TaskScheduler heartbeatTaskScheduler,
+            WebSocketSessionManager webSocketSessionManager
     ) {
         this.channelInterceptor = channelInterceptor;
         this.properties = properties;
         this.heartbeatTaskScheduler = heartbeatTaskScheduler;
+        this.webSocketSessionManager = webSocketSessionManager;
     }
 
     @Override
@@ -45,10 +49,11 @@ public class RealtimeWebSocketConfig implements WebSocketMessageBrokerConfigurer
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         long heartbeatMillis = properties.heartbeat().toMillis();
-        registry.enableSimpleBroker(RealtimeDestinations.TOPIC_PREFIX)
+        registry.enableSimpleBroker(RealtimeDestinations.TOPIC_PREFIX, RealtimeDestinations.QUEUE_PREFIX)
                 .setHeartbeatValue(new long[]{heartbeatMillis, heartbeatMillis})
                 .setTaskScheduler(heartbeatTaskScheduler);
         registry.setApplicationDestinationPrefixes(RealtimeDestinations.APPLICATION_PREFIX);
+        registry.setUserDestinationPrefix(RealtimeDestinations.USER_PREFIX);
     }
 
     @Override
@@ -59,5 +64,6 @@ public class RealtimeWebSocketConfig implements WebSocketMessageBrokerConfigurer
     @Override
     public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
         registration.setTimeToFirstMessage(TIME_TO_FIRST_MESSAGE_MILLIS);
+        registration.addDecoratorFactory(webSocketSessionManager);
     }
 }

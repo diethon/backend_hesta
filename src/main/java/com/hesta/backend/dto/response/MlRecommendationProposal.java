@@ -21,6 +21,8 @@ public class MlRecommendationProposal {
     private Map<String, Object> parameters;
     private String triggerType;
     private String time;
+    /** ISO days 1=Mon..7=Sun; empty = every day. */
+    private java.util.List<Integer> repeatDays;
     private Double confidence;
     private Boolean eligible;
     private String reason;

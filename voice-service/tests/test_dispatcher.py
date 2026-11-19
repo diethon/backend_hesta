@@ -331,3 +331,108 @@ class TestDispatchBatchResultMessages:
         )
         msg_fans = batch_fans.summary_message("TURN_OFF", "fan", None, pattern="tắt tất cả quạt")
         assert "tất cả 2 quạt trong nhà" in msg_fans
+
+    def test_summary_access_denied(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=0, failed_count=1,
+            results=[DispatchResult(device_id="d-1", success=False, status_code=403, error_code="ACCESS_DENIED")]
+        )
+        msg = batch.summary_message("TURN_ON", "light", "phòng ngủ")
+        assert "Bạn không có quyền bật đèn phòng ngủ." in msg
+
+    def test_summary_device_offline(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=0, failed_count=1,
+            results=[DispatchResult(device_id="d-1", success=False, status_code=200, error_code="DEVICE_OFFLINE")]
+        )
+        msg = batch.summary_message("TURN_ON", "light", "phòng ngủ")
+        assert "hiện đang ngoại tuyến hoặc chưa kết nối" in msg
+
+    def test_summary_gateway_disconnected(self):
+        batch = DispatchBatchResult(
+            total_devices=1, successful_count=0, failed_count=1,
+            results=[DispatchResult(device_id="d-1", success=False, status_code=200, error_code="GATEWAY_DISCONNECTED")]
+        )
+        msg = batch.summary_message("TURN_ON", "fan", "phòng khách")
+        assert "Không thể kết nối đến Gateway" in msg
+
+    def test_summary_curtain_messages(self):
+        batch = DispatchBatchResult(total_devices=1, successful_count=1, failed_count=0)
+
+        # Mở rèm
+        msg1 = batch.summary_message("OPEN", "curtain", "phòng khách", pattern="mở rèm")
+        assert msg1 == "Đã mở rèm phòng khách"
+
+        # Mở rèm cửa
+        msg2 = batch.summary_message("OPEN", "curtain", "phòng khách", pattern="mở rèm cửa")
+        assert msg2 == "Đã mở rèm cửa phòng khách"
+
+        # Bật rèm cửa
+        msg3 = batch.summary_message("OPEN", "curtain", "phòng ngủ", pattern="bật rèm cửa")
+        assert msg3 == "Đã bật rèm cửa phòng ngủ"
+
+        # Đóng rèm
+        msg4 = batch.summary_message("CLOSE", "curtain", "phòng khách", pattern="đóng rèm")
+        assert msg4 == "Đã đóng rèm phòng khách"
+
+        # Tắt rèm cửa
+        msg5 = batch.summary_message("CLOSE", "curtain", "phòng ngủ", pattern="tắt rèm cửa")
+        assert msg5 == "Đã tắt rèm cửa phòng ngủ"
+
+        # Dừng rèm cửa
+        msg6 = batch.summary_message("STOP", "curtain", "phòng khách", pattern="dừng rèm cửa")
+        assert msg6 == "Đã dừng rèm cửa phòng khách"
+
+    def test_summary_partial_rbac_denied_does_not_say_error(self):
+        """Khi 3 đèn thành công và 3 đèn còn lại bị từ chối quyền (403/404), không được báo 'thiết bị lỗi'."""
+        batch = DispatchBatchResult(
+            total_devices=6,
+            successful_count=3,
+            failed_count=3,
+            results=[
+                DispatchResult(device_id="d-1", success=True, status_code=200),
+                DispatchResult(device_id="d-2", success=True, status_code=200),
+                DispatchResult(device_id="d-3", success=True, status_code=200),
+                DispatchResult(device_id="d-4", success=False, status_code=403, error_code="ACCESS_DENIED"),
+                DispatchResult(device_id="d-5", success=False, status_code=404, error_code="ACCESS_DENIED"),
+                DispatchResult(device_id="d-6", success=False, status_code=404, error_code="ACCESS_DENIED"),
+            ],
+        )
+        msg = batch.summary_message("TURN_ON", "light", None, pattern="bật toàn bộ đèn")
+        assert msg == "Đã bật 3 đèn trong nhà trong phạm vi quyền của bạn"
+        assert "lỗi" not in msg.lower()
+        assert "3/6" not in msg
+
+    def test_summary_partial_mixed_denied_and_offline(self):
+        """Phân tách rõ giữa thiết bị không có quyền và thiết bị ngoại tuyến."""
+        batch = DispatchBatchResult(
+            total_devices=5,
+            successful_count=2,
+            failed_count=3,
+            results=[
+                DispatchResult(device_id="d-1", success=True, status_code=200),
+                DispatchResult(device_id="d-2", success=True, status_code=200),
+                DispatchResult(device_id="d-3", success=False, status_code=403, error_code="ACCESS_DENIED"),
+                DispatchResult(device_id="d-4", success=False, status_code=404, error_code="ACCESS_DENIED"),
+                DispatchResult(device_id="d-5", success=False, status_code=200, error_code="DEVICE_OFFLINE"),
+            ],
+        )
+        msg = batch.summary_message("TURN_OFF", "light", None, pattern="tắt toàn bộ đèn")
+        assert "2 thiết bị không có quyền" in msg
+        assert "1 thiết bị ngoại tuyến" in msg
+        assert "thiết bị lỗi" not in msg
+
+    @patch.dict("os.environ", {"INTERNAL_API_KEY": "test-key"})
+    def test_dispatch_404_with_user_id_maps_to_access_denied(self):
+        """Backend fail-closed trả 404 cho thiết bị NONE của CUSTOM member -> map sang ACCESS_DENIED."""
+        transport = make_mock_transport(
+            status_code=404,
+            response_body={"code": 1102, "message": "Device not found"},
+            expected_api_key="test-key",
+        )
+        client = httpx.Client(base_url="http://localhost:8080", transport=transport)
+        d = Dispatcher(DispatchConfig(base_url="http://localhost:8080"), http_client=client)
+        res = d.dispatch("dev-hidden", "TURN_ON", user_id="member-123")
+        assert res.success is False
+        assert res.status_code == 404
+        assert res.error_code == "ACCESS_DENIED"

@@ -34,4 +34,4 @@ public class RoomResponse {
                 .createdAt(room.getCreatedAt())
                 .build();
     }
-}
+}

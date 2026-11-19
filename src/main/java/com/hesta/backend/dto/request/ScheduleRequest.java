@@ -5,9 +5,13 @@ import lombok.Data;
 
 import java.time.LocalTime;
 import java.util.List;
+import java.util.UUID;
 
 @Data
 public class ScheduleRequest {
+    /** Only in a rule's schedule list: an existing time to keep and update; null creates a new one. */
+    private UUID id;
+
     @NotNull(message = "SCENE_SCHEDULE_INVALID")
     private LocalTime scheduledTime;
 

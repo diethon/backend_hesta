@@ -1,5 +1,6 @@
 package com.hesta.backend.entity;
 
+import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.enums.MemberStatus;
 import jakarta.persistence.*;
@@ -41,6 +42,11 @@ public class HomeMember {
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private MemberStatus status = MemberStatus.ACTIVE;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "access_scope", nullable = false, length = 20)
+    @Builder.Default
+    private AccessScope accessScope = AccessScope.ALL;
 
     @Column(name = "allow_voice_override", nullable = false)
     @Builder.Default

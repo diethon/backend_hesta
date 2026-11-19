@@ -67,7 +67,6 @@ class TwinContractSerializationTest {
     @Test
     void device_withoutRoomOrObservation_serializesExplicitNulls() throws Exception {
         fixture.light.setRoom(null);
-        fixture.light.setLastSeen(null);
         JsonNode json = objectMapper.readTree(objectMapper.writeValueAsBytes(TwinHealthTestSupport.mapper(objectMapper)
                 .device(fixture.light)));
         assertThat(json.has("roomId")).isTrue();

@@ -1,28 +1,42 @@
 package com.hesta.backend.diagnostics;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.entity.EdgeNode;
+import com.hesta.backend.enums.EdgeNodeStatus;
+import com.hesta.backend.exception.AppException;
+import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.EdgeNodeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.integration.mqtt.event.MqttConnectionFailedEvent;
+import org.springframework.integration.mqtt.event.MqttSubscribedEvent;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class MqttDiagnosticsServiceImplTest {
 
     @Mock
     private EdgeNodeRepository edgeNodeRepository;
+
+    @Mock
+    private MqttGateway mqttGateway;
 
     @InjectMocks
     private MqttDiagnosticsServiceImpl diagnosticsService;
@@ -33,9 +47,14 @@ class MqttDiagnosticsServiceImplTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(diagnosticsService, "brokerUrl", "tcp://localhost:1883");
+        ReflectionTestUtils.setField(diagnosticsService, "topicPrefix", "hesta/nodes");
+        ReflectionTestUtils.setField(diagnosticsService, "pingTimeoutMs", 1500L);
+        ReflectionTestUtils.setField(diagnosticsService, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(diagnosticsService, "mqttGateway", mqttGateway);
         node = EdgeNode.builder()
                 .id(UUID.randomUUID())
                 .nodeCode(nodeCode)
+                .status(EdgeNodeStatus.ONLINE)
                 .build();
     }
 
@@ -83,7 +102,7 @@ class MqttDiagnosticsServiceImplTest {
     @Test
     @DisplayName("Circuit Breaker: trip endpoint forces OPEN state and blocks commands")
     void testTripCircuitBreaker() {
-        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
 
         assertTrue(diagnosticsService.allowExecution(nodeCode));
 
@@ -113,7 +132,7 @@ class MqttDiagnosticsServiceImplTest {
     @DisplayName("Circuit Breaker: in HALF_OPEN state, only one trial execution in flight is permitted")
     void testCircuitBreaker_HalfOpenOnlyAllowsSingleTrial() {
         // Manually trip
-        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
         diagnosticsService.tripCircuitBreaker(nodeCode);
         assertFalse(diagnosticsService.allowExecution(nodeCode));
 
@@ -136,8 +155,8 @@ class MqttDiagnosticsServiceImplTest {
     @Test
     @DisplayName("Circuit Breaker: trip endpoint with UUID nodeId resolves node and forces OPEN state")
     void testTripCircuitBreaker_ByNodeId() {
-        when(edgeNodeRepository.findById(node.getId())).thenReturn(Optional.of(node));
-        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByIdWithHome(node.getId())).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
 
         assertTrue(diagnosticsService.allowExecution(nodeCode));
 
@@ -204,5 +223,76 @@ class MqttDiagnosticsServiceImplTest {
         assertNotNull(response);
         assertNull(response.getLastPingAt(), "Resetting circuit breaker must not fake lastPingAt when node hasn't pinged");
         assertEquals(CircuitState.CLOSED, response.getCircuitState());
+    }
+
+    @Test
+    @DisplayName("Broker Status: tracks MqttSubscribedEvent and MqttConnectionFailedEvent instead of hardcoding true")
+    void testBrokerConnectionTracking() {
+        when(edgeNodeRepository.findAll()).thenReturn(List.of(node));
+
+        assertFalse(diagnosticsService.getSummary().isBrokerConnected());
+
+        diagnosticsService.onMqttSubscribed(new MqttSubscribedEvent(this, "connected"));
+        assertTrue(diagnosticsService.getSummary().isBrokerConnected());
+
+        diagnosticsService.onMqttConnectionFailed(new MqttConnectionFailedEvent(this, new RuntimeException("drop")));
+        assertFalse(diagnosticsService.getSummary().isBrokerConnected());
+    }
+
+    @Test
+    @DisplayName("Real MQTT Ping: publishes /ping, resolves on /pong, and works even if circuit breaker is OPEN")
+    void testPingNode_RealMqttPong() throws Exception {
+        when(edgeNodeRepository.findByIdWithHome(node.getId())).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findById(node.getId())).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findByNodeCodeWithHome(nodeCode)).thenReturn(Optional.of(node));
+
+        // Open circuit breaker first; diagnostic ping must still bypass it
+        diagnosticsService.tripCircuitBreaker(nodeCode);
+        assertFalse(diagnosticsService.allowExecution(nodeCode));
+
+        doAnswer(inv -> {
+            String topic = inv.getArgument(0);
+            String rawPayload = inv.getArgument(2);
+            assertEquals("hesta/nodes/" + nodeCode + "/ping", topic);
+            Map<?, ?> sent = new ObjectMapper().readValue(rawPayload, Map.class);
+            String pingId = sent.get("pingId").toString();
+            new Thread(() -> {
+                try {
+                    Thread.sleep(25);
+                    diagnosticsService.handlePong(nodeCode, "{\"pingId\":\"" + pingId + "\"}");
+                } catch (Exception ignored) {}
+            }).start();
+            return null;
+        }).when(mqttGateway).sendToMqtt(anyString(), anyInt(), anyString());
+
+        NodeDiagnosticsResponse response = diagnosticsService.pingNode(node.getId());
+
+        assertNotNull(response);
+        assertTrue(response.getAverageLatencyMs() >= 1L);
+        assertNotNull(response.getLastPingAt());
+        assertEquals(1, response.getSuccessfulCommands());
+        assertEquals(CircuitState.CLOSED, response.getCircuitState());
+    }
+
+    @Test
+    @DisplayName("Real MQTT Ping: throws PING_TIMEOUT (504) instead of faking 25ms when node does not reply")
+    void testPingNode_TimeoutThrows504() {
+        ReflectionTestUtils.setField(diagnosticsService, "pingTimeoutMs", 80L);
+        when(edgeNodeRepository.findByIdWithHome(node.getId())).thenReturn(Optional.of(node));
+
+        AppException ex = assertThrows(AppException.class, () -> diagnosticsService.pingNode(node.getId()));
+        assertEquals(ErrorCode.PING_TIMEOUT, ex.getErrorCode());
+
+        verify(mqttGateway).sendToMqtt(eq("hesta/nodes/" + nodeCode + "/ping"), eq(1), anyString());
+    }
+
+    @Test
+    @DisplayName("Real MQTT Ping: throws GATEWAY_DISCONNECTED (503) when MqttGateway is absent")
+    void testPingNode_DisconnectedThrows503() {
+        ReflectionTestUtils.setField(diagnosticsService, "mqttGateway", null);
+        when(edgeNodeRepository.findByIdWithHome(node.getId())).thenReturn(Optional.of(node));
+
+        AppException ex = assertThrows(AppException.class, () -> diagnosticsService.pingNode(node.getId()));
+        assertEquals(ErrorCode.GATEWAY_DISCONNECTED, ex.getErrorCode());
     }
 }

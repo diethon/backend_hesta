@@ -135,6 +135,25 @@ class RealtimeWebSocketChannelInterceptorTest {
     }
 
     @Test
+    void subscribe_toOtherHomesFallTopic_rejectsSubscription() {
+        Message<byte[]> message = subscribeMessage(
+                "/topic/home/" + UUID.randomUUID() + "/fall",
+                authenticated(principal(UUID.randomUUID()))
+        );
+
+        assertThatThrownBy(() -> interceptor.preSend(message, messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void subscribe_toOwnFallQueue_requiresAuthentication() {
+        interceptor.preSend(subscribeMessage("/user/topic/fall", authenticated(principal(UUID.randomUUID()))), messageChannel);
+
+        assertThatThrownBy(() -> interceptor.preSend(subscribeMessage("/user/topic/fall", null), messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
     void subscribe_toNonHomeDestination_rejectsSubscription() {
         Message<byte[]> message = subscribeMessage(
                 "/topic/global/events",

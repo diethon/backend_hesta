@@ -4,6 +4,7 @@ import com.hesta.backend.dto.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -20,10 +21,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<Object>> handleAppException(AppException exception) {
         ErrorCode errorCode = exception.getErrorCode();
+        String message = (exception.getMessage() != null && !exception.getMessage().isBlank())
+                ? exception.getMessage()
+                : errorCode.getMessage();
         
         ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
                 .code(errorCode.getCode())
-                .message(errorCode.getMessage())
+                .message(message)
                 .build();
                 
         return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
@@ -64,14 +68,27 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Object>> handleMaxUploadSizeExceededException(
-            MaxUploadSizeExceededException exception) {
+            MaxUploadSizeExceededException exception,
+            jakarta.servlet.http.HttpServletRequest request) {
+        if (request != null && request.getRequestURI() != null && request.getRequestURI().contains("/ota/")) {
+            return errorResponse(ErrorCode.OTA_FILE_TOO_LARGE);
+        }
         return errorResponse(ErrorCode.AVATAR_FILE_TOO_LARGE);
     }
 
     @ExceptionHandler(MissingServletRequestPartException.class)
     public ResponseEntity<ApiResponse<Object>> handleMissingServletRequestPartException(
-            MissingServletRequestPartException exception) {
+            MissingServletRequestPartException exception,
+            jakarta.servlet.http.HttpServletRequest request) {
+        if (request != null && request.getRequestURI() != null && request.getRequestURI().contains("/ota/")) {
+            return errorResponse(ErrorCode.OTA_PACKAGE_INVALID);
+        }
         return errorResponse(ErrorCode.AVATAR_FILE_REQUIRED);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Object>> handleAccessDeniedException(AccessDeniedException exception) {
+        return errorResponse(ErrorCode.UNAUTHORIZED);
     }
 
     /**
@@ -79,6 +96,14 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Object>> handleGeneralException(Exception exception) {
+        // Spring's own client errors (unknown route 404, wrong method 405, missing param 400) keep their status.
+        if (exception instanceof org.springframework.web.ErrorResponse springError
+                && springError.getStatusCode().is4xxClientError()) {
+            return clientError(springError.getStatusCode(), springError.getBody().getDetail());
+        }
+        if (exception instanceof org.springframework.beans.TypeMismatchException) {
+            return clientError(org.springframework.http.HttpStatus.BAD_REQUEST, "Request parameter has an invalid format");
+        }
         log.error("Uncaught Exception: ", exception);
         
         ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
@@ -87,6 +112,14 @@ public class GlobalExceptionHandler {
                 .build();
                 
         return ResponseEntity.status(ErrorCode.UNCATEGORIZED_EXCEPTION.getStatusCode()).body(apiResponse);
+    }
+
+    private ResponseEntity<ApiResponse<Object>> clientError(org.springframework.http.HttpStatusCode status, String detail) {
+        ApiResponse<Object> apiResponse = ApiResponse.<Object>builder()
+                .code(ErrorCode.INVALID_REQUEST.getCode())
+                .message(detail != null ? detail : "Request is invalid")
+                .build();
+        return ResponseEntity.status(status).body(apiResponse);
     }
 
     private ResponseEntity<ApiResponse<Object>> errorResponse(ErrorCode errorCode) {

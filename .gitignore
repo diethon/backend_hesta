@@ -40,6 +40,7 @@ Thumbs.db
 ### Logs ###
 *.log
 logs/
+uploads/
 
 ### Env variables ###
 .env
@@ -66,3 +67,15 @@ client_secret_*.json
 token.json
 .aider*
 hesta-backend-*
+
+### Temporary scripts, diagrams, test reports & weights ###
+diagram*.xml
+*.pt
+*.xlsx
+/scripts/
+fix_json.py
+fix_sensors.sql
+src/main/resources/application-local.properties
+voice-service/assets/piper/*.onnx
+voice-service/assets/piper/*.onnx.json
+

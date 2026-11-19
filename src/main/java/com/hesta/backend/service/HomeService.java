@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public interface HomeService {
     Map<String, Object> generateInvitation(UUID inviterId, UUID homeId, String email);
+    Map<String, Object> generateInvitation(UUID inviterId, UUID homeId, String email, com.hesta.backend.dto.access.CreateInvitationRequest request);
     void joinHome(UUID userId, String codeOrToken);
     Object getHomeMembers(UUID userId, UUID homeId);
     

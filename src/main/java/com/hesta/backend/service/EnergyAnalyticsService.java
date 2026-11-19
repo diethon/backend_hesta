@@ -29,4 +29,9 @@ public interface EnergyAnalyticsService {
      * Xác định bậc giá điện EVN hiện tại (từ bậc 1 đến bậc 6).
      */
     int determineEvnTier(double kwh);
+
+    /**
+     * Xóa cache in-memory TTL của nhà và thiết bị khi có thay đổi trạng thái thiết bị.
+     */
+    default void evictHomeAndDeviceCache(UUID homeId, UUID deviceId) {}
 }

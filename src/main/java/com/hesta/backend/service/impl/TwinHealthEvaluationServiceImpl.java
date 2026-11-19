@@ -74,7 +74,9 @@ public class TwinHealthEvaluationServiceImpl implements TwinHealthEvaluationServ
     }
 
     private void evaluate(NodeReference node, Instant now) {
-        TwinHealthStatus current = resolver.resolve(node.row().getReferenceTime(), now);
+        TwinHealthStatus current = node.type() == TwinNodeType.DEVICE
+                ? TwinHealthStatus.forDevice(node.row().getDeviceStatus())
+                : resolver.resolve(node.row().getReferenceTime(), now);
         TwinHealthStatus previous = statuses.get(node.key());
         if (previous != null && previous != current) {
             var payload = new TwinHealthStatusChangedPayload(node.type(), node.key().id(),
@@ -95,7 +97,8 @@ public class TwinHealthEvaluationServiceImpl implements TwinHealthEvaluationServ
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setReadOnly(true);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        // Keep READ_COMMITTED: REPEATABLE_READ leaks via SET SESSION CHARACTERISTICS on transaction poolers (port 6543).
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         return Objects.requireNonNull(transaction.execute(status -> query.get()));
     }
 

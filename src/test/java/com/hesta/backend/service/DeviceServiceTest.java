@@ -28,8 +28,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 @ExtendWith(MockitoExtension.class)
 class DeviceServiceTest {
@@ -38,6 +40,7 @@ class DeviceServiceTest {
     @Mock RoomRepository roomRepository;
     @Mock DeviceStateHistoryRepository deviceStateHistoryRepository;
     @Mock RealtimeEventPublisher realtimeEventPublisher;
+    @Mock com.hesta.backend.service.automation.DeviceReferenceCleaner deviceReferenceCleaner;
     @InjectMocks DeviceServiceImpl service;
 
     @Test
@@ -54,6 +57,40 @@ class DeviceServiceTest {
         assertThat(service.getDeviceDetail(userId, deviceId).getHomeId()).isEqualTo(homeId);
         verify(homeAuthorizationService).requireAccess(userId, homeId);
     }
+    @Test
+    void getDeviceHistory_cachesMappedList_andEvictsOnEvent() {
+        UUID userId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+        Home home = Home.builder().id(homeId).build();
+        Device device = Device.builder().id(deviceId).room(Room.builder().home(home).build()).build();
+
+        DeviceStateHistory h1 = DeviceStateHistory.builder().id(UUID.randomUUID()).device(device)
+                .previousState(Map.of("power", false)).newState(Map.of("power", true))
+                .source(com.hesta.backend.enums.StateChangeSource.MANUAL)
+                .changedAt(java.time.OffsetDateTime.now())
+                .build();
+
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+        when(deviceStateHistoryRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)).thenReturn(List.of(h1));
+
+        // Call 1
+        var historyList1 = service.getDeviceHistory(userId, deviceId);
+        // Call 2: should hit in-memory cache directly without querying repository again
+        var historyList2 = service.getDeviceHistory(userId, deviceId);
+
+        assertThat(historyList1).isSameAs(historyList2);
+        verify(deviceStateHistoryRepository, times(1)).findByDeviceIdOrderByChangedAtDesc(deviceId);
+
+        // Evict via helper
+        service.evictDeviceHistoryCache(deviceId);
+
+        // Call 3: should re-query repository
+        var historyList3 = service.getDeviceHistory(userId, deviceId);
+        assertThat(historyList3).isNotNull();
+        verify(deviceStateHistoryRepository, times(2)).findByDeviceIdOrderByChangedAtDesc(deviceId);
+    }
+
 
     @Test
     void getDeviceDetailNotFoundThrowsAppException() {
@@ -232,7 +269,10 @@ class DeviceServiceTest {
         service.removeDevice(userId, deviceId);
 
         assertThat(device.isDeleted()).isTrue();
-        verify(deviceRepository).save(device);
+        // References are removed while the device can still be loaded, before it is hidden as deleted.
+        var order = inOrder(deviceReferenceCleaner, deviceRepository);
+        order.verify(deviceReferenceCleaner).detach(deviceId);
+        order.verify(deviceRepository).save(device);
         verify(homeAuthorizationService).requireSceneManagement(userId, homeId);
     }
 

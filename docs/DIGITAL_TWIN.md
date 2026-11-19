@@ -177,10 +177,10 @@ Tài liệu được sửa: `docs/REALTIME.md` bổ sung liên kết đến đ�
 
 ## Phạm vi và giới hạn
 
-- `status`, `lastSeen` và `observedAt` vẫn là các giá trị gốc được lưu.
-  [Tính năng trạng thái hoạt động của Twin](TWIN_HEALTH.md) riêng biệt hiện suy
-  ra `healthStatus` và phát các chuyển trạng thái chỉ do độ mới của dữ liệu,
-  đồng thời giữ nguyên trách nhiệm cập nhật lastSeen/status của luồng tiếp nhận.
+- Kết nối thiết bị và quyền mở điều khiển chỉ dùng `status`. `lastSeen` trong
+  DTO cũ luôn null và không còn được dùng để suy ra ONLINE/OFFLINE.
+  [Độ mới dữ liệu cảm biến](TWIN_HEALTH.md) vẫn dùng `observedAt` và các ngưỡng
+  ACTIVE/STALE/OFFLINE riêng cho từng luồng chỉ số.
 - Broker dùng chung không hỗ trợ phát lại bền vững hay bảo đảm thứ tự/phiên bản.
   Bên nhận phải xử lý tình huống bản chụp ban đầu và sự kiện đến đồng thời,
   kết nối lại và cập nhật sai thứ tự. Thời điểm đo được cung cấp nhưng không

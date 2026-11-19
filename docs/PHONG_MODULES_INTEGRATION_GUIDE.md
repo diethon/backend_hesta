@@ -42,7 +42,7 @@ Lệnh được gắn Timeout. Nếu ESP32 rớt mạng và gửi ACK trễ, h�
 
 ## 4. Quản trị Dữ liệu (Database Throttling)
 Để bảo vệ thẻ nhớ của Orange Pi 5 không bị mòn/cháy do ghi liên tục:
-1. **Lọc Spam Điều hòa/Đèn:** Nếu Heartbeat ESP32 gửi lên trùng 100% trạng thái cũ, hệ thống từ chối lưu lịch sử (chỉ update `lastSeen`).
+1. **Lọc Spam Điều hòa/Đèn:** Nếu Heartbeat ESP32 gửi lên trùng 100% trạng thái cũ, hệ thống bỏ qua ghi trạng thái/lịch sử. Kết nối thiết bị dùng `status`, không dùng `lastSeen`.
 2. **Throttling Cảm biến (Sensor):** Mặc định các cảm biến (Nhiệt độ, Độ ẩm) dù đổi thông số cũng chỉ được ghi xuống Database Lịch sử tối đa **5 phút 1 lần**. App vẫn nhảy số liên tục, nhưng DB Lịch sử sẽ không bị quá tải.
 3. **Auto-Cleanup Job:** Chạy định kỳ vào **2:00 sáng mỗi ngày**, tự động xóa vĩnh viễn dữ liệu lịch sử cũ hơn **30 ngày**.
 

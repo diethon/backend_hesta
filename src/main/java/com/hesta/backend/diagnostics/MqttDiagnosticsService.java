@@ -13,6 +13,10 @@ public interface MqttDiagnosticsService {
 
     NodeDiagnosticsResponse pingNode(UUID nodeId);
 
+    void handlePong(String nodeCode, String payload);
+
+    boolean isBrokerConnected();
+
     void recordCommandSuccess(String nodeCode, long latencyMs);
 
     void recordCommandFailure(String nodeCode);

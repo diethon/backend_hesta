@@ -13,6 +13,7 @@ import com.hesta.backend.repository.DeviceStateHistoryRepository;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.BehaviorEventRecorder;
+import com.hesta.backend.service.execution.DeviceActionValues;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +29,11 @@ import java.util.UUID;
 public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
     private final BehaviorEventRepository behaviorEvents;
     private final DeviceStateHistoryRepository deviceHistory;
+
+    // Every MQTT report used to insert a row (~17k/day per sensor). Recommendations only use DEVICE_ACTION rows,
+    // so keep at most one sensor row per device per interval, and only when the reported values changed.
+    private static final long SENSOR_SAMPLE_SECONDS = 60;
+    private final java.util.Map<UUID, Object[]> lastSensorSample = new java.util.concurrent.ConcurrentHashMap<>();
     private final DeviceRepository devices;
     private final UserRepository users;
 
@@ -66,8 +72,49 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordUserCommand(UUID deviceId, String action, Map<String, Object> parameters,
+                                  Map<String, Object> previousState, StateChangeSource source) {
+        Device device = devices.findById(deviceId).orElse(null);
+        if (device == null) return;
+        Map<String, Object> previous = previousState == null ? Map.of() : new HashMap<>(previousState);
+        saveAction(device, DeviceActionValues.habitAction(action, parameters, previous),
+                source != null ? source.name() : "MANUAL", previous, device.getCurrentState());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordPhysicalToggle(Device device, Map<String, Object> previousState, Map<String, Object> newState) {
+        Object power = newState == null ? null : newState.get("power");
+        if (power == null) return;
+        saveAction(device, DeviceActionValues.isOn(power) ? "TURN_ON" : "TURN_OFF", "PHYSICAL",
+                previousState == null ? Map.of() : previousState, newState);
+    }
+
+    private void saveAction(Device device, String action, String source, Map<String, Object> previous, Map<String, Object> current) {
+        behaviorEvents.save(BehaviorEvent.builder()
+                .home(device.getRoom() != null ? device.getRoom().getHome() : device.getHome())
+                .device(device)
+                .room(device.getRoom())
+                .eventType("DEVICE_ACTION")
+                .action(action)
+                .eventSource(source)
+                .previousState(new HashMap<>(previous))
+                .currentState(current == null ? new HashMap<>() : new HashMap<>(current))
+                .occurredAt(OffsetDateTime.now()).build());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordSensor(Device device, AutomationEventRequest event) {
         if (event.isTest()) return;
+        OffsetDateTime now = OffsetDateTime.now();
+        int hash = java.util.Objects.hashCode(event.getData());
+        Object[] last = lastSensorSample.get(device.getId());
+        if (last != null && ((int) last[0] == hash
+                || ((OffsetDateTime) last[1]).isAfter(now.minusSeconds(SENSOR_SAMPLE_SECONDS)))) {
+            return;
+        }
+        lastSensorSample.put(device.getId(), new Object[]{hash, now});
         behaviorEvents.save(BehaviorEvent.builder()
                 .home(device.getRoom() != null ? device.getRoom().getHome() : device.getHome())
                 .device(device)
@@ -84,7 +131,8 @@ public class BehaviorEventRecorderImpl implements BehaviorEventRecorder {
         User user = userId == null ? null : users.findById(userId).orElse(null);
         Map<String, Object> state = Map.of("targetId", targetId.toString(), "status", status);
         behaviorEvents.save(BehaviorEvent.builder().home(home).user(user)
-                .eventType(eventType).action(status).eventSource(user == null ? "SCHEDULE" : "MANUAL")
+                .eventType(eventType).action(status)
+                .eventSource(user != null ? "MANUAL" : "AUTOMATION_EXECUTION".equals(eventType) ? "AUTOMATION" : "SCHEDULE")
                 .currentState(state).occurredAt(OffsetDateTime.now()).build());
         if (user != null) {
             behaviorEvents.save(BehaviorEvent.builder().home(home).user(user)

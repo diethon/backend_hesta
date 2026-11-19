@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -21,6 +22,7 @@ public class OtaCampaignDto {
     private String status; // DRAFT, RUNNING_CANARY_10, RUNNING_CANARY_50, RUNNING_FULL_100, COMPLETED, ABORTED_FAILURE_THRESHOLD, CANCELLED
     private String rolloutStrategy;
     private double failureThresholdPercent;
+    private int currentWave;
     private int totalNodes;
     private int attemptedNodes;
     private int successNodes;
@@ -28,4 +30,5 @@ public class OtaCampaignDto {
     private String abortReason;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    private List<OtaCampaignNodeDto> nodeExecutions;
 }

@@ -47,7 +47,8 @@ import java.util.UUID;
 })
 
 @org.hibernate.annotations.SQLRestriction("is_deleted = false")
-
+// Write only changed columns: a heartbeat saving status/lastSeen must not overwrite a state committed meanwhile.
+@org.hibernate.annotations.DynamicUpdate
 @Getter
 
 @Setter
@@ -224,17 +225,8 @@ public class Device {
 
     public Home getHome() { return room != null ? room.getHome() : (node != null ? node.getHome() : null); }
 
-
-
-    // DUMMY METHODS FOR COMPATIBILITY WITH TWIN HEALTH
-
-    public OffsetDateTime getLastSeen() { return null; }
-
-
-
-    public void setLastSeen(OffsetDateTime lastSeen) {}
-
-
+    @Column(name = "last_seen")
+    private OffsetDateTime lastSeen;
 
     public boolean supportsAction(String action) {
 
@@ -309,9 +301,7 @@ public class Device {
             return this.capabilities.values().stream()
 
                     .flatMap(java.util.List::stream)
-
-                    .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
-
+                    .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR") || act.equalsIgnoreCase("CURTAIN"));
         }
 
         if ("CLOSE".equalsIgnoreCase(action) || "GATE_CLOSE".equalsIgnoreCase(action)) {
@@ -319,9 +309,7 @@ public class Device {
             return this.capabilities.values().stream()
 
                     .flatMap(java.util.List::stream)
-
-                    .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
-
+                    .anyMatch(act -> act.equalsIgnoreCase("CLOSE") || act.equalsIgnoreCase("GATE_CLOSE") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR") || act.equalsIgnoreCase("CURTAIN"));
         }
 
         if ("STOP".equalsIgnoreCase(action) || "GATE_STOP".equalsIgnoreCase(action)) {
@@ -329,9 +317,7 @@ public class Device {
             return this.capabilities.values().stream()
 
                     .flatMap(java.util.List::stream)
-
-                    .anyMatch(act -> act.equalsIgnoreCase("STOP") || act.equalsIgnoreCase("GATE_STOP") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR"));
-
+                    .anyMatch(act -> act.equalsIgnoreCase("STOP") || act.equalsIgnoreCase("GATE_STOP") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("DOOR") || act.equalsIgnoreCase("CURTAIN"));
         }
 
         if ("TURN_ON".equalsIgnoreCase(action) || "POWER_ON".equalsIgnoreCase(action)) {
@@ -344,16 +330,14 @@ public class Device {
 
             if (powerMatch) return true;
 
-            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType) || "DOOR".equalsIgnoreCase(this.deviceType)))
+            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType) || "DOOR".equalsIgnoreCase(this.deviceType)|| "CURTAIN".equalsIgnoreCase(this.deviceType)))
 
                     || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR");
 
             if (isGate) {
 
                 return this.capabilities.values().stream().flatMap(java.util.List::stream)
-
-                        .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE"));
-
+                        .anyMatch(act -> act.equalsIgnoreCase("OPEN") || act.equalsIgnoreCase("GATE_OPEN") || act.equalsIgnoreCase("GATE") || act.equalsIgnoreCase("CURTAIN"));
             }
 
             return false;
@@ -370,7 +354,7 @@ public class Device {
 
             if (powerMatch) return true;
 
-            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType) || "DOOR".equalsIgnoreCase(this.deviceType)))
+            boolean isGate = (this.deviceType != null && ("GATE".equalsIgnoreCase(this.deviceType) || "ROLLING_DOOR".equalsIgnoreCase(this.deviceType) || "DOOR".equalsIgnoreCase(this.deviceType)|| "CURTAIN".equalsIgnoreCase(this.deviceType)))
 
                     || this.capabilities.containsKey("GATE") || this.capabilities.containsKey("DOOR");
 

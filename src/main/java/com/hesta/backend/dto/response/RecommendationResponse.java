@@ -14,6 +14,7 @@ public class RecommendationResponse {
     private UUID homeId;
     private UUID deviceId;
     private String deviceName;
+    private String roomName;
     private Map<String, Object> triggerCondition;
     private Map<String, Object> proposedAction;
     private String explanation;

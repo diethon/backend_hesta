@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.enums.EdgeNodeStatus;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
@@ -21,7 +23,10 @@ import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -52,6 +57,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private RealtimeEventPublisher realtimeEventPublisher;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PlatformTransactionManager transactionManager;
+
     @org.springframework.beans.factory.annotation.Value("${mqtt.topic.prefix:hesta/nodes}")
     private String topicPrefix;
 
@@ -62,18 +70,86 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     private com.hesta.backend.diagnostics.MqttDiagnosticsService diagnosticsService;
 
     public static final ConcurrentHashMap<String, CompletableFuture<CommandResult>> pendingCommands = new ConcurrentHashMap<>();
+    public static final ConcurrentHashMap<String, UUID> commandDeviceMap = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> commandStartTimes = new ConcurrentHashMap<>();
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.BehaviorEventRecorder behaviorEventRecorder;
 
+    /** Commands a person gave; their successful runs are the habit data for recommendations. */
+    private static final java.util.Set<StateChangeSource> HUMAN_SOURCES =
+            java.util.EnumSet.of(StateChangeSource.MANUAL, StateChangeSource.VOICE, StateChangeSource.GESTURE);
 
-    @Transactional(readOnly = true)
+    /** true when we sent this device a command recently, so a state change it reports is our doing, not a wall switch. */
+    public static boolean commandedWithin(UUID deviceId, long millis) {
+        Long started = commandStartTimes.get(deviceId);
+        return started != null && System.currentTimeMillis() - started < millis;
+    }
+
+    // REQUIRES_NEW: the optimistic device-state write must commit now. Inside a scene/automation transaction it
+    // would hold the device row lock while we wait for the ACK, blocking the MQTT thread that delivers that ACK.
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     @Override
     public CompletableFuture<CommandResult> sendCommand(UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
+        // One lookup (device + node) serves both the habit snapshot and the MQTT routing: each query is a remote round trip.
+        Device device = deviceRepository.findByIdWithNode(deviceId).orElse(null);
+        // Every app, web, voice, AC and gate command ends up here, so this is the one place that records them.
+        if (behaviorEventRecorder == null || !HUMAN_SOURCES.contains(source)) {
+            return dispatch(device, deviceId, action, parameters, source);
+        }
+        Map<String, Object> before = device != null && device.getCurrentState() != null
+                ? new HashMap<>(device.getCurrentState()) : new HashMap<>();
+        return dispatch(device, deviceId, action, parameters, source).thenApply(result -> {
+            if (result != null && result.isSuccess() && !"SUPERSEDED".equals(result.getStatus())) {
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        behaviorEventRecorder.recordUserCommand(deviceId, action, parameters, before, source);
+                    } catch (Exception ex) {
+                        log.warn("Could not record user command for device {}: {}", deviceId, ex.getMessage());
+                    }
+                });
+            }
+            return result;
+        });
+    }
+
+    private static boolean isDeviceUnavailable(Device device) {
+        if (device == null) {
+            return false;
+        }
+        if (device.getStatus() != null && device.getStatus() != DeviceStatus.ONLINE) {
+            return true;
+        }
+        try {
+            if (device.getNode() != null && device.getNode().getStatus() != null) {
+                EdgeNodeStatus nodeStatus = device.getNode().getStatus();
+                return nodeStatus == EdgeNodeStatus.OFFLINE
+                        || nodeStatus == EdgeNodeStatus.ERROR
+                        || nodeStatus == EdgeNodeStatus.UNPAIRED;
+            }
+        } catch (Exception ex) {
+            log.warn("Could not inspect node status for device {}: {}", device.getId(), ex.getMessage());
+        }
+        return false;
+    }
+
+    private CompletableFuture<CommandResult> dispatch(Device device, UUID deviceId, String action, Map<String, Object> parameters, StateChangeSource source) {
+        if (isDeviceUnavailable(device)) {
+            log.warn("Command rejected: device {} ({}) is unavailable (status={})", deviceId, device.getName(), device.getStatus());
+            return CompletableFuture.completedFuture(CommandResult.builder()
+                    .commandId(UUID.randomUUID().toString())
+                    .success(false)
+                    .status("FAILED")
+                    .errorCode("DEVICE_OFFLINE")
+                    .message("Thiết bị đang ngoại tuyến hoặc chưa kết nối")
+                    .build());
+        }
+
         Long lastStartTime = commandStartTimes.get(deviceId);
         long now = System.currentTimeMillis();
 
-        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming/Fan 60ms để kéo mượt, Relay nguồn 400ms)
+        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming 60ms để kéo mượt, Relay nguồn 400ms)
         boolean isColorOrDimmer = "SET_RGB".equalsIgnoreCase(action)
                 || "SET_BRIGHTNESS".equalsIgnoreCase(action)
                 || "SET_COLOR".equalsIgnoreCase(action)
@@ -82,7 +158,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 || "SET_FAN".equalsIgnoreCase(action);
         long antiSpamWindowMs = isColorOrDimmer ? 60L : 400L;
         if (lastStartTime != null && (now - lastStartTime < antiSpamWindowMs)) {
-            if (!isColorOrDimmer && source != StateChangeSource.VOICE) {
+            // Only human double-clicks are spam; scenes/automations queue their next command after the ACK.
+            if (!isColorOrDimmer && source == StateChangeSource.MANUAL) {
                 log.warn("Idempotency / Anti-spam: Device {} click spam rejected ({} ms < {} ms).", deviceId, now - lastStartTime, antiSpamWindowMs);
                 return CompletableFuture.completedFuture(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
@@ -254,7 +331,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             // Normalize action and parameters for devices (including Air Conditioner and Gate)
             String normalizedAction = normalizeAction(device, action, effectiveParams);
             boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType())))
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType() || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
                     || "OPEN".equalsIgnoreCase(normalizedAction)
                     || "CLOSE".equalsIgnoreCase(normalizedAction)
                     || "STOP".equalsIgnoreCase(normalizedAction);
@@ -382,6 +459,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             if (isGateOrDoor) {
                 // Keep payload compact so PubSubClient on ESP32 does not overflow its 128-byte buffer
                 payload.put("action", normalizedAction);
+                payload.put("commandId", commandId);
             } else {
                 payload.put("commandId", commandId);
                 payload.put("deviceId", device != null ? device.getId().toString() : deviceId.toString());
@@ -419,9 +497,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
             
             String jsonPayload = objectMapper.writeValueAsString(payload);
-//            if (!isRealtime) {
-//                pendingCommands.put(commandId, future);
-//            }
+            pendingCommands.put(commandId, future);
+            commandDeviceMap.put(commandId, deviceId);
             
             // 1. Dispatch MQTT command immediately to broker (sub-second physical response)
             for (String targetTopic : targetTopics) {
@@ -433,20 +510,13 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
 
             // 2. Persist device state without delaying MQTT physical dispatch
+            final Map<String, Object> stateBefore = device != null && device.getCurrentState() != null
+                    ? new HashMap<>(device.getCurrentState()) : null;
             if (device != null) {
                 updateDeviceState(device, normalizedAction, effectiveParams);
             }
-
-//            if (isRealtime) {
-//                log.info("Realtime streaming command {} dispatched immediately for device {}", action, deviceId);
-//                future.complete(CommandResult.builder()
-//                        .commandId(commandId)
-//                        .success(true)
-//                        .status("SUCCESS")
-//                        .message("Realtime command dispatched successfully")
-//                        .build());
-//                return future;
-//            }
+            final Map<String, Object> optimisticState = device != null && device.getCurrentState() != null
+                    ? new HashMap<>(device.getCurrentState()) : null;
 
             long metricStartTime = System.currentTimeMillis();
             final String targetNodeCode = nodeCode;
@@ -497,6 +567,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             }
 
                             log.warn("[METRICS] MQTT Roundtrip (Failure/Timeout) after {} ms for commandId {}. Ex: {}", roundtrip, commandId, ex != null ? ex.getMessage() : "Timeout/No-Ack");
+                            // The device never confirmed: undo the state we assumed so every screen shows what is real.
+                            revertOptimisticState(deviceId, stateBefore, optimisticState);
                             if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
                                 diagnosticsService.recordCommandFailure(targetNodeCode);
                             }
@@ -525,12 +597,23 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 diagnosticsService.recordCommandFailure(resolvedNodeCode);
             }
             log.error("Failed to send command to device {}", deviceId, e);
+
+            boolean isMqttConnectionError = e.getMessage() != null && (
+                    e.getMessage().contains("mqttOutbound") ||
+                    e.getMessage().contains("Client is not connected") ||
+                    e.getMessage().contains("Connection lost") ||
+                    e.getMessage().contains("timed out waiting for a response") ||
+                    e.getMessage().contains("No provider available")
+            );
+            String errCode = isMqttConnectionError ? "GATEWAY_DISCONNECTED" : "INTERNAL_ERROR";
+            String errMsg = isMqttConnectionError ? "Không thể kết nối đến Gateway MQTT hoặc Broker chưa khởi động" : e.getMessage();
+
             future.complete(CommandResult.builder()
                     .commandId(commandId)
                     .success(false)
                     .status("FAILED")
-                    .errorCode("INTERNAL_ERROR")
-                    .message(e.getMessage())
+                    .errorCode(errCode)
+                    .message(errMsg)
                     .build());
         }
         
@@ -594,7 +677,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         boolean isAc = !isFan && isAcDevice(device, act, parameters);
 
         boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType())))
+                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType() || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
                 || "OPEN".equalsIgnoreCase(act)
                 || "CLOSE".equalsIgnoreCase(act)
                 || "STOP".equalsIgnoreCase(act)
@@ -612,6 +695,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 case "TURN_ON":
                     return "OPEN";
                 case "GATE_CLOSE":
+                case "CLOSE":
                 case "TURN_OFF":
                 case "CLOSE":
                     return "CLOSE";
@@ -1058,7 +1142,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             }
 
             boolean isGateOrDoor = device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()));
+                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType() || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
             if (isGateOrDoor) {
                 Object stateVal = currentState.get("state");
                 currentState.clear();
@@ -1070,50 +1154,68 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             device.setCurrentState(currentState);
             deviceRepository.save(device);
             log.info("Updated device {} currentState in DB: {}", device.getId(), currentState);
-
-            UUID homeId = getHomeId(device);
-            if (homeId != null) {
-                try {
-                    TwinDeviceSnapshotResponse snapshot = twinSnapshotMapper != null
-                            ? twinSnapshotMapper.device(device)
-                            : new TwinDeviceSnapshotResponse(
-                                    device.getId(),
-                                    device.getRoom() != null ? device.getRoom().getId() : null,
-                                    device.getName(),
-                                    device.getDeviceType(),
-                                    device.getIcon(),
-                                    device.getStatus(),
-                                    objectMapper.valueToTree(currentState),
-                                    device.getLastSeen(),
-                                    TwinHealthStatus.ACTIVE
-                            );
-
-                    // 1. Gửi sự kiện cho Spring Transactional Listeners
-                    if (applicationEventPublisher != null) {
-                        applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
-                                homeId,
-                                snapshot
-                        ));
-                        log.info("Published DeviceStateChangedEvent for device {} in home {}", device.getId(), homeId);
-                    }
-
-                    // 2. Server Optimistic Broadcast: Bắn WebSocket STOMP tức thì (<1ms)
-                    // Giúp toàn bộ màn hình của các người dùng khác đồng bộ trạng thái ngay lập tức
-                    if (realtimeEventPublisher != null) {
-                        realtimeEventPublisher.publish(RealtimeEvent.create(
-                                RealtimeEventType.DEVICE_STATE_CHANGED,
-                                homeId,
-                                device.getId(),
-                                snapshot
-                        ));
-                        log.info("Server Optimistic Broadcast sent via realtimeEventPublisher for device {} in home {}", device.getId(), homeId);
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to publish realtime state for device {}", device.getId(), e);
-                }
-            }
+            publishStateChanged(device);
         } catch (Exception e) {
             log.error("Failed to update currentState for device {}", device.getId(), e);
+        }
+    }
+
+    /**
+     * Exactly one DEVICE_STATE_CHANGED per change. Inside a transaction the AFTER_COMMIT listener broadcasts it
+     * (so nobody sees a state that later rolls back); outside one (chained scene commands) we broadcast directly.
+     */
+    private void publishStateChanged(Device device) {
+        UUID homeId = getHomeId(device);
+        if (homeId == null) return;
+        try {
+            TwinDeviceSnapshotResponse snapshot = twinSnapshotMapper != null
+                    ? twinSnapshotMapper.device(device)
+                    : new TwinDeviceSnapshotResponse(
+                            device.getId(),
+                            device.getRoom() != null ? device.getRoom().getId() : null,
+                            device.getName(),
+                            device.getDeviceType(),
+                            device.getIcon(),
+                            device.getStatus(),
+                            objectMapper.valueToTree(device.getCurrentState()),
+                            device.getLastSeen(),
+                            TwinHealthStatus.ACTIVE
+                    );
+            if (TransactionSynchronizationManager.isSynchronizationActive() && applicationEventPublisher != null) {
+                applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(homeId, snapshot));
+            } else if (realtimeEventPublisher != null) {
+                realtimeEventPublisher.publish(RealtimeEvent.create(
+                        RealtimeEventType.DEVICE_STATE_CHANGED, homeId, device.getId(), snapshot));
+            }
+        } catch (Exception e) {
+            log.error("Failed to publish realtime state for device {}", device.getId(), e);
+        }
+    }
+
+    /** Restores the pre-command state after a timeout/failure, unless something newer already replaced our guess. */
+    private void revertOptimisticState(UUID deviceId, Map<String, Object> previous, Map<String, Object> optimistic) {
+        if (previous == null || optimistic == null || previous.equals(optimistic) || transactionManager == null) return;
+        try {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                    deviceRepository.findByIdWithNode(deviceId).ifPresent(device -> {
+                        if (!optimistic.equals(device.getCurrentState())) return;
+                        boolean isActuator = device.getDeviceType() != null &&
+                                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
+                        if (isActuator) {
+                            Object optState = optimistic.get("state");
+                            if ("OPENING".equalsIgnoreCase(String.valueOf(optState)) || "CLOSING".equalsIgnoreCase(String.valueOf(optState))) {
+                                log.info("Device {} is an actuator in transition (state={}); skipping premature revert on timeout",
+                                        deviceId, optState);
+                                return;
+                            }
+                        }
+                        device.setCurrentState(new HashMap<>(previous));
+                        deviceRepository.save(device);
+                        log.info("Reverted unconfirmed state of device {} to {}", deviceId, previous);
+                        publishStateChanged(device);
+                    }));
+        } catch (Exception e) {
+            log.warn("Could not revert unconfirmed state of device {}: {}", deviceId, e.getMessage());
         }
     }
 

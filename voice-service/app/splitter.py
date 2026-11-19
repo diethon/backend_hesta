@@ -51,6 +51,7 @@ CLAUSE_CONJUNCTIONS = [
     r"\s+cùng\s+lúc\s+",
     r"\s+rồi\s+",
     r"\s+và\s+",
+    r"\s+với\s+",
     r",\s+",
     r";\s+",
 ]
@@ -59,7 +60,9 @@ CLAUSE_CONJUNCTIONS = [
 ACTION_PHRASES = [
     "bật tất cả", "bật hết", "bật toàn bộ",
     "tắt tất cả", "tắt hết", "tắt toàn bộ",
-    "bật", "tắt", "mở", "đóng",
+    "mở tất cả", "mở hết", "mở toàn bộ",
+    "đóng tất cả", "đóng hết", "đóng toàn bộ",
+    "bật", "tắt", "mở", "đóng", "dừng",
     "chỉnh nhiệt độ", "đặt nhiệt độ", "tăng nhiệt độ", "giảm nhiệt độ",
     "chỉnh độ sáng", "đặt độ sáng", "tăng độ sáng", "giảm độ sáng",
     "chỉnh", "đặt", "tăng", "giảm",
@@ -76,7 +79,7 @@ DEVICE_KEYWORDS = [
     "đèn led rgb", "đèn led", "đèn rgb", "đèn ngủ", "đèn trần", "đèn bàn", "đèn chùm", "đèn",
     "máy lạnh", "điều hòa", "máy bơm nước", "máy bơm",
     "rèm cửa", "màn cửa", "rèm",
-    "cửa cuốn", "cửa chính", "cửa sổ", "cửa", "cổng",
+    "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage", "cửa chính", "cửa sổ", "cửa", "cổng",
     "ổ cắm", "tivi", "ti vi", "tv", "fan", "led", "rgb",
     "thiết bị",
 ]
@@ -209,6 +212,17 @@ def split_compound_command(text: str, custom_rooms: Optional[List[str]] = None) 
     is_valid_compound = True
 
     for clause in raw_clauses[1:]:
+        # Hỗ trợ nói tắt tên phòng ngủ ở vế sau:
+        # VD: 'bật đèn phòng ngủ master và của con' → 'phòng ngủ của con'
+        #     'tắt đèn phòng ngủ của con và master' → 'phòng ngủ master'
+        clause_norm_check = strip_vietnamese_tones(clause.strip().lower())
+        if curr_room and "phong ngu" in strip_vietnamese_tones(curr_room.lower()):
+            if clause_norm_check in {
+                "cua con", "con", "2 giuong", "hai giuong",
+                "master", "mat to", "mac to", "ma to", "masters",
+            }:
+                clause = f"phòng ngủ {clause.strip()}"
+
         c_action = find_action_verb(clause)
         c_device = extract_device_phrase(clause)
         c_room = extract_room_name(clause, custom_rooms)

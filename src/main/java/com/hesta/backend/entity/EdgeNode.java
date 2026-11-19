@@ -37,6 +37,12 @@ public class EdgeNode {
     @Column(name = "status", nullable = false, length = 20)
     private EdgeNodeStatus status;
 
+    @Column(name = "firmware_version", length = 50)
+    private String firmwareVersion;
+
+    @Column(name = "device_type", length = 50)
+    private String deviceType;
+
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "supported_types", columnDefinition = "jsonb")
     private java.util.List<java.util.Map<String, Object>> supportedTypes;
