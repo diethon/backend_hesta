@@ -222,7 +222,7 @@ Authorization: Bearer {{token}}
 }
 
 ### 11.6 LED 1 - POWER_OFF
-POST {{baseUrl}}/api/v1/devices/{{led5Id}}/command
+POST {{baseUrl}}/api/v1/devices/{{led4Id}}/command
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
