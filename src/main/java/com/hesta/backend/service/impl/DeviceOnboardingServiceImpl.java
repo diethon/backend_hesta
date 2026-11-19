@@ -55,9 +55,6 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
         if (request.getSerialNumber() == null || request.getSerialNumber().trim().isEmpty()) {
             throw new AppException(ErrorCode.SERIAL_NUMBER_REQUIRED);
         }
-        if (request.getName() == null || request.getName().trim().isEmpty()) {
-            throw new AppException(ErrorCode.DEVICE_NAME_REQUIRED);
-        }
         if (request.getDeviceType() == null || request.getDeviceType().trim().isEmpty()) {
             throw new AppException(ErrorCode.DEVICE_TYPE_REQUIRED);
         }
@@ -66,6 +63,27 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
         if (deviceRepository.existsBySerialNumber(serialNumber)) {
             throw new AppException(ErrorCode.DEVICE_SERIAL_EXISTS);
         }
+
+        // Tên sản phẩm: Admin không bắt buộc đặt tên, dùng tên mặc định theo loại thiết bị để người dùng tự đặt sau
+        String deviceName = (request.getName() != null && !request.getName().trim().isEmpty())
+                ? request.getName().trim()
+                : request.getDeviceType().trim().toUpperCase();
+
+        // Mã Node: Lấy từ request nếu có, hoặc tự động tạo theo số serial
+        String nodeCode = (request.getNodeCode() != null && !request.getNodeCode().trim().isEmpty())
+                ? request.getNodeCode().trim()
+                : "node-" + serialNumber.toLowerCase().replaceAll("[^a-z0-9_-]", "");
+
+        // 1. Tạo hoặc liên kết EdgeNode (để trống home_id, chưa gán vào nhà/phòng nào)
+        EdgeNode edgeNode = edgeNodeRepository.findByNodeCode(nodeCode)
+                .orElseGet(() -> {
+                    EdgeNode newNode = EdgeNode.builder()
+                            .nodeCode(nodeCode)
+                            .status(EdgeNodeStatus.ONLINE)
+                            .home(null) // Để trống nhà/phòng
+                            .build();
+                    return edgeNodeRepository.save(newNode);
+                });
 
         User admin = adminId != null ? userRepository.findById(adminId).orElse(null) : null;
         com.hesta.backend.entity.DeviceCatalog catalog = null;
@@ -82,8 +100,9 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
             imageUrl = catalog.getImageUrl();
         }
 
+        // 2. Tạo Device: Đã có node_id (liên kết với edgeNode), room_id để trống (null)
         Device device = Device.builder()
-                .name(request.getName().trim())
+                .name(deviceName)
                 .deviceType(request.getDeviceType().trim().toUpperCase())
                 .model(request.getModel() != null ? request.getModel().trim() : (catalog != null ? catalog.getModelCode() : null))
                 .serialNumber(serialNumber)
@@ -91,6 +110,8 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
                         ? request.getLocalId().trim()
                         : "dev-" + serialNumber.toLowerCase().replaceAll("[^a-z0-9_-]", ""))
                 .status(DeviceStatus.UNCLAIMED)
+                .node(edgeNode) // <-- GẮN NODE_ID VÀO DEVICE!
+                .room(null)     // <-- ĐỂ TRỐNG PHÒNG!
                 .currentState(new HashMap<>(Map.of("power", "OFF")))
                 .icon(request.getIcon() != null ? request.getIcon().trim() : (catalog != null ? catalog.getIcon() : null))
                 .imageUrl(imageUrl != null ? imageUrl.trim() : null)
@@ -228,6 +249,7 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
                 .model(device.getModel())
                 .serialNumber(device.getSerialNumber())
                 .status(device.getStatus().name())
+                .nodeCode(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .build();
     }
 
@@ -276,35 +298,33 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
             throw new AppException(ErrorCode.ROOM_ACCESS_DENIED);
         }
 
-        // Associate physical EdgeNode if nodeCode is provided
-        if (request.getNodeCode() != null && !request.getNodeCode().trim().isEmpty()) {
-            String nodeCode = request.getNodeCode().trim();
-            EdgeNode edgeNode = edgeNodeRepository.findByHomeIdAndNodeCode(home.getId(), nodeCode)
+        // 1. Gán EdgeNode vào Home của người dùng (khi Admin tạo đã có node, giờ gán home_id)
+        EdgeNode edgeNode = device.getNode();
+        if (edgeNode == null) {
+            String nodeCode = (request.getNodeCode() != null && !request.getNodeCode().trim().isEmpty())
+                    ? request.getNodeCode().trim()
+                    : "node-" + device.getSerialNumber().toLowerCase().replaceAll("[^a-z0-9_-]", "");
+            edgeNode = edgeNodeRepository.findByHomeIdAndNodeCode(home.getId(), nodeCode)
                     .orElseGet(() -> edgeNodeRepository.findByNodeCode(nodeCode)
-                            .map(existing -> {
-                                if (existing.getHome() == null || !existing.getHome().getId().equals(home.getId())) {
-                                    existing.setHome(home);
-                                    return edgeNodeRepository.save(existing);
-                                }
-                                return existing;
-                            })
-                            .orElseGet(() -> {
-                                EdgeNode newNode = EdgeNode.builder()
-                                        .home(home)
-                                        .nodeCode(nodeCode)
-                                        .status(EdgeNodeStatus.ONLINE)
-                                        .build();
-                                return edgeNodeRepository.save(newNode);
-                            })
-                    );
-            device.setNode(edgeNode);
+                            .orElseGet(() -> EdgeNode.builder()
+                                    .nodeCode(nodeCode)
+                                    .status(EdgeNodeStatus.ONLINE)
+                                    .build()));
+        } else if (request.getNodeCode() != null && !request.getNodeCode().trim().isEmpty()) {
+            edgeNode.setNodeCode(request.getNodeCode().trim());
         }
 
-        // Apply custom name if supplied
+        edgeNode.setHome(home);
+        edgeNode.setStatus(EdgeNodeStatus.ONLINE);
+        edgeNode = edgeNodeRepository.save(edgeNode);
+        device.setNode(edgeNode);
+
+        // 2. Gán tên sản phẩm do người dùng đặt lúc onboarding
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             device.setName(request.getName().trim());
         }
 
+        // 3. Gán phòng cho Device và chuyển trạng thái sang ONLINE
         device.setRoom(room);
         device.setStatus(DeviceStatus.ONLINE);
 

@@ -30,6 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalTime;
@@ -83,6 +84,10 @@ public class RecommendationServiceImpl implements RecommendationService {
     private final AutomationRuleRepository ruleRepository;
     private final AutomationScheduleRepository ruleSchedules;
 
+    // Field-injected so the constructor (and its tests) stay unchanged.
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     @Value("${hesta.recommendation.confidence-threshold:0.80}")
     private double confidenceThreshold;
 
@@ -92,23 +97,33 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     // ---------------------------------------------------------------- generating
 
+    // generate/generateForSystem are deliberately not @Transactional: the ML call (up to the ML timeout) runs
+    // between two short transactions so it never holds a pooled DB connection.
     @Override
-    @Transactional
     public List<RecommendationResponse> generate(UUID userId, UUID homeId, OffsetDateTime from, OffsetDateTime to) {
-        return generateFor(authorization.requireSceneManagement(userId, homeId), from, to);
+        return generateFor(inTx(() -> authorization.requireSceneManagement(userId, homeId)), from, to);
     }
 
     @Override
-    @Transactional
     public List<RecommendationResponse> generateForSystem(UUID homeId, OffsetDateTime from, OffsetDateTime to) {
-        Home home = homeRepository.findById(homeId).orElseThrow(() -> new AppException(ErrorCode.HOME_NOT_FOUND));
+        Home home = inTx(() -> homeRepository.findById(homeId).orElseThrow(() -> new AppException(ErrorCode.HOME_NOT_FOUND)));
         return generateFor(home, from, to);
     }
 
+    /** Runs {@code work} in its own short transaction; plain unit tests have no transaction manager. */
+    private <T> T inTx(java.util.function.Supplier<T> work) {
+        return transactionManager == null ? work.get() : new TransactionTemplate(transactionManager).execute(status -> work.get());
+    }
+
     private List<RecommendationResponse> generateFor(Home home, OffsetDateTime from, OffsetDateTime to) {
+        List<MlRecommendationProposal> proposals = mlServiceClient.generateRecommendations(home.getId(), from, to, confidenceThreshold);
+        return inTx(() -> saveProposals(home, proposals));
+    }
+
+    private List<RecommendationResponse> saveProposals(Home home, List<MlRecommendationProposal> proposals) {
         List<AutomationRecommendation> known = new ArrayList<>(recommendations.findAllByHomeIdOrderByCreatedAtDesc(home.getId()));
         List<RecommendationResponse> created = new ArrayList<>();
-        for (MlRecommendationProposal proposal : mlServiceClient.generateRecommendations(home.getId(), from, to, confidenceThreshold)) {
+        for (MlRecommendationProposal proposal : proposals) {
             Device device = usableDevice(proposal, home);
             if (device == null) continue;
             String time = proposal.getTime();

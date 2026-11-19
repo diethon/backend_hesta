@@ -35,6 +35,7 @@ import java.util.*;
 
 
 @Service
+
 @RequiredArgsConstructor
 @Slf4j
 public class HomeServiceImpl implements HomeService {
@@ -80,11 +81,19 @@ public class HomeServiceImpl implements HomeService {
     @Transactional
     public Map<String, Object> generateInvitation(UUID inviterId, UUID homeId, String email, com.hesta.backend.dto.access.CreateInvitationRequest request) {
         User inviter = userRepository.findById(inviterId).orElseThrow();
+
         Home home = homeRepository.findById(homeId).orElseThrow();
 
+
+
+        // Check if inviter is OWNER
+
         HomeMember membership = homeMemberRepository.findByHomeIdAndUserId(homeId, inviterId)
+
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+
         if (membership.getRole() != HomeRole.OWNER) {
+
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
 
@@ -178,20 +187,32 @@ public class HomeServiceImpl implements HomeService {
         }
 
         String inviteCode = String.format("%06d", new Random().nextInt(999999));
+
         String inviteToken = UUID.randomUUID().toString();
 
+
+
         HomeInvitation invitation = HomeInvitation.builder()
+
                 .home(home)
+
                 .inviter(inviter)
+
                 .inviteCode(inviteCode)
+
                 .inviteToken(inviteToken)
                 .targetEmail(targetEmail)
                 .accessScope(scope)
                 .accessPayload(accessPayload)
                 .expiresAt(OffsetDateTime.now().plusDays(7))
+
                 .build();
 
+
+
         homeInvitationRepository.save(invitation);
+
+
 
         boolean emailSent = false;
         if (targetEmail != null && !targetEmail.isEmpty()) {
@@ -200,11 +221,15 @@ public class HomeServiceImpl implements HomeService {
 
         Map<String, Object> result = new HashMap<>();
         result.put("inviteCode", inviteCode);
+
         result.put("inviteToken", inviteToken);
+
         result.put("expiresAt", invitation.getExpiresAt());
+
         result.put("emailSent", emailSent);
         result.put("accessScope", scope.name());
         return result;
+
     }
 
 
@@ -259,9 +284,13 @@ public class HomeServiceImpl implements HomeService {
         }
 
         HomeMember member = HomeMember.builder()
+
                 .home(invitation.getHome())
+
                 .user(user)
+
                 .role(HomeRole.MEMBER)
+
                 .invitedBy(invitation.getInviter())
                 .accessScope(scopeToApply)
                 .build();
@@ -273,11 +302,17 @@ public class HomeServiceImpl implements HomeService {
         }
 
         invitation.setStatus(InvitationStatus.ACCEPTED);
+
         homeInvitationRepository.save(invitation);
+
     }
 
+
+
     @Override
+
     @Transactional(readOnly = true)
+
     public Object getHomeMembers(UUID userId, UUID homeId) {
         HomeMember caller = homeMemberRepository.findByHomeIdAndUserId(homeId, userId)
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
@@ -289,6 +324,7 @@ public class HomeServiceImpl implements HomeService {
         boolean isCallerCustom = !isCallerOwner && caller.getAccessScope() == AccessScope.CUSTOM;
 
         List<HomeMember> members = homeMemberRepository.findByHomeIdWithUser(homeId);
+
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (HomeMember m : members) {
@@ -324,6 +360,7 @@ public class HomeServiceImpl implements HomeService {
             }
             result.add(map);
         }
+
         return result;
     }
 
@@ -400,6 +437,21 @@ public class HomeServiceImpl implements HomeService {
 
 
         List<Room> rooms = roomRepository.findByHomeId(homeId);
+        if (rooms.isEmpty()) {
+            Home home = homeRepository.findById(homeId).orElse(null);
+            if (home != null) {
+                List<String> defaultRoomNames = List.of("Phòng khách", "Phòng ngủ", "Nhà bếp", "Phòng tắm");
+                List<Room> createdRooms = new ArrayList<>();
+                for (String rName : defaultRoomNames) {
+                    createdRooms.add(roomRepository.save(Room.builder()
+                            .home(home)
+                            .name(rName)
+                            .icon("default")
+                            .build()));
+                }
+                rooms = createdRooms;
+            }
+        }
 
         List<Map<String, Object>> result = new ArrayList<>();
 
@@ -483,12 +535,19 @@ public class HomeServiceImpl implements HomeService {
 
 
     @Override
+
     @Transactional
+
     public void updateMemberRole(UUID ownerId, UUID homeId, UUID memberId, HomeRole newRole) {
+
         HomeMember owner = homeMemberRepository.findByHomeIdAndUserId(homeId, ownerId)
+
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+
         if (owner.getRole() != HomeRole.OWNER) {
+
             throw new AppException(ErrorCode.UNAUTHORIZED);
+
         }
 
         if (ownerId.equals(memberId)) {
@@ -501,6 +560,8 @@ public class HomeServiceImpl implements HomeService {
         if (target.getRole() == HomeRole.OWNER) {
             throw new AppException(ErrorCode.CANNOT_CHANGE_OWNER_ROLE);
         }
+
+
 
         target.setRole(newRole);
         if (newRole == HomeRole.OWNER) {
@@ -516,13 +577,22 @@ public class HomeServiceImpl implements HomeService {
         }
     }
 
+
+
     @Override
+
     @Transactional
+
     public void removeMember(UUID ownerId, UUID homeId, UUID memberId) {
+
         HomeMember owner = homeMemberRepository.findByHomeIdAndUserId(homeId, ownerId)
+
                 .orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+
         if (owner.getRole() != HomeRole.OWNER) {
+
             throw new AppException(ErrorCode.UNAUTHORIZED);
+
         }
 
         if (ownerId.equals(memberId)) {
@@ -591,7 +661,14 @@ public class HomeServiceImpl implements HomeService {
 
         homeMemberRepository.save(owner);
 
-
+        List<String> defaultRoomNames = List.of("Phòng khách", "Phòng ngủ", "Nhà bếp", "Phòng tắm");
+        for (String rName : defaultRoomNames) {
+            roomRepository.save(Room.builder()
+                    .home(savedHome)
+                    .name(rName)
+                    .icon("default")
+                    .build());
+        }
 
         return Map.of(
 

@@ -1,9 +1,26 @@
 ### =========================================================================
-### HESTA AIR CONDITIONER (CASPER / ELECTRA) MQTT CONTROL API
+### HESTA AIR CONDITIONER (DAIKIN) MQTT CONTROL API
 ### =========================================================================
 @baseUrl = http://localhost:8080/api/v1
-@deviceId = 30e3c9ee-4856-431a-a9a3-ce8c3ad3e96d
-#@token = YOUR_JWT_TOKEN_HERE
+@deviceId = 05d8a4fd-d7f1-4c62-a70e-a4213552b054
+#@token = 
+
+### ====================================================================
+### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
+### ====================================================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@gmail.com",
+  "password": "123123123"
+}
+
+> {%
+    if (response.body && response.body.result && response.body.result.accessToken) {
+        client.global.set("token", response.body.result.accessToken);
+    }
+%}
 
 ### 1. Bật điều hòa (SET_POWER ON)
 POST {{baseUrl}}/devices/{{deviceId}}/air-conditioner/command
