@@ -10,6 +10,12 @@ import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.*;
 import com.hesta.backend.service.AutomationRuleService;
 import com.hesta.backend.service.HomeAuthorizationService;
+import com.hesta.backend.service.ScheduleService;
+import com.hesta.backend.service.automation.RuleMatcher;
+import com.hesta.backend.service.automation.RuleTriggerGate;
+import com.hesta.backend.service.execution.DeviceActionValues;
+import com.hesta.backend.service.MemberAccessContext;
+import com.hesta.backend.enums.AccessScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,11 +30,23 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     private final AutomationExecutionRepository executionRepository;
     private final DeviceRepository deviceRepository;
     private final SceneRepository sceneRepository;
+    private final AutomationScheduleRepository scheduleRepository;
+    private final RuleTriggerGate triggerGate;
     private final ObjectMapper objectMapper;
+    private final ScheduleService scheduleService;
+
+    private void checkAutomationAccess(UUID userId, UUID homeId) {
+        homeAuthorizationService.requireAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
+    }
 
     @Override
     @Transactional
     public AutomationRuleResponse create(UUID userId, UUID homeId, CreateAutomationRuleRequest request) {
+        checkAutomationAccess(userId, homeId);
         Home home = homeAuthorizationService.requireSceneManagement(userId, homeId);
         validateName(request.getName(), homeId, null);
         TriggerType triggerType = parseTrigger(request.getTriggerType());
@@ -36,13 +54,15 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 .home(home).name(request.getName().trim()).description(normalize(request.getDescription()))
                 .triggerType(triggerType).enabled(request.getEnabled()).build();
         replaceChildren(rule, request.getConditions(), request.getActions(), home);
-        return toResponse(ruleRepository.saveAndFlush(rule));
+        AutomationRule saved = ruleRepository.saveAndFlush(rule);
+        saveSchedules(saved, request.getSchedules());
+        return toResponse(saved);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AutomationRuleResponse> getAll(UUID userId, UUID homeId) {
-        homeAuthorizationService.requireAccess(userId, homeId);
+        checkAutomationAccess(userId, homeId);
         List<AutomationRule> rules = ruleRepository.findAllByHomeIdOrderByNameAsc(homeId);
         fetchActions(rules);
         return rules.stream().map(this::toResponse).toList();
@@ -51,13 +71,14 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     @Transactional(readOnly = true)
     public AutomationRuleResponse get(UUID userId, UUID homeId, UUID ruleId) {
-        homeAuthorizationService.requireAccess(userId, homeId);
+        checkAutomationAccess(userId, homeId);
         return toResponse(find(ruleId, homeId));
     }
 
     @Override
     @Transactional
     public AutomationRuleResponse update(UUID userId, UUID homeId, UUID ruleId, UpdateAutomationRuleRequest request) {
+        checkAutomationAccess(userId, homeId);
         Home home = homeAuthorizationService.requireSceneManagement(userId, homeId);
         AutomationRule rule = find(ruleId, homeId);
         validateName(request.getName(), homeId, ruleId);
@@ -66,32 +87,54 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         rule.setTriggerType(parseTrigger(request.getTriggerType()));
         rule.setEnabled(request.getEnabled());
         replaceChildren(rule, request.getConditions(), request.getActions(), home);
-        return toResponse(ruleRepository.saveAndFlush(rule));
+        if (rule.getTriggerType() != TriggerType.SCHEDULE) {
+            // Schedules of a rule that is no longer SCHEDULE would fail on every tick.
+            scheduleRepository.deleteAll(scheduleRepository.findAllByRuleIdOrderByScheduledTimeAsc(ruleId));
+        }
+        AutomationRule saved = ruleRepository.saveAndFlush(rule);
+        saveSchedules(saved, request.getSchedules());
+        triggerGate.forget(ruleId); // new conditions start from "not matched"
+        return toResponse(saved);
     }
 
     @Override
     @Transactional
     public AutomationRuleResponse setEnabled(UUID userId, UUID homeId, UUID ruleId, boolean enabled) {
+        checkAutomationAccess(userId, homeId);
         homeAuthorizationService.requireSceneManagement(userId, homeId);
         AutomationRule rule = find(ruleId, homeId);
         rule.setEnabled(enabled);
+        triggerGate.forget(ruleId);
         return toResponse(ruleRepository.saveAndFlush(rule));
     }
 
     @Override
     @Transactional
     public void delete(UUID userId, UUID homeId, UUID ruleId) {
+        checkAutomationAccess(userId, homeId);
         homeAuthorizationService.requireSceneManagement(userId, homeId);
         ruleRepository.delete(find(ruleId, homeId));
+        triggerGate.forget(ruleId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AutomationExecutionResponse> getExecutions(UUID userId, UUID homeId, UUID ruleId) {
-        homeAuthorizationService.requireAccess(userId, homeId);
+        checkAutomationAccess(userId, homeId);
         AutomationRule rule = find(ruleId, homeId);
         return executionRepository.findTop100ByRuleIdOrderByMatchedAtDesc(rule.getId()).stream()
                 .map(AutomationRuleServiceImpl::toExecutionResponse).toList();
+    }
+
+    /**
+     * {@code requests} is the rule's full list of times (null keeps the stored ones).
+     * A SCHEDULE rule only runs at its times, so it must end up with at least one active time.
+     */
+    private void saveSchedules(AutomationRule rule, List<ScheduleRequest> requests) {
+        if (requests != null) scheduleService.syncRuleSchedules(rule, requests);
+        if (rule.getTriggerType() == TriggerType.SCHEDULE && scheduleRepository.countByRuleIdAndActiveTrue(rule.getId()) == 0) {
+            throw new AppException(ErrorCode.AUTOMATION_SCHEDULE_REQUIRED);
+        }
     }
 
     private void replaceChildren(AutomationRule rule, List<RuleConditionRequest> conditionRequests,
@@ -100,6 +143,11 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
             throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
         }
         if (rule.getTriggerType() == TriggerType.SCHEDULE && !conditionRequests.isEmpty()) {
+            throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
+        }
+        if (rule.getTriggerType() != TriggerType.SCHEDULE && conditionRequests.stream()
+                .allMatch(c -> c != null && c.getAttribute() != null && RuleMatcher.TIME_OF_DAY.equals(c.getAttribute().trim()))) {
+            // Time of day is only checked when a device event arrives; a time-only rule would never run. Use SCHEDULE.
             throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
         }
         if (!conditionRequests.isEmpty()) {
@@ -141,6 +189,11 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         }
         Device device = request.getDeviceId() == null ? null : devices.get(request.getDeviceId());
         validateHome(device, home);
+        if (RuleMatcher.TIME_OF_DAY.equals(request.getAttribute().trim())
+                && (device != null || !String.valueOf(request.getExpectedValue()).matches("([01]\\d|2[0-3]):[0-5]\\d"))) {
+            // Engine compares "HH:mm" strings, so the expected value must be zero-padded.
+            throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
+        }
         return RuleCondition.builder().rule(rule).device(device).attribute(request.getAttribute().trim())
                 .operator(operator).expectedValue(objectMapper.valueToTree(request.getExpectedValue()))
                 .logicalOperator(logicalOperator)
@@ -152,13 +205,13 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         if (request == null || request.getAction() == null) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        DeviceAction action;
+        String action;
         try {
-            action = DeviceAction.valueOf(request.getAction().trim().toUpperCase(Locale.ROOT));
+            action = request.getAction().trim().toUpperCase(Locale.ROOT);
         } catch (RuntimeException exception) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
-        if (action == DeviceAction.EXECUTE_SCENE) {
+        if ("EXECUTE_SCENE".equals(action)) {
             if (request.getSceneId() == null || request.getDeviceId() != null
                     || (request.getParameters() != null && !request.getParameters().isEmpty())) {
                 throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
@@ -175,32 +228,12 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         }
         Device device = devices.get(request.getDeviceId());
         validateHome(device, home);
-        validateActionParameters(action, request.getParameters());
-        if (device.getCapabilities() != null && !device.getCapabilities().isEmpty()
-                && device.getCapabilities().stream().noneMatch(capability -> capability.equalsIgnoreCase(action.name()))) {
+        if (!DeviceActionValues.isValidParameters(action, request.getParameters()) || !device.supportsAction(action)) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
         return RuleAction.builder().rule(rule).device(device).action(action)
                 .parameters(request.getParameters() == null ? new HashMap<>() : new HashMap<>(request.getParameters()))
                 .order(request.getOrder()).build();
-    }
-
-    private void validateActionParameters(DeviceAction action, Map<String, Object> parameters) {
-        Map<String, Object> values = parameters == null ? Map.of() : parameters;
-        boolean valid = switch (action) {
-            case TURN_ON, TURN_OFF, TOGGLE -> true;
-            case SET_BRIGHTNESS -> percentage(values.get("level"));
-            case SET_SPEED -> percentage(values.get("speed"));
-            case SET_TEMPERATURE -> values.get("temperature") instanceof Number;
-            case SET_MODE -> values.get("mode") instanceof String mode && !mode.isBlank();
-            case SET_STATE -> !values.isEmpty();
-            case EXECUTE_SCENE -> false;
-        };
-        if (!valid) throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
-    }
-
-    private boolean percentage(Object value) {
-        return value instanceof Number number && number.doubleValue() >= 0 && number.doubleValue() <= 100;
     }
 
     private Map<UUID, Device> loadDevices(List<RuleConditionRequest> conditions, List<RuleActionRequest> actions) {
@@ -215,7 +248,8 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
 
     private void validateHome(Device device, Home home) {
         if (device == null) return;
-        if (!home.getId().equals(device.getNode().getHome().getId())) {
+        if (device.getRoom() == null || device.getRoom().getHome() == null
+                || !home.getId().equals(device.getRoom().getHome().getId())) {
             throw new AppException(ErrorCode.AUTOMATION_DEVICE_HOME_MISMATCH);
         }
     }
@@ -279,7 +313,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                                 .deviceName(action.getDevice() == null ? null : action.getDevice().getName())
                                 .sceneId(action.getScene() == null ? null : action.getScene().getId())
                                 .sceneName(action.getScene() == null ? null : action.getScene().getName())
-                                .action(action.getAction().name())
+                                .action(action.getAction())
                                 .parameters(action.getParameters()).order(action.getOrder()).build()).toList())
                 .build();
     }
@@ -291,4 +325,5 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 .startedAt(execution.getStartedAt()).completedAt(execution.getCompletedAt())
                 .resultDetail(execution.getResultDetail()).build();
     }
+
 }

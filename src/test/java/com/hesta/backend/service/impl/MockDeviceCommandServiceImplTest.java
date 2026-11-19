@@ -1,7 +1,6 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.command.CommandResult;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,7 +25,7 @@ class MockDeviceCommandServiceImplTest {
     void testSendCommand_Success_TurnOn() throws ExecutionException, InterruptedException {
         UUID deviceId = UUID.randomUUID();
         
-        CommandResult result = service.sendCommand(deviceId, DeviceAction.TURN_ON, null, StateChangeSource.MANUAL).get();
+        CommandResult result = service.sendCommand(deviceId, "TURN_ON", null, StateChangeSource.MANUAL).get();
         
         assertTrue(result.isSuccess());
         assertEquals("ACKNOWLEDGED", result.getStatus());
@@ -39,7 +38,7 @@ class MockDeviceCommandServiceImplTest {
     void testSendCommand_Failure_MissingParameters() throws ExecutionException, InterruptedException {
         UUID deviceId = UUID.randomUUID();
         
-        CommandResult result = service.sendCommand(deviceId, DeviceAction.SET_MODE, new HashMap<>(), StateChangeSource.SCENE).get();
+        CommandResult result = service.sendCommand(deviceId, "SET_MODE", new HashMap<>(), StateChangeSource.SCENE).get();
         
         assertFalse(result.isSuccess());
         assertEquals("FAILED", result.getStatus());

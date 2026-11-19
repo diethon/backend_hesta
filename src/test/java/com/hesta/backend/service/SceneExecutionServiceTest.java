@@ -7,7 +7,6 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
 import com.hesta.backend.entity.SceneExecution;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.repository.SceneExecutionRepository;
@@ -41,8 +40,14 @@ class SceneExecutionServiceTest {
     @Mock DeviceCommandService commands;
     @Mock BehaviorEventRecorder behaviorEventRecorder;
     @Mock ManualOverrideService manualOverrideService;
-    @org.mockito.Spy ObjectMapper objectMapper = new ObjectMapper();
-    @InjectMocks SceneExecutionServiceImpl service;
+    ObjectMapper objectMapper = new ObjectMapper();
+    SceneExecutionServiceImpl service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        service = new SceneExecutionServiceImpl(authorization, scenes, executions, behaviorEventRecorder, manualOverrideService,
+                new com.hesta.backend.service.execution.CommandBatchRunner(commands, behaviorEventRecorder));
+    }
 
     private final UUID userId = UUID.randomUUID();
     private final UUID homeId = UUID.randomUUID();
@@ -58,9 +63,9 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(commands.sendCommand(device.getId(), DeviceAction.TURN_ON, Map.of(), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
-        when(commands.sendCommand(device.getId(), DeviceAction.SET_SPEED, Map.of("speed", 60), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "SET_SPEED", Map.of("speed", 60, "fan", 60), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(false).status("FAILED").build()));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -74,8 +79,76 @@ class SceneExecutionServiceTest {
         verify(executions).save(saved.capture());
         assertThat(saved.getValue().getTriggerSource()).isEqualTo("MANUAL");
         var order = inOrder(commands);
-        order.verify(commands).sendCommand(eq(device.getId()), eq(DeviceAction.TURN_ON), any(), eq(StateChangeSource.SCENE));
-        order.verify(commands).sendCommand(eq(device.getId()), eq(DeviceAction.SET_SPEED), any(), eq(StateChangeSource.SCENE));
+        order.verify(commands).sendCommand(eq(device.getId()), eq("TURN_ON"), any(), eq(StateChangeSource.SCENE));
+        order.verify(commands).sendCommand(eq(device.getId()), eq("SET_SPEED"), any(), eq(StateChangeSource.SCENE));
+    }
+
+    @Test
+    void asyncRunStartsPendingThenPushesProgressAndFinalResult() {
+        Device device = Device.builder().id(UUID.randomUUID()).build();
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true)
+                .actions(new ArrayList<>()).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build()));
+        UUID executionId = UUID.randomUUID();
+        SceneExecution[] stored = new SceneExecution[1];
+        when(executions.save(any())).thenAnswer(invocation -> {
+            SceneExecution execution = invocation.getArgument(0);
+            assertThat(execution.getCompletedAt()).as("completed_at is NOT NULL in the DB").isNotNull();
+            if (execution.getId() == null) execution.setId(executionId);
+            return stored[0] = execution;
+        });
+        when(executions.findById(executionId)).thenAnswer(invocation -> Optional.of(stored[0]));
+        var publisher = mock(com.hesta.backend.realtime.publisher.RealtimeEventPublisher.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeEventPublisher", publisher);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sceneRunner",
+                (java.util.concurrent.Executor) Runnable::run);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "transactionManager",
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+
+        service.executeAsync(userId, homeId, sceneId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<com.hesta.backend.realtime.model.RealtimeEvent<?>> events =
+                ArgumentCaptor.forClass(com.hesta.backend.realtime.model.RealtimeEvent.class);
+        verify(publisher, times(2)).publish(events.capture());
+        var progress = (com.hesta.backend.dto.response.SceneExecutionResponse) events.getAllValues().get(0).data();
+        var finalResult = (com.hesta.backend.dto.response.SceneExecutionResponse) events.getAllValues().get(1).data();
+        assertThat(progress.getStatus()).isEqualTo("PENDING");
+        assertThat(finalResult.getStatus()).isEqualTo("SUCCESS");
+        assertThat(finalResult.getId()).isEqualTo(executionId);
+        assertThat(events.getAllValues()).allMatch(event ->
+                event.type() == com.hesta.backend.realtime.model.RealtimeEventType.SCENE_EXECUTION_UPDATED
+                        && event.homeId().equals(homeId));
+    }
+
+    @Test
+    void scheduledSceneSendsCommandsWithNoTransactionOpen() {
+        var open = AutomationEngineTest.TransactionCounter.install(service);
+        Device device = Device.builder().id(UUID.randomUUID()).build();
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenAnswer(invocation -> {
+            assertThat(open.get()).as("scene is read inside a transaction").isEqualTo(1);
+            return Optional.of(scene);
+        });
+        int[] openWhileSending = {-1};
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCHEDULE)).thenAnswer(invocation -> {
+            openWhileSending[0] = open.get();
+            return CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build());
+        });
+        when(executions.save(any())).thenAnswer(invocation -> {
+            assertThat(open.get()).as("result is saved inside a transaction").isEqualTo(1);
+            return invocation.getArgument(0);
+        });
+
+        var result = service.executeScheduled(homeId, sceneId);
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(openWhileSending[0]).as("no DB transaction held while waiting for the ACK").isZero();
+        assertThat(open.get()).isZero();
     }
 
     @Test
@@ -109,7 +182,7 @@ class SceneExecutionServiceTest {
         scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device)
                 .action("TURN_ON").order(0).build());
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
-        when(commands.sendCommand(device.getId(), DeviceAction.TURN_ON, Map.of(), StateChangeSource.SCENE))
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCENE))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
         when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -117,5 +190,37 @@ class SceneExecutionServiceTest {
 
         assertThat(result.getStatus()).isEqualTo("SUCCESS");
         verifyNoInteractions(manualOverrideService);
+    }
+
+    @Test
+    void executesAirConditionerAndGateActionsSuccessfully() {
+        Device acDevice = Device.builder().id(UUID.randomUUID()).build();
+        Device gateDevice = Device.builder().id(UUID.randomUUID()).build();
+
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true)
+                .actions(new ArrayList<>()).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(gateDevice)
+                .action("OPEN").value(null).order(0).build());
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(acDevice)
+                .action("SET_TEMPERATURE").value(objectMapper.valueToTree(24)).order(1).build());
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(acDevice)
+                .action("SET_SWING").value(objectMapper.valueToTree(true)).order(2).build());
+
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(commands.sendCommand(eq(gateDevice.getId()), eq("OPEN"), anyMap(), eq(StateChangeSource.SCENE)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(commands.sendCommand(eq(acDevice.getId()), eq("SET_TEMPERATURE"), anyMap(), eq(StateChangeSource.SCENE)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(commands.sendCommand(eq(acDevice.getId()), eq("SET_SWING"), anyMap(), eq(StateChangeSource.SCENE)))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("ACKNOWLEDGED").build()));
+        when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.execute(userId, homeId, sceneId);
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getResultDetail()).hasSize(3);
+        verify(commands).sendCommand(eq(gateDevice.getId()), eq("OPEN"), eq(Map.of()), eq(StateChangeSource.SCENE));
+        verify(commands).sendCommand(eq(acDevice.getId()), eq("SET_TEMPERATURE"), argThat(map -> Integer.valueOf(24).equals(map.get("temperature"))), eq(StateChangeSource.SCENE));
+        verify(commands).sendCommand(eq(acDevice.getId()), eq("SET_SWING"), argThat(map -> Boolean.TRUE.equals(map.get("swing"))), eq(StateChangeSource.SCENE));
     }
 }

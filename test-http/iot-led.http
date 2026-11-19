@@ -1,0 +1,387 @@
+### ====================================================================
+### HESTA Smart Home - Device Command API Test Suite
+### ====================================================================
+
+@baseUrl = http://localhost:8080
+@deviceId = f803473e-8f7f-4dcd-8001-5ce1fc2f4dc4
+#@nodeId = 32442d7f-dfcf-4b2f-a380-adba32876cec
+@nodeId = 109441d8-b6bf-4a18-bdf8-9279b7a1548d
+@led1Id = 19f79c42-afc1-4796-a48c-8d076ea45b65
+@led2Id = 98ae5452-250c-44c6-8b1a-fac08b2fc716
+@led3Id = c8186ca5-ff09-486c-bc56-ac75ef85e6d9
+@led4Id = c968b5c4-80d1-4aec-abef-cc52876a6da5
+@led5Id = b016fe3d-36fc-4d3e-a8bd-e287d7138395
+@gateId = 2d566d0a-f7d6-4fac-a0bf-18912da4ab28
+@doorId = c77b64a6-e163-44eb-83d2-431de5eb8f43
+#@token =
+
+### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@gmail.com",
+  "password": "123123123"
+}
+
+> {%
+    if (response.body && response.body.result && response.body.result.accessToken) {
+        client.global.set("token", response.body.result.accessToken);
+    }
+%}
+
+### ====================================================================
+### 0.1 Check Device Detail & Current State
+### ====================================================================
+#GET {{baseUrl}}/api/v1/devices/{{deviceId}}
+Authorization: Bearer {{token}}
+#
+#### ====================================================================
+#### 1. POWER_ON Command
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "POWER_ON"
+}
+
+### ====================================================================
+### 2. POWER_OFF Command
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "POWER_OFF"
+}
+
+### ====================================================================
+### 3. SET_RGB Command (RED)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_RGB",
+  "r": 255,
+  "g": 0,
+  "b": 0
+}
+
+### ====================================================================
+### 4. SET_RGB Command (GREEN)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_RGB",
+  "r": 0,
+  "g": 255,
+  "b": 0
+}
+
+### ====================================================================
+### 5. SET_RGB Command (BLUE)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_RGB",
+  "r": 0,
+  "g": 0,
+  "b": 255
+}
+
+### ====================================================================
+### 6. SET_BRIGHTNESS Command (50%)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_BRIGHTNESS",
+  "brightness": 50
+}
+
+### ====================================================================
+### 7. Invalid RGB (r: 300 -> Expected: HTTP 400)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_RGB",
+  "r": 300,
+  "g": 0,
+  "b": 0
+}
+
+### ====================================================================
+### 8. Invalid Brightness (brightness: 150 -> Expected: HTTP 400)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_BRIGHTNESS",
+  "brightness": 150
+}
+
+### ====================================================================
+### 9. Invalid Action (UNKNOWN_ACTION -> Expected: HTTP 400)
+### ====================================================================
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "UNKNOWN_ACTION"
+}
+
+### ====================================================================
+### 10. LEGACY LED TEST ENDPOINTS (Kept for integration verification)
+### ====================================================================
+###
+POST {{baseUrl}}/api/devices/led-strip/power/on
+
+###
+POST {{baseUrl}}/api/devices/led-strip/power/off
+
+###
+POST {{baseUrl}}/api/devices/led-strip/rgb?r=255&g=0&b=0
+
+###
+POST {{baseUrl}}/api/devices/led-strip/rgb?r=0&g=255&b=0
+
+###
+POST {{baseUrl}}/api/devices/led-strip/rgb?r=0&g=0&b=255
+
+###
+POST {{baseUrl}}/api/devices/led-strip/brightness?brightness=50
+
+### ====================================================================
+### 11. ESP32 4CH LED - LED 1 (19f79c42-afc1-4796-a48c-8d076ea45b65)
+### ====================================================================
+### 11.1 LED 1 - POWER_ON
+POST {{baseUrl}}/api/v1/devices/{{led5Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "POWER_ON"
+}
+
+### 11.2 LED 1 - SET_BRIGHTNESS (80%)
+POST {{baseUrl}}/api/v1/devices/{{led1Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_BRIGHTNESS",
+  "brightness": 80
+}
+
+### 11.3 LED 1 - INCREASE_BRIGHTNESS (+20%)
+POST {{baseUrl}}/api/v1/devices/{{led1Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "INCREASE_BRIGHTNESS",
+  "amount": 20
+}
+
+### 11.4 LED 1 - DECREASE_BRIGHTNESS (-20%)
+POST {{baseUrl}}/api/v1/devices/{{led1Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "DECREASE_BRIGHTNESS",
+  "amount": 20
+}
+
+### 11.5 LED 1 - TOGGLE
+POST {{baseUrl}}/api/v1/devices/{{led5Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "TOGGLE"
+}
+
+### 11.6 LED 1 - POWER_OFF
+POST {{baseUrl}}/api/v1/devices/{{led4Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "POWER_OFF"
+}
+
+### ====================================================================
+### 12. ESP32 4CH LED - LED 2, 3, 4 DIRECT TESTS
+### ====================================================================
+### 12.1 LED 2 - SET_BRIGHTNESS (60%)
+POST {{baseUrl}}/api/v1/devices/{{led2Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_BRIGHTNESS",
+  "brightness": 60
+}
+
+### 12.2 LED 3 - INCREASE_BRIGHTNESS (+15%)
+POST {{baseUrl}}/api/v1/devices/{{led3Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "INCREASE_BRIGHTNESS",
+  "amount": 15
+}
+
+### 12.3 LED 4 - DECREASE_BRIGHTNESS (-25%)
+POST {{baseUrl}}/api/v1/devices/{{led4Id}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "DECREASE_BRIGHTNESS",
+  "amount": 25
+}
+
+### ====================================================================
+### 13. MOTOR A - SLIDING GATE (2d566d0a-f7d6-4fac-a0bf-18912da4ab28)
+### ====================================================================
+### 13.1 CỔNG TRƯỢT - MỞ (OPEN)
+POST {{baseUrl}}/api/v1/devices/{{gateId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN"
+}
+
+### 13.2 CỔNG TRƯỢT - DỪNG (STOP)
+POST {{baseUrl}}/api/v1/devices/{{gateId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "STOP"
+}
+
+### 13.3 CỔNG TRƯỢT - ĐÓNG (CLOSE)
+POST {{baseUrl}}/api/v1/devices/{{gateId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "CLOSE"
+}
+
+### 13.4 CỔNG TRƯỢT - CẤU HÌNH THỜI GIAN MỞ RIÊNG (2000ms / 2s)
+POST {{baseUrl}}/api/v1/devices/{{gateId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_OPEN_DURATION",
+  "openDurationMs": 2000
+}
+
+### 13.5 CỔNG TRƯỢT - CẤU HÌNH THỜI GIAN ĐÓNG RIÊNG (1900ms / 1.9s)
+POST {{baseUrl}}/api/v1/devices/{{gateId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_CLOSE_DURATION",
+  "closeDurationMs": 1900
+}
+
+### 13.6 CỔNG TRƯỢT - CẤU HÌNH SỐ VÒNG QUAY (Mở 4 vòng, Đóng 3.8 vòng)
+POST {{baseUrl}}/api/v1/devices/{{gateId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_TURNS",
+  "openTurns": 4.0,
+  "closeTurns": 3.8
+}
+
+### ====================================================================
+### 14. MOTOR B - ROLLING DOOR / CURTAIN (c77b64a6-e163-44eb-83d2-431de5eb8f43)
+### ====================================================================
+### 14.1 CỬA CUỐN / RÈM - MỞ / CUỘN LÊN (OPEN)
+POST {{baseUrl}}/api/v1/devices/{{doorId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN"
+}
+
+### 14.2 CỬA CUỐN / RÈM - DỪNG (STOP)
+POST {{baseUrl}}/api/v1/devices/{{doorId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "STOP"
+}
+
+### 14.3 CỬA CUỐN / RÈM - ĐÓNG / HẠ XUỐNG (CLOSE)
+POST {{baseUrl}}/api/v1/devices/{{doorId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "CLOSE"
+}
+
+### 14.4 CỬA CUỐN / RÈM - CẤU HÌNH THỜI GIAN MỞ / CUỘN LÊN RIÊNG (2000ms / 2s)
+POST {{baseUrl}}/api/v1/devices/{{doorId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_OPEN_DURATION",
+  "openDurationMs": 2000
+}
+
+### 14.5 CỬA CUỐN / RÈM - CẤU HÌNH THỜI GIAN ĐÓNG / HẠ XUỐNG RIÊNG (1900ms / 1.9s)
+POST {{baseUrl}}/api/v1/devices/{{doorId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_CLOSE_DURATION",
+  "closeDurationMs": 1900
+}
+
+### 14.6 CỬA CUỐN / RÈM - CẤU HÌNH SỐ VÒNG QUAY (Mở 5 vòng, Đóng 4.8 vòng)
+POST {{baseUrl}}/api/v1/devices/{{doorId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_TURNS",
+  "openTurns": 5.0,
+  "closeTurns": 4.8
+}
+

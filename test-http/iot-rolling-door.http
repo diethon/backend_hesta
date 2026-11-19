@@ -1,0 +1,162 @@
+### ====================================================================
+### HESTA Smart Home - Rolling Door (Cửa cuốn / Rèm) Test Suite
+### Tương thích hoàn toàn với cấu hình test của iot-led.http
+### ====================================================================
+### Cấu hình thiết bị Cửa cuốn (Rolling Door / Curtain):
+### - Node ID:     32442d7f-dfcf-4b2f-a380-adba32876cec (LED_Normal Hub)
+### - Device ID:   c77b64a6-e163-44eb-83d2-431de5eb8f43
+### - Device Type: ROLLING_DOOR
+### - Cơ cấu:      Motor B (L298N IN3=GPIO 15, IN4=GPIO 16, ENB=GPIO 17)
+### - Hành trình:  Công tắc mở=GPIO 18, Đóng=GPIO 21
+### ====================================================================
+
+@baseUrl = http://localhost:8080
+@deviceId = c77b64a6-e163-44eb-83d2-431de5eb8f43
+@nodeId = 32442d7f-dfcf-4b2f-a380-adba32876cec
+#@token = 
+
+### ====================================================================
+### 0. (Optional) Login to obtain JWT Bearer token if authentication is enabled
+### ====================================================================
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@gmail.com",
+  "password": "123123123"
+}
+
+> {%
+    if (response.body && response.body.result && response.body.result.accessToken) {
+        client.global.set("token", response.body.result.accessToken);
+    }
+%}
+
+### ====================================================================
+### 0.1 Xem chi tiết thiết bị & Trạng thái hiện tại từ Database
+### ====================================================================
+GET {{baseUrl}}/api/v1/devices/{{deviceId}}
+Authorization: Bearer {{token}}
+
+### ====================================================================
+### PHẦN 1: ĐIỀU KHIỂN CỬA CUỐN QUA GENERIC DEVICE COMMAND API
+### ====================================================================
+
+### 1.1 CỬA CUỐN - MỞ / CUỘN LÊN (OPEN - thời gian mặc định)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN"
+}
+
+### 1.2 CỬA CUỐN - DỪNG (STOP)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "STOP"
+}
+
+### 1.3 CỬA CUỐN - ĐÓNG / HẠ XUỐNG (CLOSE - thời gian mặc định)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "CLOSE"
+}
+
+### 1.4 CỬA CUỐN - CUỘN LÊN KÈM THỜI GIAN CHỈ ĐỊNH (4000ms / 4s)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN",
+  "duration": 4000
+}
+
+### 1.5 CỬA CUỐN - CUỘN LÊN KÈM SỐ VÒNG QUAY CHỈ ĐỊNH (8 vòng)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "OPEN",
+  "turns": 8.0
+}
+
+### 1.6 CỬA CUỐN - CẤU HÌNH THỜI GIAN MỞ / CUỘN LÊN RIÊNG (2000ms / 2s)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_OPEN_DURATION",
+  "openDurationMs": 2000
+}
+
+### 1.7 CỬA CUỐN - CẤU HÌNH THỜI GIAN ĐÓNG / HẠ XUỐNG RIÊNG (1900ms / 1.9s)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_CLOSE_DURATION",
+  "closeDurationMs": 1900
+}
+
+### 1.8 CỬA CUỐN - CẤU HÌNH SỐ VÒNG QUAY (Mở 5 vòng, Đóng 4.8 vòng)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_TURNS",
+  "openTurns": 5.0,
+  "closeTurns": 4.8
+}
+
+### 1.9 CỬA CUỐN - CẤU HÌNH TỐC ĐỘ MOTOR PWM (0 - 255)
+POST {{baseUrl}}/api/v1/devices/{{deviceId}}/command
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "SET_SPEED",
+  "speed": 220
+}
+
+### ====================================================================
+### PHẦN 2: MQTT TOPICS & PAYLOAD MẪU CHO CỬA CUỐN (TEST BẰNG MQTTX / APP)
+### ====================================================================
+# Topic Gửi Lệnh:
+# hesta/nodes/32442d7f-dfcf-4b2f-a380-adba32876cec/devices/c77b64a6-e163-44eb-83d2-431de5eb8f43/command
+#
+# Payload Mở cửa cuốn:
+# {"commandId": "cmd-door-open-01", "action": "OPEN"}
+#
+# Payload Mở cửa cuốn chạy 5 giây:
+# {"commandId": "cmd-door-open-02", "action": "OPEN", "duration": 5000}
+#
+# Payload Mở cửa cuốn chạy 10 vòng:
+# {"commandId": "cmd-door-open-03", "action": "OPEN", "turns": 10.0}
+#
+# Payload Cài đặt thời gian mở / đóng:
+# {"commandId": "cmd-door-cfg-01", "action": "SET_OPEN_DURATION", "openDurationMs": 2000}
+# {"commandId": "cmd-door-cfg-02", "action": "SET_CLOSE_DURATION", "closeDurationMs": 1900}
+#
+# Payload Đóng cửa cuốn:
+# {"commandId": "cmd-door-close-01", "action": "CLOSE"}
+#
+# Payload Dừng cửa cuốn:
+# {"commandId": "cmd-door-stop-01", "action": "STOP"}
+#
+# Topic Nhận Trạng Thái (State):
+# hesta/nodes/32442d7f-dfcf-4b2f-a380-adba32876cec/devices/c77b64a6-e163-44eb-83d2-431de5eb8f43/state
+#
+# Topic Nhận Phản Hồi Xác Nhận (ACK):
+# hesta/nodes/32442d7f-dfcf-4b2f-a380-adba32876cec/devices/c77b64a6-e163-44eb-83d2-431de5eb8f43/ack

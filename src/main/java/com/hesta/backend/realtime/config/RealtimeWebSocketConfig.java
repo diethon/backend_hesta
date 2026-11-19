@@ -2,7 +2,9 @@ package com.hesta.backend.realtime.config;
 
 import com.hesta.backend.realtime.security.RealtimeWebSocketChannelInterceptor;
 import com.hesta.backend.realtime.transport.RealtimeDestinations;
+import com.hesta.backend.realtime.transport.WebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -16,39 +18,42 @@ import org.springframework.web.socket.config.annotation.WebSocketTransportRegist
 @EnableWebSocketMessageBroker
 public class RealtimeWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    private static final String[] ALLOWED_ORIGINS = {
-            "http://localhost:5173",
-            "http://127.0.0.1:5173"
-    };
     private static final int TIME_TO_FIRST_MESSAGE_MILLIS = 10_000;
 
     private final RealtimeWebSocketChannelInterceptor channelInterceptor;
     private final WebSocketRealtimeProperties properties;
     private final TaskScheduler heartbeatTaskScheduler;
+    private final WebSocketSessionManager webSocketSessionManager;
+    private final String[] allowedOrigins;
 
     public RealtimeWebSocketConfig(
             RealtimeWebSocketChannelInterceptor channelInterceptor,
             WebSocketRealtimeProperties properties,
-            @Qualifier("realtimeHeartbeatTaskScheduler") TaskScheduler heartbeatTaskScheduler
+            @Qualifier("realtimeHeartbeatTaskScheduler") TaskScheduler heartbeatTaskScheduler,
+            WebSocketSessionManager webSocketSessionManager,
+            @Value("${app.cors.allowed-origins}") String[] allowedOrigins
     ) {
         this.channelInterceptor = channelInterceptor;
         this.properties = properties;
         this.heartbeatTaskScheduler = heartbeatTaskScheduler;
+        this.webSocketSessionManager = webSocketSessionManager;
+        this.allowedOrigins = allowedOrigins;
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint(RealtimeDestinations.WEBSOCKET_ENDPOINT)
-                .setAllowedOrigins(ALLOWED_ORIGINS);
+                .setAllowedOrigins(allowedOrigins);
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         long heartbeatMillis = properties.heartbeat().toMillis();
-        registry.enableSimpleBroker(RealtimeDestinations.TOPIC_PREFIX)
+        registry.enableSimpleBroker(RealtimeDestinations.TOPIC_PREFIX, RealtimeDestinations.QUEUE_PREFIX)
                 .setHeartbeatValue(new long[]{heartbeatMillis, heartbeatMillis})
                 .setTaskScheduler(heartbeatTaskScheduler);
         registry.setApplicationDestinationPrefixes(RealtimeDestinations.APPLICATION_PREFIX);
+        registry.setUserDestinationPrefix(RealtimeDestinations.USER_PREFIX);
     }
 
     @Override
@@ -59,5 +64,6 @@ public class RealtimeWebSocketConfig implements WebSocketMessageBrokerConfigurer
     @Override
     public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
         registration.setTimeToFirstMessage(TIME_TO_FIRST_MESSAGE_MILLIS);
+        registration.addDecoratorFactory(webSocketSessionManager);
     }
 }

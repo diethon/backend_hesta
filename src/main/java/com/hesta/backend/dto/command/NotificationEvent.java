@@ -14,6 +14,17 @@ public record NotificationEvent(
         NotificationType type,
         String title,
         String message,
-        NotificationPriority priority
+        NotificationPriority priority,
+        UUID sourceAnomalyId
 ) {
+    public NotificationEvent(
+            UUID userId,
+            UUID homeId,
+            NotificationType type,
+            String title,
+            String message,
+            NotificationPriority priority
+    ) {
+        this(userId, homeId, type, title, message, priority, null);
+    }
 }

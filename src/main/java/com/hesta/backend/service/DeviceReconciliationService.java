@@ -4,6 +4,7 @@ import com.hesta.backend.config.mqtt.MqttGateway;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(name = "mqtt.reconciliation.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class DeviceReconciliationService {
 
@@ -36,5 +38,34 @@ public class DeviceReconciliationService {
         } catch (Exception e) {
             log.error("[State Reconciliation] Lỗi khi gửi lệnh đồng bộ", e);
         }
+    }
+
+    /**
+     * PHO-038: Runtime Broker Failover
+     * Tự động phục hồi và kích hoạt State Reconciliation khi Broker Mosquitto kết nối lại mà không cần restart server.
+     */
+    private final java.util.concurrent.atomic.AtomicLong lastReconcileTimestamp = new java.util.concurrent.atomic.AtomicLong(0);
+
+    @EventListener(org.springframework.integration.mqtt.event.MqttSubscribedEvent.class)
+    public void onMqttSubscribed(org.springframework.integration.mqtt.event.MqttSubscribedEvent event) {
+        long now = System.currentTimeMillis();
+        long lastTime = lastReconcileTimestamp.get();
+        // Rate-limit / debounce: Bỏ qua nếu lần reconcile trước đó chưa qua 15 giây để tránh Broadcast Storm
+        if (now - lastTime < 15000) {
+            log.debug("[PHO-038 Broker Failover Recovery] Bỏ qua sự kiện Subscribed trùng lặp do đang trong thời gian debounce.");
+            return;
+        }
+        if (!lastReconcileTimestamp.compareAndSet(lastTime, now)) {
+            log.debug("[PHO-038 Broker Failover Recovery] Race condition detected on debounce timestamp update, skipping.");
+            return;
+        }
+        log.info("[PHO-038 Broker Failover Recovery] MQTT Broker connected/subscribed! Triggering automatic State Reconciliation...");
+        reconcileStatesOnStartup();
+    }
+
+    @EventListener(org.springframework.integration.mqtt.event.MqttConnectionFailedEvent.class)
+    public void onMqttConnectionFailed(org.springframework.integration.mqtt.event.MqttConnectionFailedEvent event) {
+        log.warn("[PHO-038 Broker Failover] Mất kết nối tới Mosquitto Broker: {}", 
+                event.getCause() != null ? event.getCause().getMessage() : "Network dropped");
     }
 }

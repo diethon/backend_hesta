@@ -1,9 +1,12 @@
 package com.hesta.backend.service;
 
 import com.hesta.backend.entity.HomeMember;
+import com.hesta.backend.enums.AccessScope;
+import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.enums.MemberStatus;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
+import com.hesta.backend.realtime.transport.RealtimeDestinations;
 import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.service.impl.RealtimeSubscriptionServiceImpl;
 import org.junit.jupiter.api.Test;
@@ -32,7 +35,11 @@ class RealtimeSubscriptionServiceTest {
     void authorizeSubscription_whenUserIsActiveHomeMember_allowsSubscription() {
         UUID userId = UUID.randomUUID();
         UUID homeId = UUID.randomUUID();
-        HomeMember membership = HomeMember.builder().status(MemberStatus.ACTIVE).build();
+        HomeMember membership = HomeMember.builder()
+                .status(MemberStatus.ACTIVE)
+                .role(HomeRole.MEMBER)
+                .accessScope(AccessScope.ALL)
+                .build();
         when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
                 .thenReturn(Optional.of(membership));
 
@@ -46,7 +53,7 @@ class RealtimeSubscriptionServiceTest {
         UUID homeId = UUID.randomUUID();
         when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId)).thenReturn(Optional.empty());
 
-        assertUnauthorized(userId, homeId);
+        assertUnauthorized(userId, homeId, RealtimeDestinations.homeEvents(homeId));
     }
 
     @Test
@@ -57,11 +64,64 @@ class RealtimeSubscriptionServiceTest {
         when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
                 .thenReturn(Optional.of(membership));
 
-        assertUnauthorized(userId, homeId);
+        assertUnauthorized(userId, homeId, RealtimeDestinations.homeEvents(homeId));
     }
 
-    private void assertUnauthorized(UUID userId, UUID homeId) {
-        assertThatThrownBy(() -> subscriptionService.authorizeSubscription(userId, homeId))
+    @Test
+    void authorizeSubscription_whenCustomMemberSubscribesToSharedTopic_rejectsSubscription() {
+        UUID userId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+        HomeMember membership = HomeMember.builder()
+                .status(MemberStatus.ACTIVE)
+                .role(HomeRole.MEMBER)
+                .accessScope(AccessScope.CUSTOM)
+                .build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(membership));
+
+        assertUnauthorized(userId, homeId, RealtimeDestinations.homeEvents(homeId));
+    }
+
+    @Test
+    void authorizeSubscription_whenCustomMemberSubscribesToUserQueue_allowsSubscription() {
+        UUID userId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+        HomeMember membership = HomeMember.builder()
+                .status(MemberStatus.ACTIVE)
+                .role(HomeRole.MEMBER)
+                .accessScope(AccessScope.CUSTOM)
+                .build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(membership));
+
+        assertThatCode(() -> subscriptionService.authorizeSubscription(
+                userId,
+                homeId,
+                "/user" + RealtimeDestinations.userHomeEvents(homeId)
+        )).doesNotThrowAnyException();
+    }
+
+    @Test
+    void authorizeSubscription_whenOwnerSubscribesToSharedTopic_allowsSubscription() {
+        UUID userId = UUID.randomUUID();
+        UUID homeId = UUID.randomUUID();
+        HomeMember membership = HomeMember.builder()
+                .status(MemberStatus.ACTIVE)
+                .role(HomeRole.OWNER)
+                .accessScope(AccessScope.ALL)
+                .build();
+        when(homeMemberRepository.findByHomeIdAndUserId(homeId, userId))
+                .thenReturn(Optional.of(membership));
+
+        assertThatCode(() -> subscriptionService.authorizeSubscription(
+                userId,
+                homeId,
+                RealtimeDestinations.homeEvents(homeId)
+        )).doesNotThrowAnyException();
+    }
+
+    private void assertUnauthorized(UUID userId, UUID homeId, String destination) {
+        assertThatThrownBy(() -> subscriptionService.authorizeSubscription(userId, homeId, destination))
                 .isInstanceOf(AppException.class)
                 .extracting(exception -> ((AppException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.UNAUTHORIZED);

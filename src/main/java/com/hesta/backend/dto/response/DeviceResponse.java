@@ -3,6 +3,7 @@ package com.hesta.backend.dto.response;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
+import com.hesta.backend.enums.AccessLevel;
 import lombok.Builder;
 import lombok.Data;
 
@@ -23,16 +24,26 @@ public class DeviceResponse {
     private String nodeName;
     private String name;
     private String deviceType;
+    private String model;
+    private String serialNumber;
     private String mqttTopic;
     private String status;
     private Map<String, Object> currentState;
-    private List<String> capabilities;
+    private Map<String, Object> settings;
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.hesta.backend.entity.DeviceCapabilitiesDeserializer.class)
+    private java.util.Map<String, java.util.List<String>> capabilities;
     private String icon;
+    private String imageUrl;
+    private UUID catalogId;
     private BigDecimal digitalTwinX;
     private BigDecimal digitalTwinY;
     private BigDecimal digitalTwinZ;
+    private OffsetDateTime manualOverrideUntil;
+    private Boolean manualOverrideActive;
+    private AccessLevel accessLevel;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    private OffsetDateTime lastSeen;
 
     public static DeviceResponse fromEntity(Device device) {
         if (device == null) {
@@ -40,32 +51,35 @@ public class DeviceResponse {
         }
 
         Room room = device.getRoom();
-        Home home = (room != null) ? room.getHome() : null;
+        Home home = device.getHome();
 
         return DeviceResponse.builder()
                 .id(device.getId())
-                .roomId(device.getRoom() != null ? device.getRoom().getId() : null)
-                .roomName(device.getRoom() != null ? device.getRoom().getName() : null)
-                .homeId(home != null ? home.getId() : null)
                 .roomId(room != null ? room.getId() : null)
                 .roomName(room != null ? room.getName() : null)
+                .homeId(home != null ? home.getId() : null)
                 .nodeId(device.getNode() != null ? device.getNode().getId() : null)
                 .nodeName(device.getNode() != null ? device.getNode().getNodeCode() : null)
                 .name(device.getName())
-                .deviceType(device.getDeviceType() != null ? device.getDeviceType().name() : null)
+                .deviceType(device.getDeviceType())
+                .model(device.getModel())
+                .serialNumber(device.getSerialNumber())
                 .mqttTopic(device.getMqttTopic())
                 .status(device.getStatus() != null ? device.getStatus().name() : null)
-
-                .status(device.getStatus().name())
                 .currentState(device.getCurrentState())
+                .settings(device.getSettings() != null ? device.getSettings() : java.util.Collections.emptyMap())
                 .capabilities(device.getCapabilities())
                 .icon(device.getIcon())
+                .imageUrl(device.getImageUrl())
+                .catalogId(device.getCatalog() != null ? device.getCatalog().getId() : null)
                 .digitalTwinX(device.getDigitalTwinX())
                 .digitalTwinY(device.getDigitalTwinY())
                 .digitalTwinZ(device.getDigitalTwinZ())
                 .createdAt(device.getCreatedAt())
                 .updatedAt(device.getUpdatedAt())
+                .lastSeen(device.getLastSeen() != null ? device.getLastSeen() : device.getUpdatedAt())
                 .build();
     }
+
 }
 

@@ -89,12 +89,18 @@ public class BehaviorServiceImpl implements BehaviorService {
                 .collect(Collectors.toMap(Device::getId, device -> device));
         return detectPatterns(userId, homeId, from, to).stream()
                 .filter(pattern -> pattern.getConfidence() >= 0.6)
-                .filter(pattern -> "TURN_ON".equals(pattern.getAction()) || "TURN_OFF".equals(pattern.getAction()))
+                .filter(pattern -> Set.of("TURN_ON", "TURN_OFF", "OPEN", "CLOSE", "SET_POWER").contains(pattern.getAction()))
                 .filter(pattern -> devices.containsKey(pattern.getDeviceId()))
                 .filter(pattern -> Math.abs(Duration.between(now, pattern.getAverageTime()).toMinutes()) <= 45)
                 .filter(pattern -> {
-                    Object power = Optional.ofNullable(devices.get(pattern.getDeviceId()).getCurrentState())
-                            .map(state -> state.get("power")).orElse(null);
+                    Map<String, Object> state = devices.get(pattern.getDeviceId()).getCurrentState();
+                    if (state == null) return true;
+                    if ("OPEN".equals(pattern.getAction()) || "CLOSE".equals(pattern.getAction())) {
+                        Object s = state.get("state");
+                        if (s == null) return true;
+                        return !String.valueOf(s).equalsIgnoreCase("OPEN".equals(pattern.getAction()) ? "OPEN" : "CLOSED");
+                    }
+                    Object power = state.get("power");
                     return power == null || !String.valueOf(power).equalsIgnoreCase(
                             "TURN_ON".equals(pattern.getAction()) ? "ON" : "OFF");
                 })

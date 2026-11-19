@@ -16,6 +16,15 @@ public interface HomeMemberRepository extends JpaRepository<HomeMember, UUID> {
     List<HomeMember> findByUserId(UUID userId);
     List<HomeMember> findByUserIdOrderByJoinedAtDesc(UUID userId);
     Optional<HomeMember> findByHomeIdAndUserId(UUID homeId, UUID userId);
+
+    // Authorization reads home and membership together: one DB round trip instead of two.
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"home"})
+    Optional<HomeMember> findWithHomeByHomeIdAndUserId(UUID homeId, UUID userId);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT hm FROM HomeMember hm WHERE hm.home.id = :homeId AND hm.user.id = :userId")
+    Optional<HomeMember> findByHomeIdAndUserIdForUpdate(@Param("homeId") UUID homeId, @Param("userId") UUID userId);
+
     boolean existsByHomeIdAndUserId(UUID homeId, UUID userId);
     boolean existsByHomeIdAndUserIdAndRole(UUID homeId, UUID userId, com.hesta.backend.enums.HomeRole role);
 

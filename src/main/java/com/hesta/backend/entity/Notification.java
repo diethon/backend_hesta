@@ -60,6 +60,9 @@ public class Notification {
     @Builder.Default
     private boolean read = false;
 
+    @Column(name = "source_anomaly_id")
+    private UUID sourceAnomalyId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

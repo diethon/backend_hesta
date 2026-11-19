@@ -10,6 +10,8 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Notification;
 import com.hesta.backend.entity.User;
+import com.hesta.backend.enums.AccessScope;
+import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.enums.MemberStatus;
 import com.hesta.backend.enums.NotificationPriority;
 import com.hesta.backend.enums.NotificationType;
@@ -28,6 +30,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -80,7 +83,25 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public NotificationResponse get(UUID currentUserId, UUID notificationId) {
-        return NotificationResponse.fromEntity(findOwnedNotification(currentUserId, notificationId));
+        Notification notification = findOwnedNotification(currentUserId, notificationId);
+        if (notification.getHome() != null) {
+            Optional<HomeMember> memberOpt = homeMemberRepository.findByHomeIdAndUserId(
+                    notification.getHome().getId(),
+                    currentUserId
+            );
+            if (memberOpt.isPresent()) {
+                HomeMember m = memberOpt.get();
+                if (m.getRole() != HomeRole.OWNER && m.getAccessScope() == AccessScope.CUSTOM) {
+                    boolean allowed = notification.getType() == NotificationType.SECURITY
+                            || notification.getType() == NotificationType.SYSTEM
+                            || notification.getPriority() == NotificationPriority.HIGH;
+                    if (!allowed) {
+                        throw new AppException(ErrorCode.NOTIFICATION_NOT_FOUND);
+                    }
+                }
+            }
+        }
+        return NotificationResponse.fromEntity(notification);
     }
 
     @Override
@@ -116,6 +137,9 @@ public class NotificationServiceImpl implements NotificationService {
                 event.message().trim(),
                 event.priority()
         );
+        if (event.sourceAnomalyId() != null) {
+            notification.setSourceAnomalyId(event.sourceAnomalyId());
+        }
         NotificationResponse response = NotificationResponse.fromEntity(notificationRepository.saveAndFlush(notification));
         applicationEventPublisher.publishEvent(
                 new NotificationCreatedEvent(NotificationRealtimePayload.from(response))

@@ -1,7 +1,10 @@
 package com.hesta.backend.repository;
 
 import com.hesta.backend.entity.Device;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -13,18 +16,125 @@ import java.util.UUID;
 @Repository
 public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
-    @Query("SELECT d FROM Device d WHERE d.node.home.id = :homeId")
+    @Query("""
+            select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+                   null as metricType, null as referenceTime, device.status as deviceStatus
+            from Device device where device.isDeleted = false
+            """)
+    List<TwinHealthReference> findHealthReferences();
+
+    @Query("""
+            select device.room.home.id as homeId, device.id as deviceId, device.room.id as roomId,
+                   null as metricType, null as referenceTime, device.status as deviceStatus
+            from Device device where device.id = :id and device.isDeleted = false
+            """)
+    Optional<TwinHealthReference> findHealthReference(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select device from Device device where device.id = :id and device.isDeleted = false")
+    Optional<Device> findForSensorReading(@Param("id") UUID id);
+
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.createdAt ASC, d.id ASC")
     List<Device> findByHomeId(@Param("homeId") UUID homeId);
 
-    @Query("SELECT d FROM Device d WHERE d.node.id = :roomId")
+    @Query("""
+            SELECT d FROM Device d
+            LEFT JOIN FETCH d.room r
+            LEFT JOIN FETCH r.home
+            LEFT JOIN FETCH d.node n
+            LEFT JOIN FETCH n.home
+            WHERE (r.home.id = :homeId)
+               OR (r IS NULL AND n.home.id = :homeId)
+            ORDER BY d.createdAt ASC, d.id ASC
+            """)
+    List<Device> findByHomeIdWithRoomAndNode(@Param("homeId") UUID homeId);
+
+    @EntityGraph(attributePaths = "room")
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.id ASC")
+    List<Device> findByHomeIdOrderByIdAsc(@Param("homeId") UUID homeId);
+
+    @Query("SELECT d FROM Device d WHERE d.room.id = :roomId ORDER BY d.createdAt ASC, d.id ASC")
     List<Device> findByRoomId(@Param("roomId") UUID roomId);
+
+    @Query("SELECT d FROM Device d JOIN FETCH d.room r JOIN FETCH r.home WHERE d.id = :deviceId")
+    Optional<Device> findByIdWithRoomHome(@Param("deviceId") UUID deviceId);
+
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE d.id = :id")
+    Optional<Device> findByIdWithNode(@Param("id") UUID id);
 
     @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.name = :name")
     Optional<Device> findByNodeCodeAndName(@Param("nodeCode") String nodeCode, @Param("name") String name);
 
+    @Query("SELECT d FROM Device d WHERE d.node.nodeCode = :nodeCode AND d.localId = :localId")
+    Optional<Device> findByNodeCodeAndLocalId(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
+
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home WHERE (n IS NOT NULL AND (n.id = :nodeId OR n.nodeCode = :nodeCode)) OR (d.mqttTopic LIKE CONCAT('%/nodes/', :nodeCode, '/%'))")
+    List<Device> findByNodeIdOrNodeCode(@Param("nodeId") UUID nodeId, @Param("nodeCode") String nodeCode);
+
     Optional<Device> findByMqttTopic(String mqttTopic);
+
+    // Eager variants for callers outside a Hibernate session (MQTT automation path).
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE n.nodeCode = :nodeCode AND d.localId = :localId")
+    Optional<Device> findByNodeCodeAndLocalIdWithRoomAndHome(@Param("nodeCode") String nodeCode, @Param("localId") String localId);
+
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE n.nodeCode = :nodeCode AND d.name = :name")
+    Optional<Device> findByNodeCodeAndNameWithRoomAndHome(@Param("nodeCode") String nodeCode, @Param("name") String name);
+
+    @Query("SELECT d FROM Device d LEFT JOIN FETCH d.node n LEFT JOIN FETCH n.home LEFT JOIN FETCH d.room r LEFT JOIN FETCH r.home WHERE d.mqttTopic = :mqttTopic")
+    Optional<Device> findByMqttTopicWithRoomAndHome(@Param("mqttTopic") String mqttTopic);
+
+
+    Optional<Device> findByLocalId(String localId);
+
+    @Query("SELECT d FROM Device d WHERE d.mqttTopic LIKE %:keyword%")
+    Optional<Device> findByMqttTopicContaining(@Param("keyword") String keyword);
+
+    @Query("SELECT d FROM Device d WHERE d.room.home.id = :homeId ORDER BY d.name ASC")
+    List<Device> findAllByHomeIdOrderByNameAsc(@Param("homeId") UUID homeId);
+
     List<Device> findAllByRoom_Home_IdOrderByNameAsc(UUID homeId);
 
-    @Query("SELECT CASE WHEN COUNT(d) > 0 THEN true ELSE false END FROM Device d JOIN HomeMember hm ON d.room.home.id = hm.home.id WHERE d.id = :deviceId AND hm.user.id = :userId")
+    @Query("SELECT CASE WHEN COUNT(d) > 0 THEN true ELSE false END FROM Device d " +
+           "LEFT JOIN d.room r " +
+           "LEFT JOIN d.node n " +
+           "JOIN HomeMember hm ON (r.home.id = hm.home.id OR (r IS NULL AND n.home.id = hm.home.id)) " +
+           "WHERE d.id = :deviceId AND hm.user.id = :userId")
     boolean hasAccessToDevice(@Param("deviceId") UUID deviceId, @Param("userId") UUID userId);
+
+    Optional<Device> findBySerialNumber(String serialNumber);
+
+    boolean existsBySerialNumber(String serialNumber);
+
+    long countByStatus(com.hesta.backend.enums.DeviceStatus status);
+
+    long countByCatalogId(UUID catalogId);
+
+    long countByCatalogIdAndStatus(UUID catalogId, com.hesta.backend.enums.DeviceStatus status);
+
+    long countByModel(String model);
+
+    long countByModelAndStatus(String model, com.hesta.backend.enums.DeviceStatus status);
+
+    @Query("SELECT d.serialNumber FROM Device d WHERE d.serialNumber LIKE CONCAT(:prefix, '%')")
+    List<String> findSerialNumbersStartingWith(@Param("prefix") String prefix);
+
+    @Query("SELECT d.deviceType, COUNT(d) FROM Device d GROUP BY d.deviceType")
+    List<Object[]> countGroupedByDeviceType();
+
+    @Query("""
+        SELECT d FROM Device d
+        LEFT JOIN FETCH d.room r
+        LEFT JOIN FETCH r.home
+        LEFT JOIN FETCH d.node n
+        LEFT JOIN FETCH n.home
+        WHERE d.isDeleted = false
+          AND (d.status IS NULL OR d.status != com.hesta.backend.enums.DeviceStatus.UNCLAIMED)
+          AND d.deviceType IN :monitoredTypes
+          AND d.lastSeen IS NOT NULL
+          AND d.lastSeen >= :maxAgeCutoff
+    """)
+    List<Device> findCandidateSensorsForOfflineMonitoring(
+            @Param("monitoredTypes") java.util.Collection<String> monitoredTypes,
+            @Param("maxAgeCutoff") java.time.OffsetDateTime maxAgeCutoff
+    );
 }

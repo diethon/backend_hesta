@@ -1,0 +1,77 @@
+### =========================================================================
+### SYNA SMART HOME - ADMIN DEVICE & QR ONBOARDING HTTP TESTS
+### =========================================================================
+
+@baseUrl = http://localhost:8080/api/v1
+@adminToken = eyJhbGciOiJIUzI1NiJ9...ADMIN_TOKEN_HERE
+@userToken = eyJhbGciOiJIUzI1NiJ9...USER_TOKEN_HERE
+@deviceId = 11111111-1111-1111-1111-111111111111
+@qrToken = SAMPLE_TOKEN_HERE
+
+### 1. ADMIN CREATE DEVICE (Success: 201 Created)
+POST {{baseUrl}}/admin/devices
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "SYNA RGB Light",
+  "deviceType": "LIGHT",
+  "model": "SYNA-RGB-001",
+  "serialNumber": "SYNA-RGB-001-0001",
+  "localId": "rgb-01",
+  "icon": "lightbulb",
+  "capabilities": {
+    "POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"],
+    "COLOR": ["SET_COLOR"],
+    "BRIGHTNESS": ["SET_BRIGHTNESS"]
+  }
+}
+
+### 2. ADMIN GET DEVICE DETAILS (Success: 200 OK)
+GET {{baseUrl}}/admin/devices/{{deviceId}}
+Authorization: Bearer {{adminToken}}
+
+### 3. ADMIN GET ACTIVE QR INFO (Success: 200 OK)
+GET {{baseUrl}}/admin/devices/{{deviceId}}/qr
+Authorization: Bearer {{adminToken}}
+
+### 4. ADMIN REGENERATE QR TOKEN (Success: 200 OK)
+POST {{baseUrl}}/admin/devices/{{deviceId}}/qr/regenerate
+Authorization: Bearer {{adminToken}}
+
+### 5. PUBLIC RESOLVE QR TOKEN (Success: 200 OK, No Auth Required)
+GET {{baseUrl}}/devices/qr/{{qrToken}}
+
+### 6. USER CREATE DEVICE - FORBIDDEN TEST (Expected: 403 Forbidden)
+POST {{baseUrl}}/admin/devices
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "name": "Hacker Device",
+  "deviceType": "LIGHT",
+  "serialNumber": "HACK-001"
+}
+
+### 7. UNAUTHENTICATED CREATE DEVICE (Expected: 401 Unauthorized)
+POST {{baseUrl}}/admin/devices
+Content-Type: application/json
+
+{
+  "name": "Anonymous Device",
+  "deviceType": "LIGHT",
+  "serialNumber": "ANON-001"
+}
+
+### 8. USER CLAIM DEVICE (Success: 200 OK)
+POST {{baseUrl}}/devices/{{deviceId}}/claim
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "token": "{{qrToken}}",
+  "homeId": "22222222-2222-2222-2222-222222222222",
+  "roomId": "33333333-3333-3333-3333-333333333333",
+  "name": "Living Room RGB Light",
+  "nodeCode": "esp32-001"
+}

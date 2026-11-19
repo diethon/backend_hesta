@@ -1,0 +1,381 @@
+package com.hesta.backend.service;
+
+import com.hesta.backend.config.AnomalyDetectionProperties;
+import com.hesta.backend.dto.event.AnomalyRaisedEvent;
+import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.DeviceAnomaly;
+import com.hesta.backend.entity.Home;
+import com.hesta.backend.enums.AnomalyStatus;
+import com.hesta.backend.enums.AnomalyType;
+import com.hesta.backend.enums.SeverityLevel;
+import com.hesta.backend.repository.DeviceAnomalyRepository;
+import com.hesta.backend.repository.SensorReadingRepository;
+import com.hesta.backend.service.impl.AnomalyDetectionServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class AnomalyDetectionServiceTest {
+
+    @Mock
+    private DeviceAnomalyRepository anomalyRepository;
+
+    @Mock
+    private SensorReadingRepository sensorReadingRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
+    private AnomalyDetectionProperties properties;
+    private AnomalyDetectionServiceImpl service;
+
+    private Device device;
+    private Home home;
+    private UUID deviceId;
+    private UUID homeId;
+
+    @BeforeEach
+    void setUp() {
+        properties = new AnomalyDetectionProperties();
+        service = new AnomalyDetectionServiceImpl(
+                properties,
+                anomalyRepository,
+                sensorReadingRepository,
+                eventPublisher
+        );
+
+        deviceId = UUID.randomUUID();
+        homeId = UUID.randomUUID();
+
+        home = Home.builder().id(homeId).name("Home Sweet Home").build();
+        device = Device.builder()
+                .id(deviceId)
+                .name("Gas Sensor Living Room")
+                .deviceType("GAS_SENSOR")
+                .isDeleted(false)
+                .build();
+        device.setRoom(com.hesta.backend.entity.Room.builder().id(UUID.randomUUID()).home(home).name("Living Room").build());
+    }
+
+    @Test
+    @DisplayName("Readings below warn threshold should not raise an anomaly")
+    void evaluateReading_BelowWarnThreshold_NoAnomalyRaised() {
+        OffsetDateTime now = OffsetDateTime.now();
+
+        // gas_ppm warn is 400.0. Reading 250.0 is normal.
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(250.0), now, 100L);
+
+        verify(anomalyRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Readings above warn threshold require configured confirmation streak before raising anomaly")
+    void evaluateReading_ExceedsWarnThreshold_RequiresConsecutiveReadings() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // Reading 1: gas_ppm = 500 (warn=400, confirmReadingsHigh=2). Streak = 1 -> no alert yet
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(500.0), now, 101L);
+        verify(anomalyRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(AnomalyRaisedEvent.class));
+
+        // Reading 2: gas_ppm = 520. Streak = 2 -> raises HIGH anomaly!
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(520.0), now.plusSeconds(5), 102L);
+
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        DeviceAnomaly created = captor.getValue();
+
+        assertThat(created.getSeverity()).isEqualTo(SeverityLevel.HIGH);
+        assertThat(created.getStatus()).isEqualTo(AnomalyStatus.OPEN);
+        assertThat(created.getAnomalyType()).isEqualTo(AnomalyType.GAS_LEAKAGE);
+
+        verify(eventPublisher, times(1)).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Critical reading meeting streak requirement raises CRITICAL anomaly immediately")
+    void evaluateReading_ExceedsCriticalThreshold_RaisesCritical() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // Critical threshold is 1000.0, confirmReadingsCritical is 1
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(1200.0), now, 103L);
+
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        DeviceAnomaly created = captor.getValue();
+
+        assertThat(created.getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+        assertThat(created.getStatus()).isEqualTo(AnomalyStatus.OPEN);
+
+        ArgumentCaptor<AnomalyRaisedEvent> eventCaptor = ArgumentCaptor.forClass(AnomalyRaisedEvent.class);
+        verify(eventPublisher, times(1)).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().severity()).isEqualTo(SeverityLevel.CRITICAL);
+    }
+
+    @Test
+    @DisplayName("Escalation: active HIGH anomaly escalates to CRITICAL on dangerous reading")
+    void evaluateReading_EscalatesFromHighToCritical() {
+        OffsetDateTime now = OffsetDateTime.now();
+        DeviceAnomaly existing = DeviceAnomaly.builder()
+                .id(UUID.randomUUID())
+                .home(home)
+                .device(device)
+                .anomalyType(AnomalyType.GAS_LEAKAGE)
+                .severity(SeverityLevel.HIGH)
+                .status(AnomalyStatus.ACKNOWLEDGED)
+                .currentValue("500")
+                .occurrenceCount(1)
+                .build();
+
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.of(existing));
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // Reading gas_ppm = 1500 (CRITICAL >= 1000)
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(1500.0), now, 104L);
+
+        assertThat(existing.getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+        assertThat(existing.getStatus()).isEqualTo(AnomalyStatus.OPEN); // resets to OPEN on escalation
+        assertThat(existing.getOccurrenceCount()).isEqualTo(2);
+
+        ArgumentCaptor<AnomalyRaisedEvent> eventCaptor = ArgumentCaptor.forClass(AnomalyRaisedEvent.class);
+        verify(eventPublisher, times(1)).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().isEscalated()).isTrue();
+        assertThat(eventCaptor.getValue().severity()).isEqualTo(SeverityLevel.CRITICAL);
+    }
+
+    @Test
+    @DisplayName("Hysteresis: active anomaly auto-resolves after N consecutive readings below clear margin")
+    void evaluateReading_HysteresisAutoClear() {
+        OffsetDateTime now = OffsetDateTime.now();
+        DeviceAnomaly existing = DeviceAnomaly.builder()
+                .id(UUID.randomUUID())
+                .home(home)
+                .device(device)
+                .anomalyType(AnomalyType.GAS_LEAKAGE)
+                .severity(SeverityLevel.HIGH)
+                .status(AnomalyStatus.OPEN)
+                .currentValue("500")
+                .build();
+
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.of(existing));
+
+        // Warn is 400, clearMargin is 0.10 (400 * 0.90 = 360). Clear readings required = 3.
+        // Reading 1: 300 < 360. Clear streak = 1 -> not resolved yet
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(300.0), now, 201L);
+        assertThat(existing.getStatus()).isEqualTo(AnomalyStatus.OPEN);
+
+        // Reading 2: 290 < 360. Clear streak = 2 -> not resolved yet
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(290.0), now.plusSeconds(5), 202L);
+        assertThat(existing.getStatus()).isEqualTo(AnomalyStatus.OPEN);
+
+        // Reading 3: 280 < 360. Clear streak = 3 -> auto-resolves!
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(280.0), now.plusSeconds(10), 203L);
+        assertThat(existing.getStatus()).isEqualTo(AnomalyStatus.RESOLVED);
+        assertThat(existing.getResolvedAt()).isNotNull();
+        assertThat(existing.getResolutionNote()).contains("Hysteresis");
+        verify(anomalyRepository, times(1)).save(existing);
+    }
+
+    @Test
+    @DisplayName("Manual resolution suppresses new alerts during cooldown window")
+    void evaluateReading_ManualResolution_SuppressesDuringCooldown() {
+        OffsetDateTime now = OffsetDateTime.now();
+
+        // Record manual resolution
+        service.recordManualResolution(deviceId, AnomalyType.GAS_LEAKAGE);
+
+        // Subsequent high reading within cooldown (10m) should be suppressed
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(600.0), now, 301L);
+
+        verify(anomalyRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Input validation: null, below-min, or deleted devices are safely ignored")
+    void evaluateReading_ValidationFailures_SafelyHandled() {
+        OffsetDateTime now = OffsetDateTime.now();
+
+        // Null device
+        service.evaluateReading(null, "gas_ppm", BigDecimal.valueOf(500), now, 1L);
+
+        // Deleted device
+        Device deleted = Device.builder().id(UUID.randomUUID()).isDeleted(true).build();
+        service.evaluateReading(deleted, "gas_ppm", BigDecimal.valueOf(500), now, 2L);
+
+        // Negative reading below validMin 0
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(-5), now, 4L);
+
+        verify(anomalyRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Saturated reading above validMax is clamped and raises CRITICAL instead of being dropped")
+    void evaluateReading_AboveValidMax_RaisesCritical() {
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(99999), OffsetDateTime.now(), 3L);
+
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+        assertThat(captor.getValue().getCurrentValue()).isEqualTo("10000.0 ppm");
+        verify(eventPublisher).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Manual resolution cooldown never suppresses a CRITICAL reading")
+    void evaluateReading_ManualResolution_DoesNotSuppressCritical() {
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.GAS_LEAKAGE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service.recordManualResolution(deviceId, AnomalyType.GAS_LEAKAGE);
+
+        service.evaluateReading(device, "gas_ppm", BigDecimal.valueOf(2000.0), OffsetDateTime.now(), 302L);
+
+        verify(anomalyRepository).save(argThat(a -> a.getSeverity() == SeverityLevel.CRITICAL));
+        verify(eventPublisher).publishEvent(any(AnomalyRaisedEvent.class));
+    }
+
+    @Test
+    @DisplayName("Smoke thresholds: 250 is normal, 350 triggers HIGH after 2 streaks, 1100 triggers CRITICAL")
+    void evaluateReading_SmokeThresholds_Warn300_Critical1000() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.SMOKE_DETECTED), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // 250 is normal (< 300)
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(250.0), now, 501L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 350 exceeds warn (300). Streak = 1 -> no alert yet
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(350.0), now.plusSeconds(5), 502L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 360 exceeds warn (300). Streak = 2 -> raises HIGH anomaly
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(360.0), now.plusSeconds(10), 503L);
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.HIGH);
+        assertThat(captor.getValue().getAnomalyType()).isEqualTo(AnomalyType.SMOKE_DETECTED);
+
+        // Reset mock and test CRITICAL (>= 1000)
+        reset(anomalyRepository, eventPublisher);
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.SMOKE_DETECTED), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        service.evaluateReading(device, "smoke", BigDecimal.valueOf(1100.0), now.plusSeconds(15), 504L);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+    }
+
+    @Test
+    @DisplayName("Temperature thresholds: 45 is normal, 52 triggers HIGH after 2 streaks, 70 triggers CRITICAL")
+    void evaluateReading_TemperatureThresholds_Warn50_Critical65() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.HIGH_TEMPERATURE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // 45 is normal (< 50)
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(45.0), now, 601L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 52 exceeds warn (50). Streak = 1 -> no alert yet
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(52.0), now.plusSeconds(5), 602L);
+        verify(anomalyRepository, never()).save(any());
+
+        // 53 exceeds warn (50). Streak = 2 -> raises HIGH anomaly
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(53.0), now.plusSeconds(10), 603L);
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.HIGH);
+        assertThat(captor.getValue().getAnomalyType()).isEqualTo(AnomalyType.HIGH_TEMPERATURE);
+
+        // Reset mock and test CRITICAL (>= 65)
+        reset(anomalyRepository, eventPublisher);
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.HIGH_TEMPERATURE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        service.evaluateReading(device, "temperature", BigDecimal.valueOf(70.0), now.plusSeconds(15), 604L);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.CRITICAL);
+    }
+
+    @Test
+    void evaluateReading_WhenMetricIsTempAlias_RecognizesHighTemperature() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(anomalyRepository.findByDeviceIdAndAnomalyTypeAndStatusIn(eq(deviceId), eq(AnomalyType.HIGH_TEMPERATURE), any()))
+                .thenReturn(Optional.empty());
+        when(anomalyRepository.save(any(DeviceAnomaly.class))).thenAnswer(invocation -> {
+            DeviceAnomaly a = invocation.getArgument(0);
+            a.setId(UUID.randomUUID());
+            return a;
+        });
+
+        // 2 consecutive readings with "temp" >= 50 warn limit
+        service.evaluateReading(device, "temp", BigDecimal.valueOf(55.0), now, 701L);
+        service.evaluateReading(device, "temp", BigDecimal.valueOf(56.0), now.plusSeconds(5), 702L);
+
+        ArgumentCaptor<DeviceAnomaly> captor = ArgumentCaptor.forClass(DeviceAnomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getAnomalyType()).isEqualTo(AnomalyType.HIGH_TEMPERATURE);
+        assertThat(captor.getValue().getSeverity()).isEqualTo(SeverityLevel.HIGH);
+    }
+}

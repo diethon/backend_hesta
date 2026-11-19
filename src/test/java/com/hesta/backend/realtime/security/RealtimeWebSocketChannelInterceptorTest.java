@@ -2,6 +2,7 @@ package com.hesta.backend.realtime.security;
 
 import com.hesta.backend.enums.AccountStatus;
 import com.hesta.backend.realtime.transport.RealtimeDestinations;
+import com.hesta.backend.realtime.transport.WebSocketSessionManager;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.security.CustomUserDetailsService;
 import com.hesta.backend.security.JwtTokenProvider;
@@ -45,6 +46,9 @@ class RealtimeWebSocketChannelInterceptorTest {
     private RealtimeSubscriptionService subscriptionService;
 
     @Mock
+    private WebSocketSessionManager webSocketSessionManager;
+
+    @Mock
     private MessageChannel messageChannel;
 
     @InjectMocks
@@ -66,6 +70,8 @@ class RealtimeWebSocketChannelInterceptorTest {
         assertThat(accessor.getUser()).isInstanceOf(UsernamePasswordAuthenticationToken.class);
         assertThat(((UsernamePasswordAuthenticationToken) accessor.getUser()).getPrincipal())
                 .isSameAs(userDetails);
+        verify(webSocketSessionManager).registerUserSession(
+                org.mockito.ArgumentMatchers.eq(userId), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -120,7 +126,7 @@ class RealtimeWebSocketChannelInterceptorTest {
 
         interceptor.preSend(message, messageChannel);
 
-        verify(subscriptionService).authorizeSubscription(userId, homeId);
+        verify(subscriptionService).authorizeSubscription(userId, homeId, RealtimeDestinations.homeEvents(homeId));
     }
 
     @Test
@@ -131,6 +137,25 @@ class RealtimeWebSocketChannelInterceptorTest {
         );
 
         assertThatThrownBy(() -> interceptor.preSend(message, messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void subscribe_toOtherHomesFallTopic_rejectsSubscription() {
+        Message<byte[]> message = subscribeMessage(
+                "/topic/home/" + UUID.randomUUID() + "/fall",
+                authenticated(principal(UUID.randomUUID()))
+        );
+
+        assertThatThrownBy(() -> interceptor.preSend(message, messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void subscribe_toOwnFallQueue_requiresAuthentication() {
+        interceptor.preSend(subscribeMessage("/user/topic/fall", authenticated(principal(UUID.randomUUID()))), messageChannel);
+
+        assertThatThrownBy(() -> interceptor.preSend(subscribeMessage("/user/topic/fall", null), messageChannel))
                 .isInstanceOf(AccessDeniedException.class);
     }
 

@@ -45,7 +45,7 @@ class ScheduleRunnerTest {
                 .scheduledTime(LocalTime.of(7, 30)).repeatDays(new Short[0]).active(true).build();
         when(scenes.findAllByActiveTrueAndScheduledTime(LocalTime.of(7, 30))).thenReturn(List.of(sceneSchedule));
         when(rules.findAllByActiveTrueAndScheduledTime(LocalTime.of(7, 30))).thenReturn(List.of(disabled));
-        when(jdbc.update(anyString(), eq("SCENE"), eq(sceneSchedule.getId()), eq(now.toLocalDate()))).thenReturn(1);
+        when(jdbc.update(anyString(), eq("SCENE@07:30"), eq(sceneSchedule.getId()), eq(now.toLocalDate()))).thenReturn(1);
 
         runner.runDueSchedules(now);
 
@@ -63,7 +63,7 @@ class ScheduleRunnerTest {
         SceneSchedule duplicate = SceneSchedule.builder().id(UUID.randomUUID()).scene(scene)
                 .repeatDays(new Short[]{2}).build();
         when(scenes.findAllByActiveTrueAndScheduledTime(LocalTime.of(7, 30))).thenReturn(List.of(wrongDay, duplicate));
-        when(jdbc.update(anyString(), eq("SCENE"), eq(duplicate.getId()), eq(now.toLocalDate()))).thenReturn(0);
+        when(jdbc.update(anyString(), eq("SCENE@07:30"), eq(duplicate.getId()), eq(now.toLocalDate()))).thenReturn(0);
 
         runner.runDueSchedules(now);
 

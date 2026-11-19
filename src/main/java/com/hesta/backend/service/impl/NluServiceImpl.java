@@ -2,7 +2,6 @@ package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.command.CommandResult;
 import com.hesta.backend.entity.Device;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.service.DeviceCommandService;
@@ -168,7 +167,7 @@ public class NluServiceImpl implements NluService {
         }
         
         Device target = matchingDevices.get(0);
-        DeviceAction action = "TURN_OFF".equals(intent) ? DeviceAction.TURN_OFF : DeviceAction.TURN_ON;
+        String action = "TURN_OFF".equals(intent) ? "TURN_OFF" : "TURN_ON";
         
         // Tách tham số nâng cao bằng Regex
         Map<String, Object> params = new HashMap<>();

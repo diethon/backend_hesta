@@ -18,12 +18,22 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class UserServiceImpl implements UserService {
+
+    private static final long MAX_AVATAR_SIZE_BYTES = 5L * 1024 * 1024;
+    private static final Set<String> ALLOWED_AVATAR_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif"
+    );
 
     UserRepository userRepository;
     PasswordEncoder passwordEncoder;
@@ -79,6 +89,8 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse uploadAvatar(UUID userId, MultipartFile file) {
+        validateAvatar(file);
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
 
@@ -100,7 +112,22 @@ public class UserServiceImpl implements UserService {
                     .lastActiveAt(user.getLastActiveAt())
                     .build();
         } catch (IOException e) {
-            throw new RuntimeException("Lỗi upload file", e);
+            throw new AppException(ErrorCode.AVATAR_UPLOAD_FAILED);
+        }
+    }
+
+    private void validateAvatar(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new AppException(ErrorCode.AVATAR_FILE_REQUIRED);
+        }
+        if (file.getSize() > MAX_AVATAR_SIZE_BYTES) {
+            throw new AppException(ErrorCode.AVATAR_FILE_TOO_LARGE);
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null
+                || !ALLOWED_AVATAR_CONTENT_TYPES.contains(contentType.toLowerCase(Locale.ROOT))) {
+            throw new AppException(ErrorCode.AVATAR_FILE_TYPE_INVALID);
         }
     }
 }

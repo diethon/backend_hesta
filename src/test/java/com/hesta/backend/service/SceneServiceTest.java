@@ -12,7 +12,6 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.Scene;
 import com.hesta.backend.entity.SceneAction;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -72,15 +71,22 @@ class SceneServiceTest {
         sceneId = UUID.randomUUID();
         deviceId = UUID.randomUUID();
         home = Home.builder().id(homeId).name("Home").build();
-        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-                .room(Room.builder().home(home).build()).name("Lamp").deviceType(DeviceType.LIGHT).build();
-        scene = Scene.builder()
-                .id(sceneId)
-                .home(home)
-                .name("Evening")
+        device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build()).room(Room.builder().home(home).build()).name("Lamp").deviceType("LIGHT").capabilities(java.util.Map.of("LIGHT", java.util.List.of("TURN_ON", "TURN_OFF", "SET_BRIGHTNESS"))).build();
+        scene = Scene.builder().id(sceneId).home(home).name("Evening")
                 .enabled(true)
                 .actions(new ArrayList<>())
                 .build();
+    }
+
+    @Test
+    void actionTypesComeFromDeviceCapabilitiesForAnAuthorizedHome() {
+        Device device1 = Device.builder().capabilities(java.util.Map.of("LIGHT", java.util.List.of("TURN_ON", "TURN_OFF"))).build();
+        Device device2 = Device.builder().capabilities(java.util.Map.of("FAN", java.util.List.of("SET_SPEED", "TURN_OFF"))).build();
+        when(deviceRepository.findByHomeId(homeId)).thenReturn(java.util.List.of(device1, device2));
+        java.util.List<String> types = sceneService.getActionTypes(userId, homeId);
+
+        assertThat(types).containsExactly("SET_SPEED", "TURN_OFF", "TURN_ON");
+        verify(homeAuthorizationService).requireAccess(userId, homeId);
     }
 
     @Test
@@ -128,14 +134,39 @@ class SceneServiceTest {
         Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
         Device foreignDevice = Device.builder()
                 .id(deviceId)
-                .node(EdgeNode.builder().home(anotherHome).build())
-                .room(Room.builder().home(anotherHome).build())
-                .name("Foreign lamp")
-                .deviceType(DeviceType.LIGHT)
+                .node(EdgeNode.builder().home(anotherHome).build()).room(Room.builder().home(anotherHome).build()).name("Foreign lamp").deviceType("LIGHT")
                 .build();
         when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(foreignDevice));
+
+        assertError(() -> sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0)),
+                ErrorCode.SCENE_DEVICE_HOME_MISMATCH);
+        verify(sceneRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void acceptsDeviceWithoutNodeWhenItsRoomBelongsToSceneHome() {
+        device.setNode(null);
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
+        when(sceneRepository.saveAndFlush(scene)).thenReturn(scene);
+
+        SceneActionResponse response = sceneService.addAction(
+                userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0));
+
+        assertThat(response.getAction()).isEqualTo("TURN_ON");
+    }
+
+    @Test
+    void rejectsDeviceWhoseRoomIsInAnotherHomeEvenWithSceneHomeNode() {
+        Home anotherHome = Home.builder().id(UUID.randomUUID()).name("Other").build();
+        device.setRoom(Room.builder().home(anotherHome).build());
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(sceneRepository.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
 
         assertError(() -> sceneService.addAction(
                 userId, homeId, sceneId, actionRequest(deviceId, "TURN_ON", null, 0)),
@@ -268,6 +299,46 @@ class SceneServiceTest {
 
         assertError(() -> sceneService.deleteScene(userId, homeId, sceneId), ErrorCode.SCENE_IN_USE);
         verify(sceneRepository, never()).delete(any());
+    }
+
+    @Test
+    void createsSceneWithAirConditionerAndGateActions() {
+        Device acDevice = Device.builder().id(UUID.randomUUID()).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Living Room AC").deviceType("AIR_CONDITIONER")
+                .capabilities(java.util.Map.of("AC", java.util.List.of("SET_TEMPERATURE", "SET_FAN", "SET_MODE", "SET_SWING", "SET_POWER")))
+                .build();
+        Device gateDevice = Device.builder().id(UUID.randomUUID()).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Main Gate").deviceType("GATE")
+                .capabilities(java.util.Map.of("GATE", java.util.List.of("OPEN", "CLOSE", "STOP")))
+                .build();
+
+        CreateSceneRequest request = CreateSceneRequest.builder()
+                .name("Arriving Home")
+                .description("Open gate and turn on AC")
+                .enabled(true)
+                .actions(List.of(
+                        actionRequest(gateDevice.getId(), "OPEN", null, 0),
+                        actionRequest(acDevice.getId(), "SET_TEMPERATURE", objectMapper.valueToTree(24), 1),
+                        actionRequest(acDevice.getId(), "SET_MODE", objectMapper.valueToTree("COOL"), 2),
+                        actionRequest(acDevice.getId(), "SET_FAN", objectMapper.valueToTree("HIGH"), 3),
+                        actionRequest(acDevice.getId(), "SET_SWING", objectMapper.valueToTree(true), 4)
+                ))
+                .build();
+
+        when(homeAuthorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(deviceRepository.findAllById(any())).thenReturn(List.of(acDevice, gateDevice));
+        when(sceneRepository.saveAndFlush(any(Scene.class))).thenAnswer(invocation -> {
+            Scene saved = invocation.getArgument(0);
+            saved.setId(sceneId);
+            return saved;
+        });
+
+        SceneResponse response = sceneService.createScene(userId, homeId, request);
+
+        assertThat(response.getName()).isEqualTo("Arriving Home");
+        assertThat(response.getActions()).hasSize(5);
+        assertThat(response.getActions()).extracting(SceneActionResponse::getAction)
+                .containsExactly("OPEN", "SET_TEMPERATURE", "SET_MODE", "SET_FAN", "SET_SWING");
     }
 
     private SceneActionRequest actionRequest(

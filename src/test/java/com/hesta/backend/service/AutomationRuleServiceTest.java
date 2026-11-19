@@ -4,11 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.hesta.backend.dto.request.*;
 import com.hesta.backend.entity.*;
-import com.hesta.backend.enums.DeviceType;
 import com.hesta.backend.enums.ConditionOperator;
 import com.hesta.backend.enums.LogicalOperator;
 import com.hesta.backend.enums.TriggerType;
-import com.hesta.backend.enums.DeviceAction;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.*;
@@ -22,6 +20,7 @@ import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,6 +30,9 @@ class AutomationRuleServiceTest {
     @Mock AutomationExecutionRepository executionRepository;
     @Mock DeviceRepository deviceRepository;
     @Mock SceneRepository sceneRepository;
+    @Mock com.hesta.backend.repository.AutomationScheduleRepository scheduleRepository;
+    @Mock com.hesta.backend.service.automation.RuleTriggerGate triggerGate;
+    @Mock com.hesta.backend.service.ScheduleService scheduleService;
     @Spy ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks AutomationRuleServiceImpl service;
 
@@ -44,12 +46,13 @@ class AutomationRuleServiceTest {
     void setUp() {
         home = Home.builder().id(homeId).name("Home").build();
         device = Device.builder().id(deviceId).node(EdgeNode.builder().home(home).build())
-                .room(Room.builder().home(home).build()).name("Fan").deviceType(DeviceType.FAN)
-                .capabilities(List.of("TURN_ON", "SET_SPEED")).build();
+                .room(Room.builder().home(home).build()).name("Fan").deviceType("FAN")
+                .capabilities(java.util.Map.of("FAN", java.util.List.of("TURN_ON", "SET_SPEED"))).build();
     }
 
     @Test
     void createsAndReadsValidRule() {
+        device.setNode(null);
         when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
         when(deviceRepository.findAllById(any())).thenReturn(List.of(device));
         when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
@@ -80,11 +83,55 @@ class AutomationRuleServiceTest {
         request.setTriggerType("SCHEDULE");
         request.setConditions(List.of());
 
+        when(scheduleRepository.countByRuleIdAndActiveTrue(any())).thenReturn(1L);
         var response = service.create(userId, homeId, request);
 
         assertThat(response.getTriggerType()).isEqualTo("SCHEDULE");
         assertThat(response.getConditions()).isEmpty();
         assertThat(response.getActions()).hasSize(1);
+    }
+
+    @Test
+    void scheduleRuleWithoutActiveTimeIsNotCreated() {
+        when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(deviceRepository.findAllById(any())).thenReturn(List.of(device));
+        when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            AutomationRule rule = invocation.getArgument(0);
+            rule.setId(UUID.randomUUID());
+            return rule;
+        });
+        CreateAutomationRuleRequest request = validRequest();
+        request.setTriggerType("SCHEDULE");
+        request.setConditions(List.of());
+
+        assertThatThrownBy(() -> service.create(userId, homeId, request))
+                .isInstanceOf(AppException.class)
+                .extracting("errorCode").isEqualTo(com.hesta.backend.exception.ErrorCode.AUTOMATION_SCHEDULE_REQUIRED);
+    }
+
+    @Test
+    void scheduleRuleSavesItsTimesWithTheRule() {
+        UUID ruleId = UUID.randomUUID();
+        when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(deviceRepository.findAllById(any())).thenReturn(List.of(device));
+        when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            AutomationRule rule = invocation.getArgument(0);
+            rule.setId(ruleId);
+            return rule;
+        });
+        when(scheduleRepository.countByRuleIdAndActiveTrue(ruleId)).thenReturn(1L);
+        com.hesta.backend.dto.request.ScheduleRequest time = new com.hesta.backend.dto.request.ScheduleRequest();
+        time.setScheduledTime(java.time.LocalTime.of(7, 0));
+        time.setRepeatDays(List.of());
+        time.setActive(true);
+        CreateAutomationRuleRequest request = validRequest();
+        request.setTriggerType("SCHEDULE");
+        request.setConditions(List.of());
+        request.setSchedules(List.of(time));
+
+        service.create(userId, homeId, request);
+
+        verify(scheduleService).syncRuleSchedules(any(AutomationRule.class), eq(List.of(time)));
     }
 
     @Test
@@ -105,6 +152,7 @@ class AutomationRuleServiceTest {
         request.setActions(List.of(RuleActionRequest.builder().sceneId(sceneId)
                 .action("EXECUTE_SCENE").order(0).build()));
 
+        when(scheduleRepository.countByRuleIdAndActiveTrue(any())).thenReturn(1L);
         var response = service.create(userId, homeId, request);
 
         assertThat(response.getActions().getFirst().getSceneId()).isEqualTo(sceneId);
@@ -123,6 +171,19 @@ class AutomationRuleServiceTest {
                 .extracting(exception -> ((AppException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.AUTOMATION_CONDITION_INVALID);
         verify(ruleRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void rejectsSensorRuleWithOnlyTimeOfDayConditions() {
+        CreateAutomationRuleRequest request = validRequest();
+        request.setConditions(List.of(RuleConditionRequest.builder().attribute("timeOfDay")
+                .operator("GTE").expectedValue("18:00").logicalOperator("AND").order(0).build()));
+        when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+
+        assertThatThrownBy(() -> service.create(userId, homeId, request))
+                .isInstanceOf(AppException.class)
+                .extracting(exception -> ((AppException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.AUTOMATION_CONDITION_INVALID);
     }
 
     @Test
@@ -209,6 +270,48 @@ class AutomationRuleServiceTest {
                         .parameters(Map.of("speed", 80)).order(0).build())).build();
     }
 
+    @Test
+    void createsAutomationRuleWithAirConditionerAndGateActions() {
+        Device acDevice = Device.builder().id(UUID.randomUUID()).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Living Room AC").deviceType("AIR_CONDITIONER")
+                .capabilities(java.util.Map.of("AC", java.util.List.of("SET_TEMPERATURE", "SET_FAN", "SET_MODE", "SET_SWING", "SET_POWER")))
+                .build();
+        Device gateDevice = Device.builder().id(UUID.randomUUID()).node(EdgeNode.builder().home(home).build())
+                .room(Room.builder().home(home).build()).name("Main Gate").deviceType("GATE")
+                .capabilities(java.util.Map.of("GATE", java.util.List.of("OPEN", "CLOSE", "STOP")))
+                .build();
+
+        when(authorizationService.requireSceneManagement(userId, homeId)).thenReturn(home);
+        when(deviceRepository.findAllById(any())).thenReturn(List.of(acDevice, gateDevice));
+        when(ruleRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            AutomationRule rule = invocation.getArgument(0);
+            rule.setId(UUID.randomUUID());
+            return rule;
+        });
+
+        CreateAutomationRuleRequest request = CreateAutomationRuleRequest.builder()
+                .name("Arrive home comfort")
+                .triggerType("SCHEDULE")
+                .enabled(true)
+                .conditions(List.of())
+                .actions(List.of(
+                        RuleActionRequest.builder().deviceId(gateDevice.getId()).action("OPEN").parameters(Map.of()).order(0).build(),
+                        RuleActionRequest.builder().deviceId(acDevice.getId()).action("SET_TEMPERATURE").parameters(Map.of("temperature", 24)).order(1).build(),
+                        RuleActionRequest.builder().deviceId(acDevice.getId()).action("SET_MODE").parameters(Map.of("mode", "COOL")).order(2).build(),
+                        RuleActionRequest.builder().deviceId(acDevice.getId()).action("SET_FAN").parameters(Map.of("fan", "HIGH")).order(3).build(),
+                        RuleActionRequest.builder().deviceId(acDevice.getId()).action("SET_SWING").parameters(Map.of("swing", true)).order(4).build()
+                ))
+                .build();
+
+        when(scheduleRepository.countByRuleIdAndActiveTrue(any())).thenReturn(1L);
+        var response = service.create(userId, homeId, request);
+
+        assertThat(response.getName()).isEqualTo("Arrive home comfort");
+        assertThat(response.getActions()).hasSize(5);
+        assertThat(response.getActions()).extracting("action")
+                .containsExactly("OPEN", "SET_TEMPERATURE", "SET_MODE", "SET_FAN", "SET_SWING");
+    }
+
     private AutomationRule persistedRule(UUID ruleId) {
         AutomationRule rule = AutomationRule.builder().id(ruleId).home(home).name("Hot room")
                 .triggerType(TriggerType.SENSOR).enabled(true).build();
@@ -217,7 +320,7 @@ class AutomationRuleServiceTest {
                 .expectedValue(JsonNodeFactory.instance.numberNode(30))
                 .logicalOperator(LogicalOperator.AND).order(0).build());
         rule.getActions().add(RuleAction.builder().id(UUID.randomUUID()).rule(rule).device(device)
-                .action(DeviceAction.SET_SPEED).parameters(Map.of("speed", 80)).order(0).build());
+                .action("SET_SPEED").parameters(Map.of("speed", 80)).order(0).build());
         return rule;
     }
 }

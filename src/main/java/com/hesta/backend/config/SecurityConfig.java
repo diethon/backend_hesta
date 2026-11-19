@@ -2,8 +2,10 @@ package com.hesta.backend.config;
 
 import com.hesta.backend.security.CustomAccessDeniedHandler;
 import com.hesta.backend.security.CustomAuthenticationEntryPoint;
+import com.hesta.backend.security.InternalApiKeyFilter;
 import com.hesta.backend.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -28,8 +30,12 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final InternalApiKeyFilter internalApiKeyFilter;
     private final CustomAuthenticationEntryPoint customAuthenticationEntryPoint;
     private final CustomAccessDeniedHandler customAccessDeniedHandler;
+
+    @Value("${app.cors.allowed-origins}")
+    private List<String> allowedOrigins;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -47,10 +53,15 @@ public class SecurityConfig {
                 .accessDeniedHandler(customAccessDeniedHandler)
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html","/api/devices/led-strip/**","/api/devices/**").permitAll()
+                .requestMatchers("/api/v1/auth/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/api/devices/led-strip/**", "/api/v1/devices/**", "/api/devices/**", "/internal/**").permitAll()
+                // Camera AI pushes fall events without a user; viewing/handling incidents needs a logged-in member.
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/emergency/fall/events", "/api/emergency/fall/events").permitAll()
+                // ESP32 Edge Nodes fetch OTA firmware binaries over HTTP without user JWT credentials; integrity is verified via SHA-256.
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/ota/packages/*/download").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
+            .addFilterBefore(internalApiKeyFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -59,7 +70,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173"));
+        configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
         configuration.setAllowCredentials(true);

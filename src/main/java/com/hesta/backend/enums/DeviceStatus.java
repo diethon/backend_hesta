@@ -8,5 +8,6 @@ package com.hesta.backend.enums;
  * - UNKNOWN: Không xác định được trạng thái.
  */
 public enum DeviceStatus {
-    ONLINE, OFFLINE, ERROR, UNKNOWN
+    ONLINE, OFFLINE, ERROR, UNKNOWN, UNCLAIMED
 }
+
