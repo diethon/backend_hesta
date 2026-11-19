@@ -111,6 +111,8 @@ public class MqttConfig {
                 topicPrefix + "/+/register",
                 topicPrefix + "/+/catalog",
                 topicPrefix + "/+/status",
+                topicPrefix + "/+/pong",
+                topicPrefix + "/+/ota/#",
                 "hesta/device/+/ack",
                 "hesta/device/+/state",
                 "hesta/sensor/fall-detection/#",

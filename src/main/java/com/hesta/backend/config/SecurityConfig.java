@@ -52,6 +52,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/api/devices/led-strip/**", "/api/v1/devices/**", "/api/devices/**", "/internal/**").permitAll()
                 // Camera AI pushes fall events without a user; viewing/handling incidents needs a logged-in member.
                 .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/emergency/fall/events", "/api/emergency/fall/events").permitAll()
+                // ESP32 Edge Nodes fetch OTA firmware binaries over HTTP without user JWT credentials; integrity is verified via SHA-256.
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/ota/packages/*/download").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )

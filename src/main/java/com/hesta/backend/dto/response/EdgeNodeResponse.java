@@ -18,6 +18,8 @@ public class EdgeNodeResponse {
     private UUID id;
     private String nodeCode;
     private String status;
+    private String firmwareVersion;
+    private String deviceType;
     private List<Map<String, Object>> supportedTypes;
     private OffsetDateTime pairedAt;
 
@@ -26,6 +28,8 @@ public class EdgeNodeResponse {
                 .id(node.getId())
                 .nodeCode(node.getNodeCode())
                 .status(node.getStatus() != null ? node.getStatus().name() : null)
+                .firmwareVersion(node.getFirmwareVersion())
+                .deviceType(node.getDeviceType())
                 .supportedTypes(node.getSupportedTypes())
                 .pairedAt(node.getPairedAt())
                 .build();
