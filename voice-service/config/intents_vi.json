@@ -46,7 +46,19 @@
         "bật toàn bộ ánh sáng",
         "mở tất cả đèn",
         "mở hết đèn",
-        "mở toàn bộ đèn"
+        "mở toàn bộ đèn",
+        "bật đèn chiếu tivi",
+        "bật đèn chiếu tv",
+        "mở đèn chiếu tivi",
+        "mở đèn chiếu tv",
+        "bật đèn tivi",
+        "bật đèn tv",
+        "mở đèn tivi",
+        "mở đèn tv",
+        "bật đèn chiếu tivi phòng khách",
+        "bật đèn chiếu tv phòng khách",
+        "bật đèn rọi tivi",
+        "bật đèn rọi tv"
       ]
     },
     {
@@ -84,7 +96,15 @@
         "tắt đèn phòng ngủ",
         "tắt đèn phòng khách",
         "tắt đèn trần",
-        "tắt đèn bàn"
+        "tắt đèn bàn",
+        "tắt đèn chiếu tivi",
+        "tắt đèn chiếu tv",
+        "tắt đèn tivi",
+        "tắt đèn tv",
+        "tắt đèn chiếu tivi phòng khách",
+        "tắt đèn chiếu tv phòng khách",
+        "tắt đèn rọi tivi",
+        "tắt đèn rọi tv"
       ]
     },
     {
@@ -721,6 +741,33 @@
         "bật hết phòng",
         "bật toàn bộ phòng",
         "bật tất cả"
+      ]
+    },
+    {
+      "action": "TURN_ON",
+      "device_type": "tv",
+      "patterns": [
+        "bật tivi",
+        "bật ti vi",
+        "bật tv",
+        "mở tivi",
+        "mở ti vi",
+        "mở tv",
+        "bật tivi phòng khách",
+        "bật tv phòng khách",
+        "mở tivi phòng khách",
+        "mở tv phòng khách"
+      ]
+    },
+    {
+      "action": "TURN_OFF",
+      "device_type": "tv",
+      "patterns": [
+        "tắt tivi",
+        "tắt ti vi",
+        "tắt tv",
+        "tắt tivi phòng khách",
+        "tắt tv phòng khách"
       ]
     }
   ]

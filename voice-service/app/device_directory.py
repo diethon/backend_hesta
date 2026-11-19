@@ -395,11 +395,36 @@ class DeviceDirectory:
             return False
 
         def _filter_hint(devs: list[DeviceInfo]) -> list[DeviceInfo]:
-            if not device_name_hint or len(devs) <= 1:
+            if not device_name_hint:
                 return devs
-            hint_lower = device_name_hint.lower()
-            filtered = [d for d in devs if hint_lower in d.device_name.lower()]
-            return filtered if filtered else devs
+            hint_norm = strip_vietnamese_tones(device_name_hint.lower())
+
+            def _name_matches_hint(name: str) -> bool:
+                n_norm = strip_vietnamese_tones(name.lower())
+                if hint_norm in n_norm:
+                    return True
+                # Alias cho đèn chiếu TV / tivi
+                if any(k in hint_norm for k in ("chieu tv", "chieu tivi", "tv", "tivi")):
+                    if "chieu" in n_norm and any(k in n_norm for k in ("tv", "tivi")):
+                        return True
+                    if any(k in n_norm for k in ("chieu tv", "chieu tivi", "den tv", "den tivi")):
+                        return True
+                if "ngu" in hint_norm and "ngu" in n_norm:
+                    return True
+                if "tran" in hint_norm and "tran" in n_norm:
+                    return True
+                if "ban" in hint_norm and "ban" in n_norm:
+                    return True
+                if "chum" in hint_norm and "chum" in n_norm:
+                    return True
+                return False
+
+            filtered = [d for d in devs if _name_matches_hint(d.device_name)]
+            if filtered:
+                return filtered
+            # Nếu người dùng đã nói rõ hint (VD: "chiếu tv") mà các thiết bị hiện tại không cái nào khớp,
+            # KHÔNG ĐƯỢC trả về thiết bị khác để tránh bật nhầm đèn khác trong phòng!
+            return []
 
         def _lookup() -> list[DeviceInfo]:
             # Trường hợp tìm kiếm all thiết bị (tắt/bật tất cả thiết bị, cả nhà, cả phòng)

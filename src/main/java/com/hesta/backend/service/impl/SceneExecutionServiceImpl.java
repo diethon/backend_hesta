@@ -217,11 +217,15 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     private Plan plan(Scene scene, String trigger) {
         ArrayNode details = JsonNodeFactory.instance.arrayNode();
         List<PlannedCommand> commands = new ArrayList<>();
+        // A person who just changed a device by hand wins over schedules/automations, but not over pressing the scene.
+        // One query for all devices instead of one per action (each is a remote DB round trip).
+        java.util.Set<UUID> overridden = "MANUAL".equals(trigger) ? java.util.Set.of()
+                : manualOverrideService.getOverridesUntil(scene.getActions().stream()
+                        .map(action -> action.getTargetDevice().getId()).toList()).keySet();
 
         for (SceneAction action : scene.getActions().stream().sorted(Comparator.comparingInt(SceneAction::getOrder)).toList()) {
             Device device = action.getTargetDevice();
-            // A person who just changed a device by hand wins over schedules/automations, but not over pressing the scene.
-            if (!"MANUAL".equals(trigger) && manualOverrideService.isActive(device.getId())) {
+            if (overridden.contains(device.getId())) {
                 details.add(CommandBatchRunner.skip(CommandBatchRunner.detail(device.getId(), action.getAction()), "SKIPPED_OVERRIDE"));
                 continue;
             }

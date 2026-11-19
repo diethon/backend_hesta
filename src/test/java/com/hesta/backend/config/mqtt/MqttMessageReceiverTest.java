@@ -92,8 +92,8 @@ class MqttMessageReceiverTest {
                 org.springframework.test.util.ReflectionTestUtils.getField(
                         com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
         active.put(deviceId, waiting);
-        // The DB write sees the command already done, i.e. the ACK did not wait for it.
-        doAnswer(inv -> { org.junit.jupiter.api.Assertions.assertTrue(waiting.isDone()); return null; })
+        // Completion is async; it must finish while the DB write is still blocked, i.e. the ACK did not wait for it.
+        doAnswer(inv -> { org.junit.jupiter.api.Assertions.assertTrue(waiting.get(2, java.util.concurrent.TimeUnit.SECONDS).isSuccess()); return null; })
                 .when(deviceService).updateDeviceStateFromMqtt(any(), any(), any());
 
         receiver.handleMessage(MessageBuilder.withPayload("{\"state\":\"opening\"}")
@@ -294,5 +294,25 @@ class MqttMessageReceiverTest {
 
         verify(deviceService).updateDeviceStateFromMqtt(isNull(), eq(deviceId.toString()), anyMap());
         org.junit.jupiter.api.Assertions.assertFalse(com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.commandDeviceMap.containsKey(commandId));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void ackWithoutCommandIdCompletesActiveCommandByTopicDeviceId() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        var waiting = new java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>();
+        var active = (java.util.Map<UUID, java.util.concurrent.CompletableFuture<com.hesta.backend.dto.command.CommandResult>>)
+                org.springframework.test.util.ReflectionTestUtils.getField(
+                        com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
+        active.put(deviceId, waiting);
+
+        String payload = "{\"status\":\"OK\",\"state\":{\"power\":\"OFF\"}}";
+        receiver.handleMessage(MessageBuilder.withPayload(payload)
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/node-1/devices/" + deviceId + "/ack")
+                .build());
+
+        // completeDeviceCommand completes asynchronously, so wait instead of checking isDone() immediately
+        org.junit.jupiter.api.Assertions.assertTrue(waiting.get(2, java.util.concurrent.TimeUnit.SECONDS).isSuccess());
+        verify(deviceService).updateDeviceStateFromMqtt(isNull(), eq(deviceId.toString()), anyMap());
     }
 }

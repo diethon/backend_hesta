@@ -1359,15 +1359,18 @@ class FallDetectorEngine:
                     cv2.putText(frame, "CRITICAL FALL!", (box[0] + 5, max(20, box[1] - 10)),
                                 cv2.FONT_HERSHEY_DUPLEX, 0.75, (255, 255, 255), 2)
 
-            cand_kpts = resolved_cand["raw_kpts"]
-            cand_confs = resolved_cand["raw_confs"]
-            for p1, p2 in skeleton_links:
-                if cand_confs[p1] > 0.25 and cand_confs[p2] > 0.25:
-                    cv2.line(frame, (int(cand_kpts[p1][0]), int(cand_kpts[p1][1])),
-                             (int(cand_kpts[p2][0]), int(cand_kpts[p2][1])), p_color, 2, cv2.LINE_AA)
-            for i in range(17):
-                if cand_confs[i] > 0.25:
-                    cv2.circle(frame, (int(cand_kpts[i][0]), int(cand_kpts[i][1])), 4, (0, 255, 255), -1, cv2.LINE_AA)
+            # [TẮT HIỂN THỊ] Khung xương 17 điểm — chỉ giữ bounding box trên camera.
+            # AI vẫn dùng keypoints để phát hiện té ngã, chỉ không vẽ lên khung hình.
+            # Bỏ comment khối dưới nếu muốn hiện lại khung xương.
+            # cand_kpts = resolved_cand["raw_kpts"]
+            # cand_confs = resolved_cand["raw_confs"]
+            # for p1, p2 in skeleton_links:
+            #     if cand_confs[p1] > 0.25 and cand_confs[p2] > 0.25:
+            #         cv2.line(frame, (int(cand_kpts[p1][0]), int(cand_kpts[p1][1])),
+            #                  (int(cand_kpts[p2][0]), int(cand_kpts[p2][1])), p_color, 2, cv2.LINE_AA)
+            # for i in range(17):
+            #     if cand_confs[i] > 0.25:
+            #         cv2.circle(frame, (int(cand_kpts[i][0]), int(cand_kpts[i][1])), 4, (0, 255, 255), -1, cv2.LINE_AA)
 
         # Preserve visual alert box briefly during momentary YOLO flicker (<= 1.5s)
         for p_id, trk in self.trackers.items():

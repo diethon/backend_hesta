@@ -1,0 +1,66 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Test and package
+        # Runner's preinstalled Maven: the wrapper download from Maven Central failed intermittently.
+        run: mvn -B -ntp package
+      - name: Upload jar
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/backend-*.jar
+          retention-days: 3
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: deploy-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: dist
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+      - name: Copy files
+        env:
+          TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+        run: |
+          mv dist/backend-*.jar dist/app.jar
+          rsync -az deploy/docker-compose.yml deploy/mosquitto dist/app.jar "$TARGET:/opt/hesta/"
+          rsync -az --delete --exclude artifacts --exclude .env recommendation-service/ "$TARGET:/opt/hesta/recommendation-service/"
+      - name: Restart stack
+        run: |
+          ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            'cd /opt/hesta && docker compose up -d --build --remove-orphans && docker compose restart backend && docker image prune -f'
+      - name: Health check
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://api.hesta.homes/api/v1/auth/login -X POST -H 'Content-Type: application/json' -d '{}') || true
+            echo "attempt $i: $code"
+            case "$code" in 2*|4*) exit 0;; esac
+            sleep 10
+          done
+          exit 1

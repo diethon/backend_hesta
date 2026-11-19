@@ -618,13 +618,48 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         return future;
     }
 
+    private static final ObjectMapper FAST_ACK_MAPPER = new ObjectMapper();
+
+    /**
+     * Resolves the waiting command as soon as its /ack or /state arrives, before the message queues behind slow
+     * DB writes on the inbound partition threads (that queue made acks miss the timeout under scenes/automations).
+     * Only clear successes are handled here; everything else still goes through MqttMessageReceiver as before.
+     */
+    public static void resolveFromInbound(String topic, String payload) {
+        boolean isAck = topic.endsWith("/ack");
+        if (!isAck && !topic.endsWith("/state")) return;
+        try {
+            Map<String, Object> data = FAST_ACK_MAPPER.readValue(payload, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            Object stateObj = data.get("state");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> state = stateObj instanceof Map<?, ?> m ? (Map<String, Object>) m : data;
+            if (isAck) {
+                String status = String.valueOf(data.get("status")).trim().toUpperCase(java.util.Locale.ROOT);
+                Object commandId = data.get("commandId");
+                UUID deviceId = commandId == null ? null : commandDeviceMap.get(commandId.toString());
+                if (deviceId != null && ("SUCCESS".equals(status) || "OK".equals(status)) && data.get("errorCode") == null) {
+                    completeDeviceCommand(deviceId, state);
+                }
+            } else {
+                String[] parts = topic.split("/");
+                completeDeviceCommand(UUID.fromString(parts[parts.length - 2]), state);
+            }
+        } catch (Exception ignored) {
+            // malformed payload or non-UUID local device id: the normal receiver path handles it
+        }
+    }
+
     public static void completeDeviceCommand(UUID deviceId, Map<String, Object> state) {
         commandStartTimes.remove(deviceId);
         CompletableFuture<CommandResult> future = activeDeviceCommands.remove(deviceId);
         if (future != null && !future.isDone()) {
+            // the real id, so execution history can be matched to the MQTT command and its ACK
+            String commandId = pendingCommands.entrySet().stream().filter(e -> e.getValue() == future)
+                    .map(Map.Entry::getKey).findFirst().orElse(null);
             pendingCommands.values().remove(future);
-            future.complete(CommandResult.builder()
-                    .commandId(UUID.randomUUID().toString())
+            // async: the scene/automation continuation (next action's DB lookup) must not run on an MQTT thread
+            future.completeAsync(() -> CommandResult.builder()
+                    .commandId(commandId)
                     .success(true)
                     .status("SUCCESS")
                     .acknowledgedState(state)

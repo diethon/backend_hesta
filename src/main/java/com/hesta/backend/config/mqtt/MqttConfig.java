@@ -91,11 +91,21 @@ public class MqttConfig {
      */
     @Bean
     public MessageChannel mqttInputChannel(@Value("${mqtt.inbound.partitions:4}") int partitions) {
-        return new PartitionedChannel(partitions, message -> {
+        PartitionedChannel channel = new PartitionedChannel(partitions, message -> {
             String topic = String.valueOf(message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC));
             int lastSlash = topic.lastIndexOf('/');
             return lastSlash > 0 ? topic.substring(0, lastSlash) : topic;
         });
+        // preSend runs on the Paho thread before queueing: command ACKs resolve without waiting behind DB work.
+        channel.addInterceptor(new org.springframework.messaging.support.ChannelInterceptor() {
+            @Override
+            public org.springframework.messaging.Message<?> preSend(org.springframework.messaging.Message<?> message, MessageChannel ch) {
+                com.hesta.backend.service.impl.MqttDeviceCommandServiceImpl.resolveFromInbound(
+                        String.valueOf(message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC)), String.valueOf(message.getPayload()));
+                return message;
+            }
+        });
+        return channel;
     }
 
     @Bean
@@ -104,6 +114,8 @@ public class MqttConfig {
         String[] topics = {
                 topicPrefix + "/+/devices/+/state",
                 topicPrefix + "/+/devices/+/ack",
+                topicPrefix + "/+/devices/+/response",
+                topicPrefix + "/+/response",
                 topicPrefix + "/+/devices/+/sensor",
                 topicPrefix + "/+/devices/+/status",
                 topicPrefix + "/+/devices/+/telemetry",
