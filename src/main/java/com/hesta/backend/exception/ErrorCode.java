@@ -144,7 +144,9 @@ public enum ErrorCode {
 
     // Anomaly detection & management
     ANOMALY_NOT_FOUND(1700, "Bất thường không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
-    ANOMALY_INVALID_STATUS(1701, "Trạng thái bất thường không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST);
+    ANOMALY_INVALID_STATUS(1701, "Trạng thái bất thường không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST),
+    SECURITY_EVENT_NOT_FOUND(1710, "Sự kiện an ninh không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
+    SECURITY_EVENT_INVALID_STATUS(1711, "Trạng thái sự kiện an ninh không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST);
 
 
     private final int code;

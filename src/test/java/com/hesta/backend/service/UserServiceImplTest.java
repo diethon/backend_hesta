@@ -1,6 +1,9 @@
 package com.hesta.backend.service;
 
+import com.hesta.backend.dto.request.UpdateNotificationPreferenceRequest;
 import com.hesta.backend.entity.User;
+import com.hesta.backend.entity.UserPreference;
+import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.enums.AccountStatus;
 import com.hesta.backend.enums.AuthProvider;
 import com.hesta.backend.enums.PlatformRole;
@@ -38,8 +41,39 @@ class UserServiceImplTest {
     @Mock
     private CloudinaryService cloudinaryService;
 
+    @Mock
+    private UserPreferenceRepository userPreferenceRepository;
+
     @InjectMocks
     private UserServiceImpl userService;
+
+    @Test
+    void updateNotificationPreferences_persistsAllThreeToggles() {
+        UUID userId = UUID.randomUUID();
+        UserPreference stored = UserPreference.builder().userId(userId).build();
+        when(userPreferenceRepository.findById(userId)).thenReturn(Optional.of(stored));
+
+        var response = userService.updateNotificationPreferences(
+                userId, new UpdateNotificationPreferenceRequest(false, true, false));
+
+        assertThat(response.securityEnabled()).isFalse();
+        assertThat(response.automationEnabled()).isTrue();
+        assertThat(response.systemEnabled()).isFalse();
+        assertThat(stored.getNotificationPreference().isSecurityEnabled()).isFalse();
+        verify(userPreferenceRepository).save(stored);
+    }
+
+    @Test
+    void getNotificationPreferences_withoutStoredRow_returnsAllEnabled() {
+        UUID userId = UUID.randomUUID();
+        when(userPreferenceRepository.findById(userId)).thenReturn(Optional.empty());
+
+        var response = userService.getNotificationPreferences(userId);
+
+        assertThat(response.securityEnabled()).isTrue();
+        assertThat(response.automationEnabled()).isTrue();
+        assertThat(response.systemEnabled()).isTrue();
+    }
 
     @Test
     void uploadAvatar_withValidImage_shouldUploadAndPersistUrl() throws IOException {
