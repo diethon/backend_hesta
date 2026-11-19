@@ -156,6 +156,10 @@ public class AutomationEngineImpl implements AutomationEngine {
         ArrayNode details = JsonNodeFactory.instance.arrayNode();
         List<SceneStep> scenes = new ArrayList<>();
         List<PlannedCommand> deviceCommands = new ArrayList<>();
+        // One query for every device of the rule instead of one per action (each is a remote DB round trip).
+        Set<UUID> overridden = event.isTest() ? Set.of() : manualOverrideService.getOverridesUntil(rule.getActions().stream()
+                .filter(action -> action.getScene() == null && action.getDevice() != null)
+                .map(action -> action.getDevice().getId()).toList()).keySet();
         for (RuleAction action : rule.getActions().stream().sorted(Comparator.comparingInt(RuleAction::getOrder)).toList()) {
             ObjectNode detail = detailFor(action);
             details.add(detail);
@@ -168,7 +172,7 @@ public class AutomationEngineImpl implements AutomationEngine {
                 } else {
                     CommandBatchRunner.skip(detail, "SKIPPED_DISABLED");
                 }
-            } else if (blockedByManualOverride(rule, action, event, emergency, detail)) {
+            } else if (blockedByManualOverride(rule, action, event, emergency, detail, overridden)) {
                 CommandBatchRunner.skip(detail, "SKIPPED_OVERRIDE");
             } else {
                 deviceCommands.add(new PlannedCommand(action.getDevice(), action.getAction(), action.getParameters(), detail));
@@ -229,8 +233,8 @@ public class AutomationEngineImpl implements AutomationEngine {
 
     /** A device the user just changed by hand is left alone, except in an emergency. */
     private boolean blockedByManualOverride(AutomationRule rule, RuleAction action, AutomationEventRequest event,
-                                            boolean emergency, ObjectNode detail) {
-        if (!manualOverrideService.isActive(action.getDevice().getId())) return false;
+                                            boolean emergency, ObjectNode detail, Set<UUID> overridden) {
+        if (!overridden.contains(action.getDevice().getId())) return false;
         if (!emergency) return true;
         log.warn("[SAFETY BYPASS] Emergency event '{}' / rule '{}' bypassed manual override on device {}",
                 event.getEventType(), rule.getName(), action.getDevice().getId());

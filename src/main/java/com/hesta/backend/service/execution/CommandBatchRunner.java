@@ -61,9 +61,15 @@ public class CommandBatchRunner {
             for (PlannedCommand command : deviceCommands) {
                 CompletableFuture<CommandResult> result = send(command, source);
                 result.handle((ignored, failure) -> null).join(); // wait for the ACK outside the lock
+                CommandResult ok;
                 synchronized (resultLock) {
-                    if (record(command, result, source)) succeeded.incrementAndGet();
+                    ok = record(command, result);
                     if (afterEachCommand != null) afterEachCommand.run();
+                }
+                // DB write outside the lock: inside it every device queued behind the others' writes (seconds per run).
+                if (ok != null) {
+                    succeeded.incrementAndGet();
+                    recordBehavior(command, source, ok);
                 }
             }
         }, DEVICE_RUNNER)).toArray(CompletableFuture[]::new);
@@ -100,7 +106,8 @@ public class CommandBatchRunner {
         }
     }
 
-    private boolean record(PlannedCommand command, CompletableFuture<CommandResult> future, StateChangeSource source) {
+    /** Fills the command's result row; returns the result when it succeeded, else null. */
+    private CommandResult record(PlannedCommand command, CompletableFuture<CommandResult> future) {
         ObjectNode detail = command.detail();
         CommandResult result;
         try {
@@ -108,19 +115,21 @@ public class CommandBatchRunner {
         } catch (RuntimeException exception) {
             detail.put("message", "Device command failed");
             skip(detail, "FAILED");
-            return false;
+            return null;
         }
         detail.put("success", result.isSuccess());
         detail.put("status", result.getStatus());
         if (result.getCommandId() != null) detail.put("commandId", result.getCommandId());
         if (result.getErrorCode() != null) detail.put("errorCode", result.getErrorCode());
         if (result.getMessage() != null) detail.put("message", result.getMessage());
-        if (!result.isSuccess()) return false;
+        return result.isSuccess() ? result : null;
+    }
+
+    private void recordBehavior(PlannedCommand command, StateChangeSource source, CommandResult result) {
         try {
             behaviorEventRecorder.recordCommand(command.device(), command.action(), source, result);
         } catch (RuntimeException recordingFailure) {
             log.warn("Could not record command for device {}", command.device().getId(), recordingFailure);
         }
-        return true;
     }
 }

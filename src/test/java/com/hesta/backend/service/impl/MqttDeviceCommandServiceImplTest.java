@@ -84,6 +84,30 @@ class MqttDeviceCommandServiceImplTest {
     }
 
     @Test
+    @DisplayName("Fast ACK path: SUCCESS ack resolves the command; FAILED ack is left to the receiver")
+    void testResolveFromInbound_Ack() throws Exception {
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));
+        ReflectionTestUtils.setField(commandService, "commandTimeoutMs", 3000L);
+
+        var future = commandService.sendCommand(deviceId, "TURN_ON", new HashMap<>(), StateChangeSource.SCENE);
+        String commandId = MqttDeviceCommandServiceImpl.commandDeviceMap.entrySet().stream()
+                .filter(e -> e.getValue().equals(deviceId)).findFirst().orElseThrow().getKey();
+
+        MqttDeviceCommandServiceImpl.resolveFromInbound("hesta/nodes/n1/devices/" + deviceId + "/ack",
+                "{\"commandId\":\"" + commandId + "\",\"status\":\"FAILED\",\"errorCode\":\"E1\"}");
+        Thread.sleep(100);
+        assertFalse(future.isDone(), "failed ack must not be counted as success");
+
+        long t0 = System.currentTimeMillis();
+        MqttDeviceCommandServiceImpl.resolveFromInbound("hesta/nodes/n1/devices/" + deviceId + "/ack",
+                "{\"commandId\":\"" + commandId + "\",\"status\":\"SUCCESS\",\"state\":{\"power\":true}}");
+        CommandResult result = future.get(2, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(result.isSuccess());
+        assertEquals(commandId, result.getCommandId(), "result must carry the commandId that was published");
+        assertTrue(System.currentTimeMillis() - t0 < 1000, "ack must resolve immediately, not at timeout");
+    }
+
+    @Test
     @DisplayName("LED: action POWER_ON should remain POWER_ON in MQTT payload")
     void testSendCommand_Led_PowerOn() throws Exception {
         when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(ledDevice));

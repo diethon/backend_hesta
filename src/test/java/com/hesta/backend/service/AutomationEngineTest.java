@@ -104,7 +104,7 @@ class AutomationEngineTest {
 
     @Test
     void manualOverrideSkipsAutomaticCommandAndRecordsOutcome() {
-        when(manualOverrideService.isActive(deviceId)).thenReturn(true);
+        when(manualOverrideService.getOverridesUntil(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(java.util.Map.of(deviceId, java.time.OffsetDateTime.now().plusHours(1)));
         when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         var response = engine.process(homeId, event(35));
         assertThat(response.getExecutions().getFirst().getStatus()).isEqualTo("SKIPPED");
@@ -287,7 +287,7 @@ class AutomationEngineTest {
 
     @Test
     void emergencyRuleBypassesManualOverrideAndExecutesCommand() {
-        when(manualOverrideService.isActive(deviceId)).thenReturn(true);
+        when(manualOverrideService.getOverridesUntil(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(java.util.Map.of(deviceId, java.time.OffsetDateTime.now().plusHours(1)));
         when(commandService.sendCommand(eq(deviceId), eq("TURN_ON"), any(), eq(StateChangeSource.AUTOMATION)))
                 .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build()));
         when(executionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
