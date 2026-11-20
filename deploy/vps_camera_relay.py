@@ -40,9 +40,12 @@ UPSTREAM_HOST = os.environ.get("UPSTREAM_HOST", "127.0.0.1")
 UPSTREAM_PORT = int(os.environ.get("UPSTREAM_PORT", "18001"))
 STATUS_CACHE_TTL = float(os.environ.get("STATUS_CACHE_TTL", "1.5"))
 STATUS_STALE_TTL = float(os.environ.get("STATUS_STALE_TTL", "15.0"))
-ERROR_CACHE_TTL = float(os.environ.get("ERROR_CACHE_TTL", "1.0"))
+ERROR_CACHE_TTL = float(os.environ.get("ERROR_CACHE_TTL", "2.0"))
 IDLE_DISCONNECT_SEC = float(os.environ.get("IDLE_DISCONNECT_SEC", "3.0"))
 UPSTREAM_STALL_SEC = float(os.environ.get("UPSTREAM_STALL_SEC", "6.0"))
+STALE_FRAME_SEC = float(os.environ.get("STALE_FRAME_SEC", "5.0"))
+STREAM_FIRST_FRAME_WAIT_SEC = float(os.environ.get("STREAM_FIRST_FRAME_WAIT_SEC", "4.0"))
+STREAM_CLIENT_IDLE_TIMEOUT_SEC = float(os.environ.get("STREAM_CLIENT_IDLE_TIMEOUT_SEC", "8.0"))
 STATUS_TIMEOUT_SEC = float(os.environ.get("STATUS_TIMEOUT_SEC", "3.5"))
 ALLOWED_ORIGINS = {
     origin.strip()
@@ -112,11 +115,17 @@ class MjpegHub:
         upstream_port: int = UPSTREAM_PORT,
         idle_disconnect_sec: float = IDLE_DISCONNECT_SEC,
         upstream_stall_sec: float = UPSTREAM_STALL_SEC,
+        stale_frame_sec: float = STALE_FRAME_SEC,
+        first_frame_wait_sec: float = STREAM_FIRST_FRAME_WAIT_SEC,
+        client_idle_timeout_sec: float = STREAM_CLIENT_IDLE_TIMEOUT_SEC,
     ):
         self.upstream_host = upstream_host
         self.upstream_port = upstream_port
         self.idle_disconnect_sec = idle_disconnect_sec
         self.upstream_stall_sec = upstream_stall_sec
+        self.stale_frame_sec = stale_frame_sec
+        self.first_frame_wait_sec = first_frame_wait_sec
+        self.client_idle_timeout_sec = client_idle_timeout_sec
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribers: set[asyncio.Event] = set()
@@ -126,6 +135,7 @@ class MjpegHub:
         self._stop_requested = False
 
         self.latest_frame: Optional[bytes] = None
+        self.last_frame_mono: float = 0.0
         self.frame_seq: int = 0
         self.upstream_connected: bool = False
         self.frames_received: int = 0
@@ -139,14 +149,26 @@ class MjpegHub:
         with self._sub_lock:
             return len(self._subscribers)
 
+    def has_fresh_frame(self) -> bool:
+        with self._frame_lock:
+            return (
+                self.latest_frame is not None
+                and self.last_frame_mono > 0.0
+                and (time.monotonic() - self.last_frame_mono) < self.stale_frame_sec
+            )
+
+    def frame_age_ms(self) -> Optional[int]:
+        with self._frame_lock:
+            if self.latest_frame is None or self.last_frame_mono <= 0.0:
+                return None
+            return int((time.monotonic() - self.last_frame_mono) * 1000)
+
     def subscribe(self) -> asyncio.Event:
         ev = asyncio.Event()
         start_thread = False
         with self._sub_lock:
             self._subscribers.add(ev)
             self._last_subscriber_seen_mono = time.monotonic()
-            if self.latest_frame is not None:
-                ev.set()
             if self._reader_thread is None or not self._reader_thread.is_alive():
                 self._stop_requested = False
                 start_thread = True
@@ -157,6 +179,8 @@ class MjpegHub:
                 daemon=True,
             )
             self._reader_thread.start()
+        if self.has_fresh_frame():
+            ev.set()
         return ev
 
     def unsubscribe(self, ev: asyncio.Event) -> None:
@@ -178,6 +202,7 @@ class MjpegHub:
     def _publish_frame(self, frame_bytes: bytes, now_mono: float, prev_frame_ts: float) -> float:
         with self._frame_lock:
             self.latest_frame = frame_bytes
+            self.last_frame_mono = now_mono
             self.frame_seq += 1
             self.frames_received += 1
             if prev_frame_ts > 0.0:
@@ -198,7 +223,7 @@ class MjpegHub:
             return (time.monotonic() - self._last_subscriber_seen_mono) < self.idle_disconnect_sec
 
     def _upstream_reader_loop(self) -> None:
-        backoff = 0.5
+        backoff = 1.0
         prev_frame_ts = 0.0
         logger.info("Upstream MJPEG reader started (%s:%d)", self.upstream_host, self.upstream_port)
 
@@ -217,7 +242,7 @@ class MjpegHub:
                     raise RuntimeError(f"upstream HTTP {resp.status}")
 
                 self.upstream_connected = True
-                backoff = 0.5
+                backoff = 1.0
                 buf = bytearray()
 
                 while self._has_active_demand():
@@ -235,6 +260,9 @@ class MjpegHub:
                 logger.warning("Upstream MJPEG reader interrupted: %s", exc)
             finally:
                 self.upstream_connected = False
+                if not self.has_fresh_frame():
+                    with self._frame_lock:
+                        self.latest_frame = None
                 if conn is not None:
                     try:
                         conn.close()
@@ -244,7 +272,7 @@ class MjpegHub:
             if not self._has_active_demand():
                 break
             time.sleep(backoff)
-            backoff = min(backoff * 1.5, 2.0)
+            backoff = min(backoff * 2.0, 5.0)
 
         logger.info("Upstream MJPEG reader stopped (idle)")
 
@@ -440,6 +468,7 @@ async def handle_client(
                 "frames_received": hub.frames_received,
                 "upstream_fps": round(hub.upstream_fps, 1),
                 "frame_seq": hub.frame_seq,
+                "frame_age_ms": hub.frame_age_ms(),
                 "status_cache_age_ms": status_cache.age_ms(),
             }
             payload = json.dumps(health).encode("utf-8")
@@ -500,6 +529,34 @@ async def handle_client(
             return
 
         if path == "/camera/video_feed" and method == "GET":
+            sub_event = hub.subscribe()
+            deadline = time.monotonic() + hub.first_frame_wait_sec
+            while not hub.has_fresh_frame():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    payload = json.dumps({"error": "camera_stream_unavailable"}).encode("utf-8")
+                    await _write_http_response(
+                        writer,
+                        503,
+                        "Service Unavailable",
+                        [
+                            ("Content-Type", "application/json"),
+                            ("Content-Length", str(len(payload))),
+                            ("Cache-Control", "no-store"),
+                            ("Connection", "close"),
+                        ]
+                        + cors_headers,
+                        payload,
+                    )
+                    return
+                sub_event.clear()
+                if hub.has_fresh_frame():
+                    break
+                try:
+                    await asyncio.wait_for(sub_event.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    pass
+
             stream_headers = [
                 ("Content-Type", "multipart/x-mixed-replace; boundary=frame"),
                 ("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"),
@@ -509,27 +566,26 @@ async def handle_client(
             ] + cors_headers
             await _write_http_response(writer, 200, "OK", stream_headers)
 
-            sub_event = hub.subscribe()
             last_sent_seq = -1
             while True:
-                try:
-                    await asyncio.wait_for(sub_event.wait(), timeout=10.0)
-                except asyncio.TimeoutError:
-                    if writer.is_closing():
-                        break
-                    continue
-
                 sub_event.clear()
                 seq, frame = hub.get_frame()
-                if frame is None or seq == last_sent_seq:
+                if frame is not None and seq != last_sent_seq:
+                    last_sent_seq = seq
+                    part_header = (
+                        f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame)}\r\n\r\n"
+                    ).encode("ascii")
+                    writer.write(part_header + frame + b"\r\n")
+                    await asyncio.wait_for(writer.drain(), timeout=5.0)
                     continue
-                last_sent_seq = seq
 
-                part_header = (
-                    f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame)}\r\n\r\n"
-                ).encode("ascii")
-                writer.write(part_header + frame + b"\r\n")
-                await asyncio.wait_for(writer.drain(), timeout=5.0)
+                if writer.is_closing():
+                    break
+                try:
+                    await asyncio.wait_for(sub_event.wait(), timeout=hub.client_idle_timeout_sec)
+                except asyncio.TimeoutError:
+                    # Upstream stalled; close cleanly so browser retries instead of freezing forever.
+                    break
             return
 
         payload = json.dumps({"error": "not_found", "path": path}).encode("utf-8")
@@ -561,12 +617,18 @@ async def start_relay_server(
     upstream_host: str = UPSTREAM_HOST,
     upstream_port: int = UPSTREAM_PORT,
     idle_disconnect_sec: float = IDLE_DISCONNECT_SEC,
+    stale_frame_sec: float = STALE_FRAME_SEC,
+    first_frame_wait_sec: float = STREAM_FIRST_FRAME_WAIT_SEC,
+    client_idle_timeout_sec: float = STREAM_CLIENT_IDLE_TIMEOUT_SEC,
 ) -> tuple[asyncio.AbstractServer, MjpegHub, StatusCache]:
     loop = asyncio.get_running_loop()
     hub = MjpegHub(
         upstream_host=upstream_host,
         upstream_port=upstream_port,
         idle_disconnect_sec=idle_disconnect_sec,
+        stale_frame_sec=stale_frame_sec,
+        first_frame_wait_sec=first_frame_wait_sec,
+        client_idle_timeout_sec=client_idle_timeout_sec,
     )
     hub.bind_loop(loop)
     status_cache = StatusCache(upstream_host=upstream_host, upstream_port=upstream_port)
