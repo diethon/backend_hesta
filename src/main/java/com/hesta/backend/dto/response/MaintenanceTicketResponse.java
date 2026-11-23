@@ -21,6 +21,12 @@ public record MaintenanceTicketResponse(
         String description,
         MaintenancePriority priority,
         MaintenanceTicketStatus status,
+        MaintenanceTicketSource source,
+        String diagnosisSummary,
+        String imageObservations,
+        UUID chatConversationId,
+        MaintenanceDiagnosisQuality diagnosisQuality,
+        String diagnosisQualityNote,
         Person createdBy,
         String contactPhone,
         OffsetDateTime scheduledStart,
@@ -35,10 +41,27 @@ public record MaintenanceTicketResponse(
         Integer rating,
         String feedback,
         List<Event> events,
+        List<Attachment> attachments,
         boolean canManage,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {
+
+    /** Backwards-compatible constructor for existing callers/tests without diagnosisQuality fields. */
+    public MaintenanceTicketResponse(
+            UUID id, String code, UUID homeId, String homeName, String homeAddress,
+            String title, String description, MaintenancePriority priority, MaintenanceTicketStatus status,
+            MaintenanceTicketSource source, String diagnosisSummary, String imageObservations, UUID chatConversationId,
+            Person createdBy, String contactPhone, OffsetDateTime scheduledStart, OffsetDateTime scheduledEnd,
+            boolean scheduleConfirmed, String adminNote, String cancelReason, List<DeviceLine> devices,
+            List<Slot> slots, Quote quote, OffsetDateTime completedAt, Integer rating, String feedback,
+            List<Event> events, List<Attachment> attachments, boolean canManage,
+            OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+        this(id, code, homeId, homeName, homeAddress, title, description, priority, status, source,
+                diagnosisSummary, imageObservations, chatConversationId, null, null,
+                createdBy, contactPhone, scheduledStart, scheduledEnd, scheduleConfirmed, adminNote, cancelReason,
+                devices, slots, quote, completedAt, rating, feedback, events, attachments, canManage, createdAt, updatedAt);
+    }
 
     public record Person(UUID id, String fullName, String email, String phoneNumber) {
         static Person of(User user) {
@@ -100,6 +123,15 @@ public record MaintenanceTicketResponse(
     ) {
     }
 
+    public record Attachment(
+            UUID id,
+            String url,
+            String contentType,
+            long sizeBytes,
+            OffsetDateTime createdAt
+    ) {
+    }
+
     public static MaintenanceTicketResponse from(MaintenanceTicket t, boolean canManage) {
         Home home = t.getHome();
         List<DeviceLine> devices = t.getDevices().stream()
@@ -129,6 +161,16 @@ public record MaintenanceTicketResponse(
                         e.getNote(),
                         e.getCreatedAt()))
                 .toList();
+        List<Attachment> attachments = t.getAttachments().stream()
+                .map(a -> new Attachment(
+                        a.getId(),
+                        home != null && a.getId() != null
+                                ? "/api/v1/homes/" + home.getId() + "/maintenance-attachments/" + a.getId() + "/content"
+                                : a.getUrl(),
+                        a.getContentType(),
+                        a.getSizeBytes(),
+                        a.getCreatedAt()))
+                .toList();
         return new MaintenanceTicketResponse(
                 t.getId(),
                 t.getCode(),
@@ -139,6 +181,12 @@ public record MaintenanceTicketResponse(
                 t.getDescription(),
                 t.getPriority(),
                 t.getStatus(),
+                t.getSource() != null ? t.getSource() : MaintenanceTicketSource.MANUAL,
+                t.getDiagnosisSummary(),
+                t.getImageObservations(),
+                t.getChatConversationId(),
+                t.getDiagnosisQuality(),
+                t.getDiagnosisQualityNote(),
                 Person.of(t.getCreatedBy()),
                 t.getContactPhone(),
                 t.getScheduledStart(),
@@ -153,6 +201,7 @@ public record MaintenanceTicketResponse(
                 t.getRating() != null ? t.getRating().intValue() : null,
                 t.getFeedback(),
                 events,
+                attachments,
                 canManage,
                 t.getCreatedAt(),
                 t.getUpdatedAt());

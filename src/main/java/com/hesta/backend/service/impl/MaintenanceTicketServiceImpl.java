@@ -7,6 +7,7 @@ import com.hesta.backend.dto.response.PageResponse;
 import com.hesta.backend.entity.*;
 import com.hesta.backend.enums.*;
 import com.hesta.backend.event.MaintenanceNotificationEvent;
+import com.hesta.backend.event.MaintenanceTicketEmailEvent;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.*;
@@ -51,6 +52,7 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
             MaintenanceDeviceOutcome.FIXED, MaintenanceDeviceOutcome.REPLACED, MaintenanceDeviceOutcome.NO_ISSUE_FOUND);
 
     private final MaintenanceTicketRepository ticketRepository;
+    private final MaintenanceTicketAttachmentRepository attachmentRepository;
     private final DeviceRepository deviceRepository;
     private final DeviceAnomalyRepository deviceAnomalyRepository;
     private final UserRepository userRepository;
@@ -87,6 +89,10 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
         ticket.setContactPhone(Optional.ofNullable(trimToNull(request.contactPhone())).orElse(user.getPhoneNumber()));
         ticket.setPriority(request.priority() != null ? request.priority() : MaintenancePriority.NORMAL);
         ticket.setStatus(MaintenanceTicketStatus.SUBMITTED);
+        ticket.setSource(request.source() != null ? request.source() : MaintenanceTicketSource.MANUAL);
+        ticket.setDiagnosisSummary(trimToNull(request.diagnosisSummary()));
+        ticket.setImageObservations(trimToNull(request.imageObservations()));
+        ticket.setChatConversationId(request.chatConversationId());
 
         for (CreateMaintenanceTicketRequest.DeviceItem item : items) {
             Device device = requireReportableDevice(context, homeId, item.deviceId());
@@ -104,10 +110,19 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
         ticket.replaceSlots(slots);
         recordEvent(ticket, user, MaintenanceActorRole.USER, null, MaintenanceTicketStatus.SUBMITTED, ticket.getDescription());
 
+        List<MaintenanceTicketAttachment> attachments = resolveAttachableFiles(userId, homeId, request.attachmentIds());
         MaintenanceTicket saved = ticketRepository.save(ticket);
+        if (!attachments.isEmpty()) {
+            for (MaintenanceTicketAttachment attachment : attachments) {
+                attachment.setTicket(saved);
+                saved.getAttachments().add(attachment);
+            }
+            attachmentRepository.saveAll(attachments);
+        }
         notifyHome(saved, userId, "Yêu cầu bảo trì mới",
                 user.getFullName() + " đã gửi yêu cầu kiểm tra " + saved.getCode() + ": " + saved.getTitle() + ".",
                 NotificationPriority.LOW);
+        publishTicketEmail(saved, MaintenanceTicketEmailEvent.EventKind.TICKET_CREATED_FOR_ADMIN, Set.of());
         log.info("Maintenance ticket {} created in home {} by {}", saved.getCode(), homeId, userId);
         return MaintenanceTicketResponse.from(saved, true);
     }
@@ -276,6 +291,7 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
                         ? "Ticket " + ticket.getCode() + ": kỹ thuật viên sẽ đến lúc " + when + "."
                         : "Ticket " + ticket.getCode() + ": đề xuất lịch " + when + ". Vui lòng xác nhận hoặc chọn giờ khác.",
                 NotificationPriority.MEDIUM);
+        publishTicketEmailToHomeUsers(ticket, MaintenanceTicketEmailEvent.EventKind.TICKET_SCHEDULED);
         return MaintenanceTicketResponse.from(ticket, false);
     }
 
@@ -336,6 +352,7 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
                 "Ticket " + ticket.getCode() + ": tổng chi phí dự kiến " + formatMoney(total)
                         + ". Vui lòng xem và duyệt báo giá.",
                 NotificationPriority.MEDIUM);
+        publishTicketEmailToHomeUsers(ticket, MaintenanceTicketEmailEvent.EventKind.TICKET_QUOTED);
         return MaintenanceTicketResponse.from(ticket, false);
     }
 
@@ -371,6 +388,7 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
         notifyHome(ticket, null, "Đã hoàn tất bảo trì",
                 "Ticket " + ticket.getCode() + " đã xử lý xong. Xem chi tiết sửa chữa và đánh giá dịch vụ.",
                 NotificationPriority.MEDIUM);
+        publishTicketEmailToHomeUsers(ticket, MaintenanceTicketEmailEvent.EventKind.TICKET_COMPLETED);
         return MaintenanceTicketResponse.from(ticket, false);
     }
 
@@ -386,6 +404,32 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
         notifyHome(ticket, null, "Yêu cầu bảo trì bị từ chối",
                 "Ticket " + ticket.getCode() + " bị từ chối" + (reason != null ? ": " + reason : "."),
                 NotificationPriority.MEDIUM);
+        publishTicketEmailToHomeUsers(ticket, MaintenanceTicketEmailEvent.EventKind.TICKET_REJECTED);
+        return MaintenanceTicketResponse.from(ticket, false);
+    }
+
+    @Override
+    @Transactional
+    public MaintenanceTicketResponse rateDiagnosisQuality(
+            UUID adminId, UUID ticketId, MaintenanceDiagnosisQuality quality, String note) {
+        if (quality == null) {
+            throw new AppException(ErrorCode.MAINTENANCE_INVALID_REQUEST, "Vui lòng chọn mức đánh giá chẩn đoán.");
+        }
+        MaintenanceTicket ticket = requireTicket(ticketId);
+        if (ticket.getSource() != MaintenanceTicketSource.CHATBOT) {
+            throw new AppException(ErrorCode.MAINTENANCE_INVALID_REQUEST,
+                    "Chỉ đánh giá chất lượng chẩn đoán cho ticket tạo từ trợ lý AI.");
+        }
+        String sanitized = null;
+        if (note != null) {
+            String cleaned = note.replaceAll("[\\p{Cntrl}&&[^\\n\\t]]", "").trim();
+            if (!cleaned.isEmpty()) {
+                sanitized = cleaned.length() > 500 ? cleaned.substring(0, 500) : cleaned;
+            }
+        }
+        ticket.setDiagnosisQuality(quality);
+        ticket.setDiagnosisQualityNote(sanitized);
+        ticketRepository.save(ticket);
         return MaintenanceTicketResponse.from(ticket, false);
     }
 
@@ -439,6 +483,32 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
                     "Thiết bị \"" + device.getName() + "\" đang có ticket bảo trì chưa hoàn tất");
         }
         return device;
+    }
+
+    private List<MaintenanceTicketAttachment> resolveAttachableFiles(UUID userId, UUID homeId, List<UUID> attachmentIds) {
+        if (attachmentIds == null || attachmentIds.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> distinctIds = attachmentIds.stream().distinct().toList();
+        if (distinctIds.size() > 5) {
+            throw new AppException(ErrorCode.MAINTENANCE_ATTACHMENT_LIMIT_EXCEEDED);
+        }
+        if (distinctIds.size() != attachmentIds.size()) {
+            throw new AppException(ErrorCode.MAINTENANCE_INVALID_REQUEST);
+        }
+        List<MaintenanceTicketAttachment> found = attachmentRepository.findAllByIdIn(distinctIds);
+        if (found.size() != distinctIds.size()) {
+            throw new AppException(ErrorCode.MAINTENANCE_ATTACHMENT_NOT_FOUND);
+        }
+        for (MaintenanceTicketAttachment attachment : found) {
+            boolean validOwner = attachment.getTicket() == null
+                    && attachment.getHome() != null && homeId.equals(attachment.getHome().getId())
+                    && attachment.getUploadedBy() != null && userId.equals(attachment.getUploadedBy().getId());
+            if (!validOwner) {
+                throw new AppException(ErrorCode.MAINTENANCE_ATTACHMENT_NOT_FOUND);
+            }
+        }
+        return found;
     }
 
     private DeviceAnomaly resolveSourceAnomaly(UUID homeId, Device device, UUID anomalyId) {
@@ -542,6 +612,36 @@ public class MaintenanceTicketServiceImpl implements MaintenanceTicketService {
         if (!recipients.isEmpty()) {
             eventPublisher.publishEvent(new MaintenanceNotificationEvent(homeId, recipients, title, message, priority));
         }
+    }
+
+    private void publishTicketEmailToHomeUsers(MaintenanceTicket ticket, MaintenanceTicketEmailEvent.EventKind kind) {
+        UUID homeId = ticket.getHome().getId();
+        UUID creatorId = ticket.getCreatedBy().getId();
+        Set<String> emails = homeMemberRepository.findByHomeIdWithUser(homeId).stream()
+                .filter(m -> m.getStatus() == MemberStatus.ACTIVE && m.getUser() != null)
+                .filter(m -> m.getRole() == HomeRole.OWNER || creatorId.equals(m.getUser().getId()))
+                .map(HomeMember::getUser)
+                .filter(User::isMaintenanceEmailEnabled)
+                .map(User::getEmail)
+                .filter(e -> e != null && !e.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!emails.isEmpty()) {
+            publishTicketEmail(ticket, kind, emails);
+        }
+    }
+
+    private void publishTicketEmail(MaintenanceTicket ticket, MaintenanceTicketEmailEvent.EventKind kind, Set<String> emails) {
+        eventPublisher.publishEvent(new MaintenanceTicketEmailEvent(
+                ticket.getId(),
+                ticket.getCode(),
+                ticket.getHome().getId(),
+                ticket.getTitle(),
+                ticket.getPriority(),
+                ticket.getSource(),
+                ticket.getStatus(),
+                kind,
+                emails
+        ));
     }
 
     private Map<UUID, MaintenanceTicketDevice> ticketDevicesById(MaintenanceTicket ticket) {

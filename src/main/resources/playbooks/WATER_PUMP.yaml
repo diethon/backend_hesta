@@ -1,0 +1,65 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Máy bơm nước (WATER_PUMP)
+# QUY TẮC AN TOÀN: Động cơ công suất lớn, đấu nối cố định, môi trường gần nước.
+# Tuyệt đối KHÔNG hướng dẫn rút phích, ngắt cầu dao, chạm vào thân bơm ướt hay mở hộp đấu dây.
+# ==============================================================================
+id: WATER_PUMP
+label: Máy bơm nước thông minh
+deviceTypes:
+  - WATER_PUMP
+imageHints:
+  - Đèn báo trạng thái trên bộ công tắc/điều khiển bơm gắn tường (ở vị trí khô ráo)
+  - Khu vực xung quanh chân máy bơm (chụp từ xa kiểm tra có rò nước gần nguồn điện không)
+  - Tem thông số ngoài vỏ nếu ở vị trí khô ráo, dễ quan sát
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Máy bơm vẫn mất kết nối, không lên nước hoặc có dấu hiệu bất thường sau khi kiểm tra an toàn từ xa.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, tiếng kêu to bất thường, kẹt bơm hoặc rò nước gần nguồn điện
+  advice: "DỪNG BẬT MÁY BƠM NGAY LẬP TỨC! Tuyệt đối không chạm vào thân máy bơm, ống nước kim loại hoặc hộp điều khiển nếu khu vực đang ẩm ướt, có rò nước gần nguồn điện, mùi khét, tiếng kêu to bất thường hay nóng rực. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - rò nước
+    - kẹt
+    - vật cản
+    - tiếng kêu to
+    - kêu to bất thường
+symptoms:
+  - id: PUMP_OFFLINE
+    label: Mất kết nối / Không bật tắt được bơm trên ứng dụng
+    ticketDescription: Bộ điều khiển máy bơm nước bị mất kết nối, không phản hồi lệnh bật/tắt trên ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_SAFE_AREA
+        title: Đảm bảo khu vực máy bơm khô ráo, không có người/vật cản vùng hoạt động
+        instruction: Quan sát từ khoảng cách an toàn đảm bảo xung quanh máy bơm và đường ống không có nước rò rỉ gần ổ điện/hộp điều khiển và không có người/vật cản gần khu vực bơm.
+      - id: CHECK_CONTROLLER_LED
+        title: Quan sát đèn báo trạng thái trên bộ điều khiển gắn tường
+        instruction: Nhìn từ xa vào đèn báo nguồn và kết nối bên ngoài bộ điều khiển máy bơm (không chạm vào thân bơm, ống nước hay hộp điều khiển) xem đèn có sáng bình thường không.
+      - id: CHECK_WIFI_GATEWAY_LED
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Kiểm tra đèn Wi-Fi/Internet trên router (sáng ổn định, không nháy đỏ) và đèn nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node). Chờ 1 phút rồi kiểm tra lại trạng thái trên ứng dụng.
+  - id: PUMP_NO_WATER_OR_WEAK
+    label: Ứng dụng báo BẬT nhưng bơm không chạy hoặc không lên nước
+    ticketDescription: Máy bơm nước hiển thị BẬT trên ứng dụng nhưng không hoạt động hoặc không có nước lên.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_WATER_SOURCE_AND_VALVE
+        title: Đảm bảo khu vực an toàn và quan sát nguồn nước/van cấp đầu vào
+        instruction: Quan sát từ khoảng cách an toàn đảm bảo không có rò nước gần nguồn điện hay vật cản xung quanh; kiểm tra bằng mắt xem bể/nguồn nước cấp còn nước và van nước tổng (ở vị trí khô ráo, tách biệt hoàn toàn khỏi thân bơm) đang mở hay đóng. Tuyệt đối không chạm vào thân máy bơm hoặc cơ cấu chuyển động.
+      - id: CHECK_AUTO_SCHEDULE
+        title: Tắt bơm trên ứng dụng nếu bơm chạy khan và kiểm tra lịch tự động
+        instruction: Nếu nghe bơm chạy nhưng không lên nước quá 1 phút, hãy TẮT ngay trên ứng dụng để tránh hỏng bơm do chạy khan và kiểm tra xem có luật tự động nào đang giữ trạng thái bơm không.
+  - id: PUMP_HARDWARE_FAULT
+    label: Bơm kêu to bất thường, rung mạnh, rò nước hoặc kẹt cánh bơm
+    ticketDescription: Máy bơm nước có tiếng kêu to bất thường, rung mạnh hoặc rò nước, cần kỹ thuật viên kiểm tra trực tiếp.
+    hardwareOnly: true
+    steps: []

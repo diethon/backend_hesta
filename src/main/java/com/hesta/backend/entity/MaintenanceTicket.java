@@ -1,7 +1,9 @@
 package com.hesta.backend.entity;
 
+import com.hesta.backend.enums.MaintenanceDiagnosisQuality;
 import com.hesta.backend.enums.MaintenancePriority;
 import com.hesta.backend.enums.MaintenanceQuoteDecision;
+import com.hesta.backend.enums.MaintenanceTicketSource;
 import com.hesta.backend.enums.MaintenanceTicketStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -54,6 +56,26 @@ public class MaintenanceTicket {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private MaintenanceTicketStatus status = MaintenanceTicketStatus.SUBMITTED;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false, length = 20)
+    private MaintenanceTicketSource source = MaintenanceTicketSource.MANUAL;
+
+    @Column(name = "diagnosis_summary", columnDefinition = "TEXT")
+    private String diagnosisSummary;
+
+    @Column(name = "image_observations", columnDefinition = "TEXT")
+    private String imageObservations;
+
+    @Column(name = "chat_conversation_id")
+    private UUID chatConversationId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "diagnosis_quality", length = 20)
+    private MaintenanceDiagnosisQuality diagnosisQuality;
+
+    @Column(name = "diagnosis_quality_note", length = 500)
+    private String diagnosisQualityNote;
 
     @Column(name = "scheduled_start")
     private OffsetDateTime scheduledStart;
@@ -125,6 +147,10 @@ public class MaintenanceTicket {
     @OneToMany(mappedBy = "ticket", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("createdAt ASC")
     private List<MaintenanceTicketEvent> events = new ArrayList<>();
+
+    @OneToMany(mappedBy = "ticket")
+    @OrderBy("createdAt ASC")
+    private List<MaintenanceTicketAttachment> attachments = new ArrayList<>();
 
     public void addDevice(MaintenanceTicketDevice device) {
         device.setTicket(this);

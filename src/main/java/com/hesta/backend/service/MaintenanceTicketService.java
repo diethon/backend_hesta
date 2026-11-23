@@ -53,4 +53,7 @@ public interface MaintenanceTicketService {
     MaintenanceTicketResponse complete(UUID adminId, UUID ticketId, CompleteMaintenanceRequest request);
 
     MaintenanceTicketResponse reject(UUID adminId, UUID ticketId, MaintenanceNoteRequest request);
+
+    MaintenanceTicketResponse rateDiagnosisQuality(
+            UUID adminId, UUID ticketId, com.hesta.backend.enums.MaintenanceDiagnosisQuality quality, String note);
 }
