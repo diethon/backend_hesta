@@ -258,6 +258,14 @@ class DeviceControllerTest {
     }
 
     @Test
+    void unauthenticatedDeviceCommand_returns401() throws Exception {
+        mvc.perform(post("/api/v1/devices/{deviceId}/command", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"TURN_ON\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("GET /api/v1/homes/{homeId}/device-capabilities returns home capabilities")
     void getHomeCapabilities_returnsSuccess() throws Exception {
         DeviceCapabilityInfoResponse dev = DeviceCapabilityInfoResponse.builder()

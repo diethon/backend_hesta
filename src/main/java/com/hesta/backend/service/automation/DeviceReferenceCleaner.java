@@ -38,6 +38,9 @@ public class DeviceReferenceCleaner {
     private final AutomationRecommendationRepository recommendations;
     private final RuleTriggerGate triggerGate;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.repository.DeviceGroupRepository deviceGroups;
+
     /** Call in the same transaction, before the device is marked deleted. */
     public void detach(UUID deviceId) {
         Set<Scene> affectedScenes = new LinkedHashSet<>();
@@ -67,6 +70,14 @@ public class DeviceReferenceCleaner {
             // Not the user's answer, so no feedback is sent to the ML training data.
             recommendation.setStatus("EXPIRED");
             recommendation.setResolvedAt(now);
+        }
+
+        if (deviceGroups != null) {
+            for (com.hesta.backend.entity.DeviceGroup group : deviceGroups.findAllContainingDevice(deviceId)) {
+                if (group.getDevices().removeIf(d -> deviceId.equals(d.getId()))) {
+                    deviceGroups.save(group);
+                }
+            }
         }
     }
 

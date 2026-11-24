@@ -45,7 +45,8 @@ class DeviceHealthServiceTest {
     @DisplayName("Device Health: calculates baseline health without chattering")
     void testGetDeviceHealth_Normal() {
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
-        when(historyRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)).thenReturn(List.of());
+        when(historyRepository.countByDeviceId(deviceId)).thenReturn(0L);
+        when(historyRepository.findFirstByDeviceIdOrderByChangedAtDesc(deviceId)).thenReturn(Optional.empty());
 
         healthService.recordSwitch(deviceId);
         healthService.recordSwitch(deviceId);
@@ -65,7 +66,8 @@ class DeviceHealthServiceTest {
     @DisplayName("Device Health: triggers chattering warning and safety trip when switches > 10 in 60s")
     void testGetDeviceHealth_ChatteringDetected() {
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(device));
-        when(historyRepository.findByDeviceIdOrderByChangedAtDesc(deviceId)).thenReturn(List.of());
+        when(historyRepository.countByDeviceId(deviceId)).thenReturn(0L);
+        when(historyRepository.findFirstByDeviceIdOrderByChangedAtDesc(deviceId)).thenReturn(Optional.empty());
 
         for (int i = 0; i < 12; i++) {
             healthService.recordSwitch(deviceId);

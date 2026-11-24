@@ -133,11 +133,17 @@ public class AirConditionerServiceImpl implements AirConditionerService {
     }
 
     private Device authorizeDevice(UUID userId, UUID deviceId, AccessLevel minLevel) {
+        if (userId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         Device device = deviceRepository.findById(deviceId)
+                .filter(d -> !d.isDeleted())
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
-        if (userId != null && device.getHome() != null) {
-            homeAuthorizationService.requireAccess(userId, device.getHome().getId());
+        UUID homeId = device.getHome() != null ? device.getHome().getId()
+                : (device.getRoom() != null && device.getRoom().getHome() != null ? device.getRoom().getHome().getId() : null);
+        if (homeId != null) {
+            homeAuthorizationService.requireAccess(userId, homeId);
             if (minLevel != null) {
                 homeAuthorizationService.requireDeviceAccess(userId, deviceId, minLevel);
             }

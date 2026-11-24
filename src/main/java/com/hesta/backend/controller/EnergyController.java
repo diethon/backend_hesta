@@ -4,8 +4,11 @@ import com.hesta.backend.dto.response.ApiResponse;
 import com.hesta.backend.dto.response.DeviceEnergyBreakdown;
 import com.hesta.backend.dto.response.EnergyAnalyticsResponse;
 import com.hesta.backend.dto.response.EnergySummaryResponse;
+import com.hesta.backend.exception.AppException;
+import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.security.CustomUserDetails;
 import com.hesta.backend.service.EnergyAnalyticsService;
+import com.hesta.backend.service.HomeAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -19,6 +22,8 @@ import java.util.UUID;
 public class EnergyController {
 
     private final EnergyAnalyticsService energyAnalyticsService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private HomeAuthorizationService homeAuthorizationService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.energy.demandresponse.DemandResponseService demandResponseService;
 
@@ -66,7 +71,14 @@ public class EnergyController {
 
     @GetMapping("/homes/{homeId}/dr/settings")
     public ResponseEntity<ApiResponse<com.hesta.backend.energy.demandresponse.DemandResponseSettings>> getDemandResponseSettings(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID homeId) {
+        if (userDetails == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        if (homeAuthorizationService != null) {
+            homeAuthorizationService.requireAccess(userDetails.getId(), homeId);
+        }
         if (demandResponseService == null) {
             return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseSettings>builder().build());
         }
@@ -79,8 +91,15 @@ public class EnergyController {
 
     @PutMapping("/homes/{homeId}/dr/settings")
     public ResponseEntity<ApiResponse<com.hesta.backend.energy.demandresponse.DemandResponseSettings>> updateDemandResponseSettings(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID homeId,
             @RequestBody com.hesta.backend.energy.demandresponse.DemandResponseSettings settings) {
+        if (userDetails == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        if (homeAuthorizationService != null) {
+            homeAuthorizationService.requireOwner(userDetails.getId(), homeId);
+        }
         if (demandResponseService == null) {
             return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseSettings>builder().build());
         }
@@ -94,8 +113,15 @@ public class EnergyController {
 
     @PostMapping("/homes/{homeId}/dr/evaluate")
     public ResponseEntity<ApiResponse<com.hesta.backend.energy.demandresponse.DemandResponseEvaluationResult>> evaluateDemandResponse(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID homeId,
             @RequestParam(required = false) Double simulatedWatts) {
+        if (userDetails == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        if (homeAuthorizationService != null) {
+            homeAuthorizationService.requireOwner(userDetails.getId(), homeId);
+        }
         if (demandResponseService == null) {
             return ResponseEntity.ok(ApiResponse.<com.hesta.backend.energy.demandresponse.DemandResponseEvaluationResult>builder().build());
         }

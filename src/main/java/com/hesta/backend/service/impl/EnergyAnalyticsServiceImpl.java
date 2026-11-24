@@ -2,9 +2,12 @@ package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.response.*;
+import com.hesta.backend.energy.EnergyPowerCalculator;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.DeviceEnergyRollup;
 import com.hesta.backend.entity.DeviceStateHistory;
 import com.hesta.backend.enums.DeviceStatus;
+import com.hesta.backend.repository.DeviceEnergyRollupRepository;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.DeviceStateHistoryRepository;
 import com.hesta.backend.exception.AppException;
@@ -16,10 +19,12 @@ import com.hesta.backend.enums.AccessLevel;
 import com.hesta.backend.enums.AccessScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -36,6 +41,13 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     private final DeviceRepository deviceRepository;
     private final DeviceStateHistoryRepository historyRepository;
     private final HomeAuthorizationService homeAuthorizationService;
+
+    @Autowired(required = false)
+    private DeviceEnergyRollupRepository rollupRepository;
+
+    void setRollupRepository(DeviceEnergyRollupRepository rollupRepository) {
+        this.rollupRepository = rollupRepository;
+    }
 
     // EVN 6-tier residential tariff (VNĐ/kWh)
     private static final double TIER_1_LIMIT = 50.0;
@@ -91,15 +103,19 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
 
         String normPeriod = period == null ? "30D" : period.trim().toUpperCase();
-        String cacheKey = (homeId != null ? homeId.toString() : "null") + ":" + normPeriod;
+        String scopeKey = (ctx == null || ctx.isOwner() || ctx.scope() != AccessScope.CUSTOM)
+                ? "ALL"
+                : ("USER:" + (userId != null ? userId.toString() : "anon"));
+        String cacheKey = (homeId != null ? homeId.toString() : "null") + ":" + normPeriod + ":" + scopeKey;
 
         CacheEntry<EnergyAnalyticsResponse> cached = homeAnalyticsCache.get(cacheKey);
         if (cached != null && !cached.isExpired()) {
             return cached.value();
         }
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = EnergyPowerCalculator.nowVn();
         OffsetDateTime from = resolveStartTime(now, normPeriod);
+        OffsetDateTime currentHourStart = now.truncatedTo(ChronoUnit.HOURS);
 
         List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId).stream()
                 .filter(d -> !d.isDeleted())
@@ -122,21 +138,51 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         }
 
         List<UUID> deviceIds = devices.stream().map(Device::getId).collect(Collectors.toList());
-        List<DeviceStateHistory> allHistories = historyRepository.findByDeviceIdsAndChangedAtBetween(deviceIds, from, now);
+        OffsetDateTime liveTailFrom = from.isAfter(currentHourStart) ? from : currentHourStart;
 
+        List<DeviceEnergyRollup> completedRollups = (rollupRepository != null && from.isBefore(currentHourStart))
+                ? rollupRepository.findByDeviceIdInAndBucketStartGreaterThanEqualAndBucketStartLessThanOrderByBucketStartAsc(
+                        deviceIds, from, currentHourStart)
+                : Collections.emptyList();
+        Map<UUID, List<DeviceEnergyRollup>> rollupsByDevice = completedRollups.stream()
+                .collect(Collectors.groupingBy(DeviceEnergyRollup::getDeviceId));
+
+        List<DeviceStateHistory> allHistories = historyRepository.findByDeviceIdsAndChangedAtBetween(deviceIds, from, now);
         Map<UUID, List<DeviceStateHistory>> historyByDevice = allHistories.stream()
                 .collect(Collectors.groupingBy(h -> h.getDevice().getId()));
 
         double totalHomeKwh = 0.0;
+        double currentHourHomeKwh = 0.0;
         int activeDeviceCount = 0;
         List<DeviceEnergyBreakdown> breakdownList = new ArrayList<>();
+        Map<UUID, Double> rawDeviceKwh = new HashMap<>();
         List<ActiveEnergySegment> allHomeSegments = new ArrayList<>();
 
         for (Device device : devices) {
             List<DeviceStateHistory> deviceHistories = historyByDevice.getOrDefault(device.getId(), Collections.emptyList());
-            DeviceEnergyResult devResult = calculateDeviceEnergy(device, deviceHistories, from, now);
+            List<DeviceEnergyRollup> devRollups = rollupsByDevice.getOrDefault(device.getId(), Collections.emptyList());
+
+            DeviceEnergyResult devResult;
+            double liveHourKwh = 0.0;
+            if (!devRollups.isEmpty() && from.isBefore(currentHourStart)) {
+                DeviceEnergyResult tailResult = calculateDeviceEnergy(device, deviceHistories, liveTailFrom, now);
+                liveHourKwh = tailResult.kwh;
+                devResult = mergeRollupsAndLiveTail(device, devRollups, tailResult);
+            } else {
+                devResult = calculateDeviceEnergy(device, deviceHistories, from, now);
+                for (ActiveEnergySegment seg : devResult.segments) {
+                    OffsetDateTime s = seg.start().isAfter(liveTailFrom) ? seg.start() : liveTailFrom;
+                    OffsetDateTime e = seg.end().isBefore(now) ? seg.end() : now;
+                    if (e.isAfter(s)) {
+                        liveHourKwh += (seg.wattage() * Duration.between(s, e).toSeconds() / 3600.0) / 1000.0;
+                    }
+                }
+            }
+
             totalHomeKwh += devResult.kwh;
+            currentHourHomeKwh += liveHourKwh;
             allHomeSegments.addAll(devResult.segments);
+            rawDeviceKwh.put(device.getId(), devResult.kwh);
 
             if (devResult.isOnNow || devResult.totalOnHours > 0.01) {
                 activeDeviceCount++;
@@ -148,20 +194,21 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                     .deviceType(device.getDeviceType())
                     .roomName(device.getRoom() != null ? device.getRoom().getName() : "Chưa gán phòng")
                     .kwh(Math.round(devResult.kwh * 100.0) / 100.0)
-                    .costVnd(calculateEvnTariffCost(devResult.kwh))
+                    .costVnd(0L)
                     .totalOnHours(Math.round(devResult.totalOnHours * 10.0) / 10.0)
                     .wattage(devResult.baseWattage)
                     .build());
         }
 
-        // Calculate breakdown percentages
+        // Calculate breakdown percentages & proportional progressive EVN cost (sum == estimatedCost)
+        long estimatedCost = calculateEvnTariffCost(totalHomeKwh);
         final double finalTotal = Math.max(totalHomeKwh, 0.001);
         for (DeviceEnergyBreakdown item : breakdownList) {
+            double devKwh = rawDeviceKwh.getOrDefault(item.getDeviceId(), 0.0);
             item.setPercentage(Math.round((item.getKwh() / finalTotal) * 1000.0) / 10.0);
+            item.setCostVnd(totalHomeKwh > 0.0001 ? Math.round(estimatedCost * (devKwh / totalHomeKwh)) : 0L);
         }
         breakdownList.sort(Comparator.comparingDouble(DeviceEnergyBreakdown::getKwh).reversed());
-
-        long estimatedCost = calculateEvnTariffCost(totalHomeKwh);
 
         // Projected monthly consumption (extrapolated to full current calendar month)
         double daysInPeriod = Math.max(0.25, Duration.between(from, now).toSeconds() / 86400.0);
@@ -169,18 +216,41 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         double projectedMonthKwh = (totalHomeKwh / daysInPeriod) * daysInCurrentMonth;
         long projectedMonthCost = calculateEvnTariffCost(projectedMonthKwh);
 
-        // Bậc EVN hiện tại tính trên sản lượng thực tế tích lũy trong kỳ đang xét (đặc biệt là từ ngày 01 đầu tháng)
-        int currentTier = determineEvnTier(totalHomeKwh);
+        // Bậc EVN hiện tại phản ánh sản lượng tích lũy từ ngày 01 đầu tháng
+        double tierBasisKwh = totalHomeKwh;
+        if (("24H".equalsIgnoreCase(normPeriod) || "7D".equalsIgnoreCase(normPeriod)) && rollupRepository != null) {
+            OffsetDateTime monthStart = now.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
+            BigDecimal monthCompleted = rollupRepository.sumKwhByDeviceIdsAndWindow(deviceIds, monthStart, currentHourStart);
+            double monthRollupKwh = monthCompleted != null ? monthCompleted.doubleValue() : 0.0;
+            tierBasisKwh = Math.max(totalHomeKwh, monthRollupKwh + currentHourHomeKwh);
+        }
+        int currentTier = determineEvnTier(tierBasisKwh);
 
         Duration window = Duration.between(from, now);
         OffsetDateTime prevFrom = from.minus(window);
+        List<DeviceEnergyRollup> prevRollups = rollupRepository != null
+                ? rollupRepository.findByDeviceIdInAndBucketStartGreaterThanEqualAndBucketStartLessThanOrderByBucketStartAsc(
+                        deviceIds, prevFrom, from)
+                : Collections.emptyList();
+        Map<UUID, List<DeviceEnergyRollup>> prevRollupsByDevice = prevRollups.stream()
+                .collect(Collectors.groupingBy(DeviceEnergyRollup::getDeviceId));
+
         List<DeviceStateHistory> prevHistories = historyRepository.findByDeviceIdsAndChangedAtBetween(deviceIds, prevFrom, from);
         Map<UUID, List<DeviceStateHistory>> prevHistoryByDevice = prevHistories.stream()
                 .collect(Collectors.groupingBy(h -> h.getDevice().getId()));
         double prevTotalHomeKwh = 0.0;
         for (Device device : devices) {
-            List<DeviceStateHistory> devHistories = prevHistoryByDevice.getOrDefault(device.getId(), Collections.emptyList());
-            prevTotalHomeKwh += calculateDeviceEnergy(device, devHistories, prevFrom, from).kwh;
+            List<DeviceEnergyRollup> devPrevRollups = prevRollupsByDevice.getOrDefault(device.getId(), Collections.emptyList());
+            if (!devPrevRollups.isEmpty()) {
+                for (DeviceEnergyRollup r : devPrevRollups) {
+                    if (r.getKwh() != null) {
+                        prevTotalHomeKwh += r.getKwh().doubleValue();
+                    }
+                }
+            } else {
+                List<DeviceStateHistory> devHistories = prevHistoryByDevice.getOrDefault(device.getId(), Collections.emptyList());
+                prevTotalHomeKwh += calculateDeviceEnergy(device, devHistories, prevFrom, from).kwh;
+            }
         }
         double compPercent = (prevTotalHomeKwh > 0.001)
                 ? Math.round(((totalHomeKwh - prevTotalHomeKwh) / prevTotalHomeKwh) * 1000.0) / 10.0
@@ -232,13 +302,25 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             return cached.value();
         }
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = EnergyPowerCalculator.nowVn();
         OffsetDateTime from = resolveStartTime(now, normPeriod);
+        OffsetDateTime currentHourStart = now.truncatedTo(ChronoUnit.HOURS);
 
         List<DeviceStateHistory> histories = historyRepository
                 .findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(deviceId, from, now);
 
-        DeviceEnergyResult result = calculateDeviceEnergy(device, histories, from, now);
+        List<DeviceEnergyRollup> devRollups = (rollupRepository != null && from.isBefore(currentHourStart))
+                ? rollupRepository.findByDeviceIdAndBucketStartGreaterThanEqualAndBucketStartLessThanOrderByBucketStartAsc(
+                        deviceId, from, currentHourStart)
+                : Collections.emptyList();
+
+        DeviceEnergyResult result;
+        if (!devRollups.isEmpty() && from.isBefore(currentHourStart)) {
+            DeviceEnergyResult tailResult = calculateDeviceEnergy(device, histories, currentHourStart, now);
+            result = mergeRollupsAndLiveTail(device, devRollups, tailResult);
+        } else {
+            result = calculateDeviceEnergy(device, histories, from, now);
+        }
 
         DeviceEnergyBreakdown breakdown = DeviceEnergyBreakdown.builder()
                 .deviceId(device.getId())
@@ -319,7 +401,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
     private OffsetDateTime resolveStartTime(OffsetDateTime now, String period) {
         return switch (period) {
-            case "24H", "DAY", "DAILY" -> now.minusHours(24);
+            case "24H", "DAY", "DAILY" -> now.truncatedTo(ChronoUnit.HOURS).minusHours(23);
             case "7D", "WEEK", "WEEKLY" -> now.truncatedTo(ChronoUnit.DAYS).minusDays(6);
             case "30D", "MONTH", "MONTHLY" -> now.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
             default -> now.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
@@ -336,26 +418,51 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             List<ActiveEnergySegment> segments
     ) {}
 
+    private DeviceEnergyResult mergeRollupsAndLiveTail(
+            Device device,
+            List<DeviceEnergyRollup> devRollups,
+            DeviceEnergyResult tailResult) {
+        double totalKwh = tailResult.kwh;
+        double totalOnHours = tailResult.totalOnHours;
+        List<ActiveEnergySegment> segments = new ArrayList<>();
+        for (DeviceEnergyRollup r : devRollups) {
+            double bucketKwh = r.getKwh() != null ? r.getKwh().doubleValue() : 0.0;
+            int onSec = r.getOnSeconds() != null ? r.getOnSeconds() : 0;
+            totalKwh += bucketKwh;
+            totalOnHours += onSec / 3600.0;
+            if (bucketKwh > 0.0) {
+                OffsetDateTime start = EnergyPowerCalculator.toVn(r.getBucketStart());
+                segments.add(new ActiveEnergySegment(start, start.plusHours(1), bucketKwh * 1000.0));
+            }
+        }
+        segments.addAll(tailResult.segments);
+        return new DeviceEnergyResult(totalKwh, totalOnHours, tailResult.isOnNow, tailResult.baseWattage, segments);
+    }
+
     /**
      * Thuật toán Tích Phân Số (Riemann Sum Integration) trên Timeline lịch sử trạng thái
      */
     private DeviceEnergyResult calculateDeviceEnergy(Device device, List<DeviceStateHistory> histories,
                                                      OffsetDateTime startTime, OffsetDateTime endTime) {
-        int baseWattage = resolveDeviceWattage(device);
+        int baseWattage = EnergyPowerCalculator.resolveBaseWattage(device);
         boolean isOffline = device.getStatus() == DeviceStatus.OFFLINE
                 || device.getStatus() == DeviceStatus.UNKNOWN;
-        boolean isCurrentlyOn = !isOffline && isStateOn(device.getCurrentState());
-        OffsetDateTime activeUntil = endTime.isAfter(OffsetDateTime.now()) ? OffsetDateTime.now() : endTime;
+        boolean isCurrentlyOn = !isOffline && EnergyPowerCalculator.isStateOn(device, device.getCurrentState());
+        OffsetDateTime vnNow = EnergyPowerCalculator.nowVn();
+        OffsetDateTime activeUntil = endTime.isAfter(vnNow) ? vnNow : endTime;
         if (isOffline) {
-            OffsetDateTime lastSeen = device.getLastSeen();
+            OffsetDateTime lastSeen = EnergyPowerCalculator.toVn(device.getLastSeen());
             if (lastSeen != null && lastSeen.isBefore(activeUntil)) {
                 activeUntil = lastSeen;
             }
         }
 
+        if (!startTime.isBefore(activeUntil)) {
+            return new DeviceEnergyResult(0.0, 0.0, isCurrentlyOn, baseWattage, Collections.emptyList());
+        }
+
         if (histories.isEmpty()) {
             if (isCurrentlyOn) {
-                // Kiểm tra trạng thái gần nhất trước startTime
                 Optional<DeviceStateHistory> lastBefore = historyRepository
                         .findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(device.getId(), startTime);
 
@@ -363,21 +470,24 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 Map<String, Object> stateMap = device.getCurrentState();
 
                 if (lastBefore.isPresent()) {
-                    if (isStateOn(lastBefore.get().getNewState())) {
-                        onSince = startTime; // Đã duy trì BẬT từ trước khoảng thời gian đang xét
+                    if (EnergyPowerCalculator.isStateOn(device, lastBefore.get().getNewState())) {
+                        onSince = startTime;
                         stateMap = lastBefore.get().getNewState();
                     } else {
-                        // Trước đó OFF, nhưng hiện tại ON -> Bắt đầu tính từ thời điểm cập nhật gần nhất
-                        onSince = (device.getUpdatedAt() != null && device.getUpdatedAt().isAfter(startTime))
-                                ? device.getUpdatedAt() : startTime;
+                        OffsetDateTime updatedVn = EnergyPowerCalculator.toVn(device.getUpdatedAt());
+                        onSince = (updatedVn != null && updatedVn.isAfter(startTime))
+                                ? updatedVn : startTime;
                     }
-                } else if (device.getCreatedAt() != null && device.getCreatedAt().isAfter(startTime)) {
-                    onSince = device.getCreatedAt();
+                } else {
+                    OffsetDateTime createdVn = EnergyPowerCalculator.toVn(device.getCreatedAt());
+                    if (createdVn != null && createdVn.isAfter(startTime)) {
+                        onSince = createdVn;
+                    }
                 }
 
                 if (onSince.isBefore(activeUntil)) {
                     double hours = Math.max(0.0, Duration.between(onSince, activeUntil).toSeconds() / 3600.0);
-                    double effectiveWattage = resolveEffectiveWattage(device, baseWattage, stateMap);
+                    double effectiveWattage = EnergyPowerCalculator.resolveEffectiveWattage(device, baseWattage, stateMap);
                     double kwh = (effectiveWattage * hours) / 1000.0;
                     List<ActiveEnergySegment> segs = List.of(new ActiveEnergySegment(onSince, activeUntil, effectiveWattage));
                     return new DeviceEnergyResult(kwh, hours, true, baseWattage, segs);
@@ -396,13 +506,13 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
         if (histories.get(0).getPreviousState() != null && !histories.get(0).getPreviousState().isEmpty()) {
             currentActiveState = histories.get(0).getPreviousState();
-            currentStateIsOn = isStateOn(currentActiveState);
+            currentStateIsOn = EnergyPowerCalculator.isStateOn(device, currentActiveState);
         } else {
             Optional<DeviceStateHistory> lastBefore = historyRepository
                     .findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(device.getId(), startTime);
             if (lastBefore.isPresent() && lastBefore.get().getNewState() != null) {
                 currentActiveState = lastBefore.get().getNewState();
-                currentStateIsOn = isStateOn(currentActiveState);
+                currentStateIsOn = EnergyPowerCalculator.isStateOn(device, currentActiveState);
             } else {
                 currentActiveState = Collections.emptyMap();
                 currentStateIsOn = false;
@@ -410,16 +520,19 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         }
 
         for (DeviceStateHistory record : histories) {
-            OffsetDateTime recordTime = record.getChangedAt();
+            OffsetDateTime recordTime = EnergyPowerCalculator.toVn(record.getChangedAt());
             if (recordTime.isBefore(cursorTime)) {
                 currentActiveState = record.getNewState();
-                currentStateIsOn = isStateOn(currentActiveState);
+                currentStateIsOn = EnergyPowerCalculator.isStateOn(device, currentActiveState);
                 continue;
+            }
+            if (!recordTime.isBefore(activeUntil)) {
+                break;
             }
 
             if (currentStateIsOn) {
                 double segmentHours = Math.max(0.0, Duration.between(cursorTime, recordTime).toSeconds() / 3600.0);
-                double effectiveWattage = resolveEffectiveWattage(device, baseWattage, currentActiveState);
+                double effectiveWattage = EnergyPowerCalculator.resolveEffectiveWattage(device, baseWattage, currentActiveState);
                 totalHoursOn += segmentHours;
                 totalKwh += (effectiveWattage * segmentHours) / 1000.0;
                 segments.add(new ActiveEnergySegment(cursorTime, recordTime, effectiveWattage));
@@ -427,94 +540,19 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
             cursorTime = recordTime;
             currentActiveState = record.getNewState();
-            currentStateIsOn = isStateOn(currentActiveState);
+            currentStateIsOn = EnergyPowerCalculator.isStateOn(device, currentActiveState);
         }
 
         // Đoạn cuối cùng từ bản ghi cuối đến thời điểm hiện tại (không cộng dồn vô hạn nếu thiết bị đang OFFLINE)
         if (currentStateIsOn && !isOffline && cursorTime.isBefore(activeUntil)) {
             double tailHours = Math.max(0.0, Duration.between(cursorTime, activeUntil).toSeconds() / 3600.0);
-            double effectiveWattage = resolveEffectiveWattage(device, baseWattage, currentActiveState);
+            double effectiveWattage = EnergyPowerCalculator.resolveEffectiveWattage(device, baseWattage, currentActiveState);
             totalHoursOn += tailHours;
             totalKwh += (effectiveWattage * tailHours) / 1000.0;
             segments.add(new ActiveEnergySegment(cursorTime, activeUntil, effectiveWattage));
         }
 
         return new DeviceEnergyResult(totalKwh, totalHoursOn, isCurrentlyOn, baseWattage, segments);
-    }
-
-    private double resolveEffectiveWattage(Device device, int baseWattage, Map<String, Object> state) {
-        if (state == null || state.isEmpty()) return baseWattage;
-
-        String type = device.getDeviceType() == null ? "" : device.getDeviceType().toUpperCase();
-        boolean isDimmer = type.contains("LIGHT") || type.contains("LED");
-
-        // 1. Đèn Dimmer / RGB: tính theo % độ sáng thực tế (brightness: 1-100)
-        if (isDimmer && state.get("brightness") != null) {
-            try {
-                double brightness = Double.parseDouble(state.get("brightness").toString().trim());
-                if (brightness > 0) {
-                    double factor = Math.min(Math.max(brightness, 1.0), 100.0) / 100.0;
-                    return Math.round(baseWattage * factor * 10.0) / 10.0;
-                }
-            } catch (NumberFormatException ignored) {}
-        }
-
-        // 2. Quạt có cấp tốc độ (speed: 1=50%, 2=75%, 3=100%)
-        if (type.contains("FAN") && state.get("speed") != null) {
-            try {
-                int speed = Integer.parseInt(state.get("speed").toString().trim());
-                if (speed == 1) return baseWattage * 0.5;
-                if (speed == 2) return baseWattage * 0.75;
-                if (speed >= 3) return baseWattage * 1.0;
-            } catch (NumberFormatException ignored) {}
-        }
-
-        return baseWattage;
-    }
-
-    private boolean isStateOn(Map<String, Object> state) {
-        if (state == null || state.isEmpty()) return false;
-        Object power = state.get("power");
-        if (power != null) {
-            String pStr = power.toString().trim();
-            if ("ON".equalsIgnoreCase(pStr) || "TRUE".equalsIgnoreCase(pStr) || "1".equals(pStr)) {
-                return true;
-            }
-        }
-        Object st = state.get("state");
-        if (st != null) {
-            String sStr = st.toString().trim();
-            return "OPENING".equalsIgnoreCase(sStr) || "OPEN".equalsIgnoreCase(sStr) || "RUNNING".equalsIgnoreCase(sStr);
-        }
-        return false;
-    }
-
-    private int resolveDeviceWattage(Device device) {
-        if (device == null) return 60;
-
-        // 1. Ưu tiên cấu hình công suất tùy chỉnh trong settings (nếu người dùng đã đặt)
-        if (device.getSettings() != null && device.getSettings().get("wattage") != null) {
-            try {
-                int customW = Integer.parseInt(device.getSettings().get("wattage").toString().trim());
-                if (customW > 0) return customW;
-            } catch (NumberFormatException ignored) {}
-        }
-
-        if (device.getDeviceType() == null) return 60;
-        String type = device.getDeviceType().toUpperCase();
-
-        return switch (type) {
-            case "AIR_CONDITIONER", "AC"        -> 1500;
-            case "LIGHT", "LED", "LED_RGB"      -> 40;
-            case "FAN"                          -> 65;
-            case "GATE", "ROLLING_DOOR"         -> 350;
-            case "CURTAIN"                      -> 60;
-            case "SMART_PLUG", "SOCKET"         -> 500;
-            case "HEATER", "WATER_HEATER"       -> 2500;
-            case "TEMP_HUMID_SENSOR", "SENSOR"  -> 2;
-            case "CAMERA_AI", "CAMERA"          -> 15;
-            default                             -> 60;
-        };
     }
 
     private List<EnergyTimeSeriesPoint> buildTimeSeries(
