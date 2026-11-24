@@ -144,7 +144,30 @@ public enum ErrorCode {
 
     // Anomaly detection & management
     ANOMALY_NOT_FOUND(1700, "Bất thường không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
-    ANOMALY_INVALID_STATUS(1701, "Trạng thái bất thường không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST);
+    ANOMALY_INVALID_STATUS(1701, "Trạng thái bất thường không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST),
+    SECURITY_EVENT_NOT_FOUND(1710, "Sự kiện an ninh không tồn tại hoặc không thuộc ngôi nhà", HttpStatus.NOT_FOUND),
+    SECURITY_EVENT_INVALID_STATUS(1711, "Trạng thái sự kiện an ninh không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST),
+
+    // Maintenance tickets
+    MAINTENANCE_TICKET_NOT_FOUND(1730, "Ticket bảo trì không tồn tại", HttpStatus.NOT_FOUND),
+    MAINTENANCE_INVALID_REQUEST(1731, "Dữ liệu yêu cầu bảo trì không hợp lệ", HttpStatus.BAD_REQUEST),
+    MAINTENANCE_INVALID_SLOT(1732, "Khung giờ không hợp lệ: phải trong 07:00-21:00, cách hiện tại ít nhất 2 giờ, trong 14 ngày tới, dài 30 phút-8 giờ và không chồng nhau", HttpStatus.BAD_REQUEST),
+    MAINTENANCE_INVALID_STATUS(1733, "Trạng thái ticket không cho phép thao tác này", HttpStatus.CONFLICT),
+    MAINTENANCE_DEVICE_HAS_ACTIVE_TICKET(1734, "Thiết bị đang có một ticket bảo trì chưa hoàn tất", HttpStatus.CONFLICT),
+    MAINTENANCE_SCHEDULE_CONFLICT(1735, "Khung giờ này trùng với lịch kiểm tra khác", HttpStatus.CONFLICT),
+    MAINTENANCE_ATTACHMENT_REQUIRED(1736, "Vui lòng chọn tệp ảnh để tải lên", HttpStatus.BAD_REQUEST),
+    MAINTENANCE_ATTACHMENT_TYPE_INVALID(1737, "Chỉ hỗ trợ ảnh định dạng JPEG, PNG hoặc WebP hợp lệ", HttpStatus.BAD_REQUEST),
+    MAINTENANCE_ATTACHMENT_TOO_LARGE(1738, "Mỗi ảnh đính kèm không được vượt quá 5 MB", HttpStatus.PAYLOAD_TOO_LARGE),
+    MAINTENANCE_ATTACHMENT_LIMIT_EXCEEDED(1739, "Mỗi ticket chỉ được đính kèm tối đa 5 ảnh", HttpStatus.BAD_REQUEST),
+    MAINTENANCE_ATTACHMENT_NOT_FOUND(1740, "Ảnh đính kèm không tồn tại hoặc không thuộc quyền sở hữu của bạn", HttpStatus.BAD_REQUEST),
+    MAINTENANCE_ATTACHMENT_UPLOAD_FAILED(1741, "Không thể tải ảnh đính kèm lên hệ thống, vui lòng thử lại sau", HttpStatus.BAD_GATEWAY),
+    MAINTENANCE_CHAT_NOT_FOUND(1742, "Phiên hội thoại trợ lý không tồn tại", HttpStatus.NOT_FOUND),
+    MAINTENANCE_CHAT_INVALID_STATE(1743, "Trạng thái phiên hội thoại không cho phép thao tác này", HttpStatus.CONFLICT),
+    MAINTENANCE_RATE_LIMITED(1744, "Bạn đã vượt quá giới hạn lượt sử dụng trong ngày, vui lòng thử lại sau", HttpStatus.TOO_MANY_REQUESTS),
+    AI_SERVICE_DISABLED(1745, "Tính năng AI hiện đang tắt trên hệ thống", HttpStatus.SERVICE_UNAVAILABLE),
+    AI_SERVICE_UNAVAILABLE(1746, "Dịch vụ AI tạm thời không phản hồi, vui lòng thử lại sau", HttpStatus.BAD_GATEWAY),
+    AI_SERVICE_RATE_LIMITED(1747, "Dịch vụ AI đang quá tải, vui lòng thử lại sau ít phút", HttpStatus.TOO_MANY_REQUESTS),
+    AI_SERVICE_SAFETY_BLOCKED(1748, "Nội dung bị bộ lọc an toàn của dịch vụ AI từ chối", HttpStatus.UNPROCESSABLE_ENTITY);
 
 
     private final int code;

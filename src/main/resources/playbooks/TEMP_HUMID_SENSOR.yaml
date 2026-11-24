@@ -1,0 +1,65 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho nhóm Cảm biến môi trường (TEMP_HUMID, MOTION, LUX)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: TEMP_HUMID_SENSOR
+label: Cảm biến môi trường / chuyển động / ánh sáng
+deviceTypes:
+  - TEMP_HUMID_SENSOR
+  - MOTION_SENSOR
+  - LUX_SENSOR
+imageHints:
+  - Đèn báo nguồn/tín hiệu trên thân cảm biến hoặc Edge Node
+  - Đầu dây nguồn USB/adapter cắm ngoài vỏ
+  - Bề mặt khe thoáng và vị trí lắp đặt cảm biến
+escalateWhen:
+  offlineHoursAfterSteps: 2
+  note: Cảm biến vẫn không gửi dữ liệu mới hoặc chỉ số bất thường sau khi đã kiểm tra nguồn và kết nối.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, nước vào hoặc cảnh báo khói/gas thật
+  advice: "DỪNG KIỂM TRA THIẾT BỊ NGAY! Nếu có khói, mùi gas hoặc mùi khét thực sự trong nhà, hãy mở cửa thông gió, di chuyển ra khu vực an toàn và gọi hỗ trợ khẩn cấp. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - nước vào
+    - rò gas
+    - phồng
+symptoms:
+  - id: SENSOR_OFFLINE
+    label: Mất kết nối / Không cập nhật số liệu mới
+    ticketDescription: Cảm biến ngừng gửi dữ liệu mới về hệ thống (trạng thái mất kết nối).
+    hardwareOnly: false
+    steps:
+      - id: CHECK_POWER_CABLE
+        title: Kiểm tra dây nguồn và đèn báo của cảm biến / Edge Node
+        instruction: Kiểm tra dây cấp nguồn USB/adapter ngoài vỏ của cụm cảm biến xem có bị lỏng không và đèn báo hoạt động có sáng không.
+      - id: RESTART_NODE
+        title: Khởi động lại nguồn cụm cảm biến sau 30 giây
+        instruction: Rút nguồn adapter của cụm cảm biến (hoặc Edge Node phụ trách), chờ 30 giây rồi cắm lại. Chờ khoảng 1-2 phút để dữ liệu đồng bộ lại.
+      - id: CHECK_GATEWAY_WIFI
+        title: Kiểm tra Wi-Fi khu vực lắp đặt cảm biến
+        instruction: Đảm bảo bộ phát Wi-Fi trong nhà đang hoạt động ổn định và không có vật cản kim loại lớn mới đặt che khuất cụm cảm biến.
+  - id: SENSOR_WRONG_READING
+    label: Số liệu đo sai lệch bất thường hoặc báo giả liên tục
+    ticketDescription: Cảm biến trả về giá trị đo sai lệch rõ rệt hoặc phát cảnh báo giả lặp lại.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_ENVIRONMENT
+        title: Kiểm tra vị trí lắp đặt xung quanh cảm biến
+        instruction: Kiểm tra xem cảm biến có bị đặt quá gần nguồn nhiệt (bếp, nắng chiếu trực tiếp), luồng gió điều hòa hoặc hơi ẩm trực tiếp không.
+      - id: CLEAN_SURFACE
+        title: Lau sạch bụi bề mặt ngoài vỏ cảm biến
+        instruction: Dùng khăn khô, mềm lau nhẹ phần khe thoáng/mắt cảm biến bên ngoài (không xịt nước hay hóa chất, không tháo vỏ).
+      - id: REBOOT_SENSOR
+        title: Khởi động lại cảm biến sau 30 giây
+        instruction: Rút nguồn ngoài vỏ của cảm biến trong 30 giây rồi cắm lại, theo dõi số liệu trên ứng dụng sau 2 phút.
+  - id: SENSOR_DAMAGED
+    label: Cảm biến rơi vỡ, vào nước hoặc đứt dây bên ngoài
+    ticketDescription: Cảm biến bị hư hỏng vật lý bên ngoài, cần kỹ thuật viên kiểm tra thay thế.
+    hardwareOnly: true
+    steps: []

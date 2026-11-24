@@ -59,6 +59,8 @@ public class MqttMessageReceiver {
     private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.SecurityEventService securityEventService;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -306,6 +308,9 @@ public class MqttMessageReceiver {
             }
             if (payload.getMetricType() != null && payload.getValue() != null) {
                 applyMetricAliases(data, payload.getMetricType(), payload.getValue());
+                Map<String, Object> incoming = new HashMap<>();
+                applyMetricAliases(incoming, payload.getMetricType(), payload.getValue());
+                recordMotionSecurityEvent(device, incoming);
             }
             triggerAutomation(device, data, "SENSOR");
         });
@@ -330,6 +335,10 @@ public class MqttMessageReceiver {
             if (!map.containsKey("temperature")) {
                 extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "temp", "°C");
             }
+            extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "humidity", "%");
+            if (!map.containsKey("humidity")) {
+                extractSingleSafetyMetric(topic, nodeCode, deviceIdStr, map, "humid", "%");
+            }
         } catch (Exception e) {
             log.warn("Failed to extract safety metrics from flat map payload: {}", e.getMessage());
         }
@@ -340,7 +349,9 @@ public class MqttMessageReceiver {
         Object valObj = map.get(metricKey);
         try {
             java.math.BigDecimal val = new java.math.BigDecimal(valObj.toString().trim());
-            String normalizedMetric = "temp".equalsIgnoreCase(metricKey) ? "temperature" : metricKey;
+            String normalizedMetric = "temp".equalsIgnoreCase(metricKey) ? "temperature"
+                    : "humid".equalsIgnoreCase(metricKey) ? "humidity"
+                    : metricKey;
             TelemetryPayload singlePayload = new TelemetryPayload(nodeCode, deviceIdStr, normalizedMetric, val, unit);
             telemetryService.processTelemetry(topic, singlePayload);
         } catch (Exception ex) {
@@ -378,9 +389,12 @@ public class MqttMessageReceiver {
                 }
                 data.putAll(finalData);
 
+                Map<String, Object> incoming = new HashMap<>(finalData);
                 if (finalData.containsKey("metricType") && finalData.get("metricType") != null && finalData.get("value") != null) {
                     applyMetricAliases(data, finalData.get("metricType").toString(), finalData.get("value"));
+                    applyMetricAliases(incoming, finalData.get("metricType").toString(), finalData.get("value"));
                 }
+                recordMotionSecurityEvent(device, incoming);
 
                 String deviceType = device.getDeviceType() != null ? device.getDeviceType().toUpperCase() : "";
                 boolean isSensor = deviceType.endsWith("SENSOR") || deviceType.contains("SENSOR") || "CAMERA_AI".equals(deviceType);
@@ -416,6 +430,31 @@ public class MqttMessageReceiver {
         // and the MQTT thread stays free to deliver the ACKs the engine waits for.
         if (automationDispatcher != null) automationDispatcher.dispatch(task);
         else task.run();
+    }
+
+    /** {@code incoming} must hold only the new message's values: saved device state can be stale. */
+    private void recordMotionSecurityEvent(com.hesta.backend.entity.Device device, Map<String, Object> incoming) {
+        if (securityEventService == null || device.getDeviceType() == null
+                || !device.getDeviceType().toUpperCase().contains("MOTION")
+                || !(isMotionDetected(incoming.get("motion")) || isMotionDetected(incoming.get("MOTION_SENSOR"))
+                        || isMotionDetected(incoming.get("motionDetected")))) {
+            return;
+        }
+        try {
+            securityEventService.recordMotion(device);
+        } catch (Exception ex) {
+            // Security history is best-effort; it must never block telemetry or automation.
+            log.warn("Failed to record motion security event for device {}: {}", device.getId(), ex.getMessage());
+        }
+    }
+
+    static boolean isMotionDetected(Object value) {
+        if (value instanceof Boolean flag) return flag;
+        if (value instanceof Number number) return number.doubleValue() > 0;
+        if (value == null) return false;
+        String text = value.toString().trim();
+        return text.equalsIgnoreCase("true") || text.equals("1") || text.equalsIgnoreCase("DETECTED")
+                || text.equalsIgnoreCase("ON");
     }
 
     private void applyMetricAliases(Map<String, Object> data, String metricType, Object value) {

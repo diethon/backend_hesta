@@ -22,6 +22,7 @@ encapsulated result structure providing:
 
 import os
 import sys
+import math
 import platform
 import time
 from typing import List, Tuple, Dict, Any, Optional, Union
@@ -290,6 +291,98 @@ def decode_yolov8_pose_output(
     return np.array(final_boxes, dtype=np.float32), np.array(final_kpts, dtype=np.float32)
 
 
+def decode_yolov8_pose_9head_outputs(
+    outputs: List[np.ndarray],
+    conf_thresh: float = 0.35,
+    iou_thresh: float = 0.45,
+    orig_shape: Tuple[int, int] = (480, 640),
+    ratio: float = 1.0,
+    pads: Tuple[float, float] = (0.0, 0.0)
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Decodes the 9 cropped YOLOv8-Pose head outputs (strides 8, 16, 32: box DFL,
+    cls logit, keypoint raw maps) directly in NumPy to avoid RK3588 NPU 13-bit
+    width register overflow on 8400-anchor post-processing tensors.
+    """
+    dfl_bins = np.arange(16, dtype=np.float32)
+    clamped_conf = min(max(float(conf_thresh), 1e-6), 1.0 - 1e-6)
+    logit_thresh = math.log(clamped_conf / (1.0 - clamped_conf))
+
+    all_boxes_xyxy: List[np.ndarray] = []
+    all_scores: List[np.ndarray] = []
+    all_kpts: List[np.ndarray] = []
+
+    for s_idx, stride in enumerate((8, 16, 32)):
+        box_map = outputs[s_idx * 3 + 0][0]     # (64, H, W)
+        cls_map = outputs[s_idx * 3 + 1][0, 0]  # (H, W)
+        kpt_map = outputs[s_idx * 3 + 2][0]     # (51, H, W)
+
+        gy, gx = np.where(cls_map >= logit_thresh)
+        if len(gy) == 0:
+            continue
+
+        scores = 1.0 / (1.0 + np.exp(-np.clip(cls_map[gy, gx].astype(np.float32), -20.0, 20.0)))
+
+        dfl = box_map[:, gy, gx].T.reshape(-1, 4, 16).astype(np.float32)
+        dfl = dfl - np.max(dfl, axis=2, keepdims=True)
+        exp_dfl = np.exp(dfl)
+        ltrb = (exp_dfl / np.sum(exp_dfl, axis=2, keepdims=True)) @ dfl_bins
+
+        gx_f = gx.astype(np.float32)
+        gy_f = gy.astype(np.float32)
+        x1 = (gx_f + 0.5 - ltrb[:, 0]) * stride
+        y1 = (gy_f + 0.5 - ltrb[:, 1]) * stride
+        x2 = (gx_f + 0.5 + ltrb[:, 2]) * stride
+        y2 = (gy_f + 0.5 + ltrb[:, 3]) * stride
+
+        kp = kpt_map[:, gy, gx].T.reshape(-1, 17, 3).astype(np.float32)
+        kx = (kp[:, :, 0] * 2.0 + gx_f[:, None]) * stride
+        ky = (kp[:, :, 1] * 2.0 + gy_f[:, None]) * stride
+        kc = 1.0 / (1.0 + np.exp(-np.clip(kp[:, :, 2], -20.0, 20.0)))
+
+        all_boxes_xyxy.append(np.column_stack([x1, y1, x2, y2]))
+        all_scores.append(scores.astype(np.float32))
+        all_kpts.append(np.stack([kx, ky, kc], axis=2).astype(np.float32))
+
+    if not all_scores:
+        return np.zeros((0, 5), dtype=np.float32), np.zeros((0, 17, 3), dtype=np.float32)
+
+    boxes_cat = np.concatenate(all_boxes_xyxy, axis=0)
+    scores_cat = np.concatenate(all_scores, axis=0)
+    kpts_cat = np.concatenate(all_kpts, axis=0)
+
+    boxes_xywh = np.column_stack([
+        boxes_cat[:, 0],
+        boxes_cat[:, 1],
+        boxes_cat[:, 2] - boxes_cat[:, 0],
+        boxes_cat[:, 3] - boxes_cat[:, 1],
+    ])
+    indices = cv2.dnn.NMSBoxes(
+        bboxes=boxes_xywh.tolist(),
+        scores=scores_cat.tolist(),
+        score_threshold=float(conf_thresh),
+        nms_threshold=float(iou_thresh),
+    )
+    if len(indices) == 0:
+        return np.zeros((0, 5), dtype=np.float32), np.zeros((0, 17, 3), dtype=np.float32)
+
+    indices = np.array(indices).flatten()
+    dw, dh = pads
+    orig_h, orig_w = orig_shape
+
+    kept_boxes = boxes_cat[indices].copy()
+    kept_boxes[:, [0, 2]] = np.clip((kept_boxes[:, [0, 2]] - dw) / ratio, 0.0, orig_w)
+    kept_boxes[:, [1, 3]] = np.clip((kept_boxes[:, [1, 3]] - dh) / ratio, 0.0, orig_h)
+    final_boxes = np.column_stack([kept_boxes, scores_cat[indices]]).astype(np.float32)
+
+    kept_kpts = kpts_cat[indices].copy()
+    kept_kpts[:, :, 0] = (kept_kpts[:, :, 0] - dw) / ratio
+    kept_kpts[:, :, 1] = (kept_kpts[:, :, 1] - dh) / ratio
+    final_kpts = kept_kpts.astype(np.float32)
+
+    return final_boxes, final_kpts
+
+
 # ==============================================================================
 # UNIFIED POSE DETECTOR WRAPPER
 # ==============================================================================
@@ -394,17 +487,27 @@ class PoseDetector:
             img_input = np.expand_dims(img_rgb, axis=0) # (1, 640, 640, 3)
 
             # 3. NPU Inference
-            outputs = self.rknn.inference(inputs=[img_input])
+            outputs = self.rknn.inference(inputs=[img_input], data_format="nhwc")
 
             # 4. Post-processing & Letterbox Rescaling
-            raw_boxes, raw_kpts = decode_yolov8_pose_output(
-                output=outputs[0],
-                conf_thresh=conf_thresh,
-                iou_thresh=0.45,
-                orig_shape=orig_shape,
-                ratio=ratio,
-                pads=(dw, dh)
-            )
+            if len(outputs) == 9:
+                raw_boxes, raw_kpts = decode_yolov8_pose_9head_outputs(
+                    outputs=outputs,
+                    conf_thresh=conf_thresh,
+                    iou_thresh=0.45,
+                    orig_shape=orig_shape,
+                    ratio=ratio,
+                    pads=(dw, dh)
+                )
+            else:
+                raw_boxes, raw_kpts = decode_yolov8_pose_output(
+                    output=outputs[0],
+                    conf_thresh=conf_thresh,
+                    iou_thresh=0.45,
+                    orig_shape=orig_shape,
+                    ratio=ratio,
+                    pads=(dw, dh)
+                )
             return [StandardPoseResult(raw_boxes, raw_kpts, orig_shape)]
 
         else:

@@ -1,11 +1,16 @@
 package com.hesta.backend.service.impl;
 
 import com.hesta.backend.dto.request.ChangePasswordRequest;
+import com.hesta.backend.dto.request.UpdateNotificationPreferenceRequest;
 import com.hesta.backend.dto.request.UpdateProfileRequest;
+import com.hesta.backend.dto.response.NotificationPreferenceResponse;
 import com.hesta.backend.dto.response.UserResponse;
+import com.hesta.backend.entity.NotificationPreference;
 import com.hesta.backend.entity.User;
+import com.hesta.backend.entity.UserPreference;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
+import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.CloudinaryService;
 import com.hesta.backend.service.UserService;
@@ -38,6 +43,35 @@ public class UserServiceImpl implements UserService {
     UserRepository userRepository;
     PasswordEncoder passwordEncoder;
     CloudinaryService cloudinaryService;
+    UserPreferenceRepository userPreferenceRepository;
+
+    @Override
+    @Transactional(readOnly = true)
+    public NotificationPreferenceResponse getNotificationPreferences(UUID userId) {
+        NotificationPreference preference = userPreferenceRepository.findById(userId)
+                .map(UserPreference::getNotificationPreference)
+                .orElseGet(NotificationPreference::defaults);
+        return NotificationPreferenceResponse.from(preference);
+    }
+
+    @Override
+    @Transactional
+    public NotificationPreferenceResponse updateNotificationPreferences(
+            UUID userId, UpdateNotificationPreferenceRequest request) {
+        UserPreference userPreference = userPreferenceRepository.findById(userId)
+                .orElseGet(() -> UserPreference.builder()
+                        .user(userRepository.findById(userId)
+                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND)))
+                        .build());
+        NotificationPreference preference = NotificationPreference.builder()
+                .securityEnabled(request.securityEnabled())
+                .automationEnabled(request.automationEnabled())
+                .systemEnabled(request.systemEnabled())
+                .build();
+        userPreference.setNotificationPreference(preference);
+        userPreferenceRepository.save(userPreference);
+        return NotificationPreferenceResponse.from(preference);
+    }
 
     @Override
     @Transactional

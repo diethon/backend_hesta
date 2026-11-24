@@ -126,6 +126,60 @@ class TelemetryServiceImplTest {
     }
 
     @Test
+    void processTelemetry_WithTwinSnapshotMapper_PublishesSensorReadingUpdatedEvent() {
+        com.hesta.backend.mapper.TwinSnapshotMapper twinSnapshotMapper = mock(com.hesta.backend.mapper.TwinSnapshotMapper.class);
+        TelemetryServiceImpl serviceWithMapper = new TelemetryServiceImpl(
+                deviceRepository,
+                sensorReadingRepository,
+                edgeNodeRepository,
+                realtimeEventPublisher,
+                anomalyDetectionService,
+                applicationEventPublisher,
+                twinSnapshotMapper
+        );
+
+        UUID homeId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+        Home home = Home.builder().id(homeId).name("Test Home").build();
+        Room room = Room.builder().id(roomId).name("Living Room").home(home).build();
+        Device device = Device.builder()
+                .id(deviceId)
+                .name("DHT-01")
+                .deviceType("TEMP_HUMID_SENSOR")
+                .room(room)
+                .status(DeviceStatus.UNKNOWN)
+                .currentState(new HashMap<>())
+                .build();
+
+        when(deviceRepository.findByNodeCodeAndName("ESP32-001", "DHT-01"))
+                .thenReturn(Optional.of(device));
+
+        when(sensorReadingRepository.save(any(SensorReading.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        com.hesta.backend.dto.response.TwinSensorSnapshotResponse mockSnapshot =
+                new com.hesta.backend.dto.response.TwinSensorSnapshotResponse(
+                        deviceId + ":temperature", roomId, deviceId, "temperature",
+                        new BigDecimal("28.5"), "°C", java.time.OffsetDateTime.now(),
+                        com.hesta.backend.enums.TwinHealthStatus.ACTIVE
+                );
+        when(twinSnapshotMapper.sensor(any(SensorReading.class))).thenReturn(mockSnapshot);
+
+        TelemetryPayload payload = TelemetryPayload.builder()
+                .nodeId("ESP32-001")
+                .deviceId("DHT-01")
+                .metricType("temperature")
+                .value(new BigDecimal("28.5"))
+                .unit("°C")
+                .build();
+
+        serviceWithMapper.processTelemetry("hesta/nodes/ESP32-001/devices/DHT-01/telemetry", payload);
+
+        verify(applicationEventPublisher).publishEvent(any(com.hesta.backend.dto.command.SensorReadingUpdatedEvent.class));
+    }
+
+    @Test
     void onSensorReadingCommitted_DispatchesToAnomalyDetectionService() {
         UUID deviceId = UUID.randomUUID();
         Device device = Device.builder().id(deviceId).name("Gas Sensor").build();

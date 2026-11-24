@@ -10,6 +10,7 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Notification;
 import com.hesta.backend.entity.User;
+import com.hesta.backend.entity.UserPreference;
 import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.enums.HomeRole;
 import com.hesta.backend.enums.MemberStatus;
@@ -20,6 +21,7 @@ import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.repository.HomeRepository;
 import com.hesta.backend.repository.NotificationRepository;
+import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.NotificationService;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +47,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final HomeRepository homeRepository;
     private final HomeMemberRepository homeMemberRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final UserPreferenceRepository userPreferenceRepository;
 
     @Override
     @Transactional
@@ -118,8 +121,12 @@ public class NotificationServiceImpl implements NotificationService {
         return new NotificationReadAllResponse(notificationRepository.markAllAsRead(currentUserId, homeId));
     }
 
+    /** Returns {@code null} when the recipient muted this notification category. */
     private NotificationResponse createNotification(NotificationEvent event) {
         validate(event);
+        if (isMutedByRecipient(event)) {
+            return null;
+        }
 
         User recipient = userRepository.findById(event.userId())
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
@@ -145,6 +152,21 @@ public class NotificationServiceImpl implements NotificationService {
                 new NotificationCreatedEvent(NotificationRealtimePayload.from(response))
         );
         return response;
+    }
+
+    private boolean isMutedByRecipient(NotificationEvent event) {
+        // HIGH priority (intrusion, gas, smoke) must always reach the user.
+        if (event.priority() == NotificationPriority.HIGH) {
+            return false;
+        }
+        return userPreferenceRepository.findById(event.userId())
+                .map(UserPreference::getNotificationPreference)
+                .map(preference -> switch (event.type()) {
+                    case SECURITY, ANOMALY -> !preference.isSecurityEnabled();
+                    case AUTOMATION -> !preference.isAutomationEnabled();
+                    case SYSTEM, DEVICE -> !preference.isSystemEnabled();
+                })
+                .orElse(false);
     }
 
     private Notification findOwnedNotification(UUID currentUserId, UUID notificationId) {

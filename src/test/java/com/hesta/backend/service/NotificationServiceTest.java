@@ -6,7 +6,9 @@ import com.hesta.backend.dto.response.NotificationResponse;
 import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Notification;
+import com.hesta.backend.entity.NotificationPreference;
 import com.hesta.backend.entity.User;
+import com.hesta.backend.entity.UserPreference;
 import com.hesta.backend.enums.MemberStatus;
 import com.hesta.backend.enums.NotificationPriority;
 import com.hesta.backend.enums.NotificationType;
@@ -15,6 +17,7 @@ import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.HomeMemberRepository;
 import com.hesta.backend.repository.HomeRepository;
 import com.hesta.backend.repository.NotificationRepository;
+import com.hesta.backend.repository.UserPreferenceRepository;
 import com.hesta.backend.repository.UserRepository;
 import com.hesta.backend.service.impl.NotificationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +57,8 @@ class NotificationServiceTest {
     private HomeMemberRepository homeMemberRepository;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
+    @Mock
+    private UserPreferenceRepository userPreferenceRepository;
 
     @InjectMocks
     private NotificationServiceImpl notificationService;
@@ -102,6 +107,42 @@ class NotificationServiceTest {
         assertThat(result.type()).isEqualTo(NotificationType.SECURITY);
         verify(notificationRepository).saveAndFlush(any(Notification.class));
         verify(applicationEventPublisher).publishEvent(any(NotificationCreatedEvent.class));
+    }
+
+    @Test
+    void create_whenCategoryMutedAndPriorityNotHigh_skipsPersistence() {
+        when(userPreferenceRepository.findById(userId)).thenReturn(Optional.of(preferenceWith(false, true, true)));
+        NotificationEvent event = new NotificationEvent(
+                userId, homeId, NotificationType.ANOMALY, "Sensor offline", "Lost signal", NotificationPriority.MEDIUM
+        );
+
+        NotificationResponse result = notificationService.create(event);
+
+        assertThat(result).isNull();
+        verify(notificationRepository, never()).saveAndFlush(any());
+        verify(applicationEventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void create_whenCategoryMutedButPriorityHigh_stillDelivers() {
+        arrangeCreation();
+
+        NotificationResponse result = notificationService.create(validEvent());
+
+        assertThat(result).isNotNull();
+        verify(userPreferenceRepository, never()).findById(any());
+        verify(notificationRepository).saveAndFlush(any(Notification.class));
+    }
+
+    @Test
+    void create_whenOtherCategoryMuted_deliversAutomationNotification() {
+        when(userPreferenceRepository.findById(userId)).thenReturn(Optional.of(preferenceWith(false, true, false)));
+        arrangeCreation();
+        NotificationEvent event = new NotificationEvent(
+                userId, homeId, NotificationType.AUTOMATION, "Rule ran", "Lights on", NotificationPriority.LOW
+        );
+
+        assertThat(notificationService.create(event)).isNotNull();
     }
 
     @Test
@@ -241,6 +282,17 @@ class NotificationServiceTest {
                     .createdAt(OffsetDateTime.now())
                     .build();
         });
+    }
+
+    private UserPreference preferenceWith(boolean security, boolean automation, boolean system) {
+        return UserPreference.builder()
+                .userId(userId)
+                .notificationPreference(NotificationPreference.builder()
+                        .securityEnabled(security)
+                        .automationEnabled(automation)
+                        .systemEnabled(system)
+                        .build())
+                .build();
     }
 
     private HomeMember activeMembership() {
