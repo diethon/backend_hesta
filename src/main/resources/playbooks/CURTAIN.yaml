@@ -1,0 +1,65 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Rèm cửa thông minh (CURTAIN)
+# QUY TẮC AN TOÀN: Thiết bị có động cơ & đấu nối cố định.
+# Tuyệt đối KHÔNG hướng dẫn rút phích, ngắt cầu dao, tháo vỏ motor hay trèo cao tháo thanh ray.
+# ==============================================================================
+id: CURTAIN
+label: Rèm cửa thông minh
+deviceTypes:
+  - CURTAIN
+imageHints:
+  - Đèn báo trạng thái trên thân motor rèm hoặc công tắc tường
+  - Phần vải rèm và thanh ray nhìn từ mặt đất (kiểm tra bị vướng/lệch)
+  - Công tắc rèm gắn tường bên ngoài
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Rèm cửa vẫn mất kết nối hoặc không đóng/mở đúng hành trình sau khi kiểm tra an toàn bên ngoài.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, kẹt rèm nặng, tiếng kêu to bất thường hoặc nước vào gần điện
+  advice: "DỪNG ĐIỀU KHIỂN RÈM NGAY! Không kéo giật mạnh vải rèm khi motor đang kẹt và không chạm vào motor nếu thấy nóng bất thường, có mùi khét, tiếng kêu to bất thường hoặc ẩm ướt gần nguồn điện. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - rò nước
+    - kẹt
+    - vật cản
+    - tiếng kêu to
+    - kêu to bất thường
+symptoms:
+  - id: CURTAIN_OFFLINE
+    label: Mất kết nối / Không điều khiển được trên ứng dụng
+    ticketDescription: Rèm cửa thông minh mất kết nối mạng, không nhận lệnh đóng/mở từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_CLEAR_PATH
+        title: Đảm bảo không có người hoặc vật cản vùng chuyển động của rèm
+        instruction: Kiểm tra dọc theo hành trình rèm đảm bảo không có đồ đạc, móc treo hay vật cản vướng vào vải rèm trước khi thử lệnh.
+      - id: CHECK_WALL_SWITCH
+        title: Thử bấm công tắc rèm gắn tường hoặc remote gốc
+        instruction: Nhấn thử nút mở/đóng trên công tắc tường hoặc remote cầm tay của rèm để kiểm tra motor rèm còn phản hồi cục bộ hay không.
+      - id: CHECK_WIFI_GATEWAY_LED
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Quan sát đèn báo Wi-Fi/Internet trên router (sáng ổn định, không nháy đỏ) và đèn nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node). Chờ 1 phút rồi kiểm tra lại trên ứng dụng.
+  - id: CURTAIN_STUCK_OR_WRONG_LIMIT
+    label: Rèm chạy nửa chừng rồi dừng hoặc sai vị trí đóng/mở
+    ticketDescription: Rèm cửa chạy không hết hành trình hoặc hiển thị sai phần trăm mở/đóng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_OBSTRUCTION
+        title: Đảm bảo không có vật cản vướng vào vải rèm
+        instruction: Quan sát từ mặt đất xem vải rèm có bị vướng vào tay nắm cửa sổ, chậu cây hoặc bàn ghế gần đó không (không kéo giật mạnh nếu rèm đang kẹt trên ray).
+      - id: RETRY_APP_COMMAND
+        title: Gửi lệnh Dừng rồi thử Mở/Đóng lại một lần trên ứng dụng
+        instruction: Bấm nút DỪNG trên ứng dụng, chờ 10 giây rồi bấm lại nút MỞ hoặc ĐÓNG. Nếu nghe tiếng kêu to bất thường hoặc rèm không chạy, hãy dừng lại và báo kỹ thuật viên.
+  - id: CURTAIN_HARDWARE_FAULT
+    label: Kẹt ray rèm, motor kêu to bất thường hoặc hỏng phần cứng
+    ticketDescription: Rèm cửa bị kẹt cơ khí, lệch ray hoặc motor phát tiếng kêu bất thường, cần kỹ thuật viên kiểm tra.
+    hardwareOnly: true
+    steps: []

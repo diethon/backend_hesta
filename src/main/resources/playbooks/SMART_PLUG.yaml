@@ -1,0 +1,64 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Ổ cắm thông minh (SMART_PLUG, SOCKET)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: SMART_PLUG
+label: Ổ cắm thông minh
+deviceTypes:
+  - SMART_PLUG
+  - SOCKET
+imageHints:
+  - Đèn LED báo trạng thái trên thân ổ cắm
+  - Mặt trước lỗ cắm và đầu phích cắm (kiểm tra dấu hiệu biến dạng bên ngoài)
+  - Nhãn model/serial ở mặt sau thân ổ cắm
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Ổ cắm vẫn mất kết nối hoặc không cấp điện sau khi đã kiểm tra an toàn bên ngoài.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, nước vào hoặc rò điện
+  advice: "DỪNG THAO TÁC NGAY LẬP TỨC! Không chạm vào ổ cắm nếu thấy nóng bất thường, có mùi khét, tia lửa hoặc ẩm ướt. Hãy ngắt aptomat nhánh nếu an toàn. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - phồng
+symptoms:
+  - id: PLUG_OFFLINE
+    label: Mất kết nối / Không bật tắt được từ ứng dụng
+    ticketDescription: Ổ cắm thông minh mất kết nối mạng, không điều khiển được từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_INDICATOR
+        title: Quan sát đèn báo trạng thái trên thân ổ cắm
+        instruction: Kiểm tra đèn LED nhỏ trên thân ổ cắm xem có sáng hoặc nhấp nháy không. Đảm bảo ổ cắm đang được cắm chắc chắn vào ổ điện tường.
+      - id: UNPLUG_REPLUG
+        title: Rút thiết bị tải và cắm lại ổ cắm sau 30 giây
+        instruction: Tắt thiết bị đang cắm vào ổ cắm thông minh, rút ổ cắm thông minh khỏi ổ tường, chờ 30 giây rồi cắm lại chắc chắn.
+      - id: CHECK_WIFI
+        title: Kiểm tra kết nối Wi-Fi và nút bấm vật lý
+        instruction: Thử nhấn nhẹ nút nguồn vật lý trên thân ổ cắm xem có tiếng "tách" nhỏ và đèn báo đổi trạng thái không, đồng thời kiểm tra Wi-Fi nhà vẫn ổn định.
+  - id: PLUG_NO_OUTPUT
+    label: Ứng dụng báo BẬT nhưng thiết bị cắm vào không có điện
+    ticketDescription: Ổ cắm thông minh hiển thị trạng thái BẬT nhưng không cấp điện ra thiết bị tải.
+    hardwareOnly: false
+    steps:
+      - id: TEST_LOAD
+        title: Kiểm tra thiết bị đang cắm vào ổ
+        instruction: Đảm bảo phích cắm thiết bị tải cắm khít vào ổ cắm thông minh và công tắc trên thiết bị tải đang bật.
+      - id: PRESS_PHYSICAL_BUTTON
+        title: Thử bật/tắt bằng nút bấm trên thân ổ cắm
+        instruction: Nhấn nút vật lý trên thân ổ cắm để tắt rồi bật lại, sau đó kiểm tra xem đèn báo nguồn có sáng không.
+      - id: POWER_CYCLE_PLUG
+        title: Rút ổ cắm chờ 30 giây rồi cắm lại
+        instruction: Rút ổ cắm thông minh khỏi ổ tường 30 giây rồi cắm lại (đảm bảo tay khô ráo và ổ cắm không nóng).
+  - id: PLUG_PHYSICAL_DAMAGE
+    label: Ổ cắm lỏng phích, nứt vỡ vỏ hoặc kẹt nút bấm
+    ticketDescription: Ổ cắm thông minh bị nứt vỏ, lỏng chấu cắm hoặc kẹt nút vật lý.
+    hardwareOnly: true
+    steps: []

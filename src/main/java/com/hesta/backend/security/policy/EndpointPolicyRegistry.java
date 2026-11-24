@@ -26,6 +26,7 @@ public final class EndpointPolicyRegistry {
         CLASS_POLICIES.put("AdminDiagnosticsController", AccessPolicyType.PLATFORM_ADMIN);
         CLASS_POLICIES.put("AdminOtaController", AccessPolicyType.PLATFORM_ADMIN);
         CLASS_POLICIES.put("AdminUserController", AccessPolicyType.PLATFORM_ADMIN);
+        CLASS_POLICIES.put("AdminMaintenanceTicketController", AccessPolicyType.PLATFORM_ADMIN);
 
         // Internal service controller
         CLASS_POLICIES.put("InternalDeviceController", AccessPolicyType.INTERNAL_SERVICE);

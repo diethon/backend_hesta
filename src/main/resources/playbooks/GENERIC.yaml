@@ -1,0 +1,64 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook dự phòng (GENERIC) cho các loại thiết bị khác (TV và loại chưa có playbook riêng)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: GENERIC
+label: Thiết bị thông minh
+deviceTypes:
+  - GENERIC
+  - TV
+imageHints:
+  - Đèn báo trạng thái trên vỏ ngoài thiết bị
+  - Mặt trước/màn hình thiết bị và vị trí bộ phát IR (nếu có)
+  - Tem model/serial mặt ngoài thiết bị (nếu dễ tiếp cận)
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Thiết bị vẫn không hoạt động ổn định sau khi thực hiện các bước kiểm tra an toàn ngoài vỏ.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, kẹt/vật cản, tiếng kêu to bất thường hoặc nước vào/rò điện
+  advice: "DỪNG THAO TÁC NGAY LẬP TỨC! Không chạm vào thiết bị nếu phát hiện mùi khét, tia lửa, nóng bất thường, tiếng kêu to bất thường hoặc nước vào gần nguồn điện. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - rò nước
+    - phồng
+    - kẹt
+    - tiếng kêu to
+symptoms:
+  - id: GENERIC_OFFLINE
+    label: Mất kết nối / Không điều khiển được trên ứng dụng
+    ticketDescription: Thiết bị mất kết nối mạng và không phản hồi lệnh điều khiển từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_INDICATOR
+        title: Quan sát đèn báo trạng thái trên vỏ ngoài thiết bị
+        instruction: Kiểm tra xem đèn báo nguồn hoặc tín hiệu trên mặt ngoài thiết bị có đang sáng không và các thiết bị khác trong cùng phòng có hoạt động bình thường không.
+      - id: CHECK_LOCAL_CONTROL
+        title: Thử thao tác bằng nút bấm vật lý hoặc remote gốc
+        instruction: Thử bật/tắt thiết bị bằng nút bấm vật lý trên vỏ hoặc remote gốc (nếu có) để phân biệt lỗi kết nối mạng với lỗi của chính thiết bị.
+      - id: CHECK_NETWORK
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Quan sát đèn Wi-Fi/Internet trên router (sáng ổn định, không nháy đỏ) và đèn nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node), sau đó chờ 1 phút rồi thử lại trên ứng dụng.
+  - id: GENERIC_ABNORMAL
+    label: Thiết bị hoạt động chập chờn / phản hồi chậm / sai trạng thái
+    ticketDescription: Thiết bị hoạt động không ổn định, phản hồi chậm hoặc sai trạng thái thực tế.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_OBSTACLE
+        title: Kiểm tra vật cản và tầm nhìn tín hiệu bên ngoài
+        instruction: Đảm bảo không có vật cản che chắn thiết bị hoặc che đường truyền hồng ngoại (IR Remote) và khu vực xung quanh thông thoáng.
+      - id: CHECK_AUTOMATION
+        title: Kiểm tra kịch bản tự động hóa đang chạy
+        instruction: Kiểm tra mục Tự động hóa / Hẹn giờ trên ứng dụng xem có luật nào đang tự động thay đổi trạng thái của thiết bị không.
+  - id: GENERIC_HARDWARE_FAULT
+    label: Hư hỏng vật lý bên ngoài / không thể tự kiểm tra
+    ticketDescription: Thiết bị có dấu hiệu hư hỏng phần cứng, cần kỹ thuật viên đến kiểm tra trực tiếp.
+    hardwareOnly: true
+    steps: []
