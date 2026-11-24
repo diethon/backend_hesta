@@ -25,6 +25,7 @@ import com.hesta.backend.service.ManualOverrideService;
 import com.hesta.backend.service.SceneExecutionService;
 import com.hesta.backend.service.automation.ActionConflictDetector;
 import com.hesta.backend.service.automation.RuleMatcher;
+import com.hesta.backend.service.automation.RuleTiming;
 import com.hesta.backend.service.automation.RuleTriggerGate;
 import com.hesta.backend.service.execution.CommandBatchRunner;
 import com.hesta.backend.service.execution.CommandBatchRunner.PlannedCommand;
@@ -43,6 +44,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * Runs automation rules. For each incoming event:
@@ -74,6 +79,16 @@ public class AutomationEngineImpl implements AutomationEngine {
     // Field-injected so the constructor (and its tests) stay unchanged.
     @Autowired(required = false) private PlatformTransactionManager transactionManager;
 
+    /** Waits between stages, auto-offs and hold timers: virtual threads, so a sleeping wait costs no pool thread. */
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
+    // Package-visible and non-final so tests can run them inline without real waiting.
+    ExecutorService background = Executors.newVirtualThreadPerTaskExecutor();
+    Sleeper sleeper = Thread::sleep;
+    // shortcut: pending holds live in memory; a restart drops them (the next matching report starts a new one).
+    private final Map<UUID, Future<?>> pendingHolds = new ConcurrentHashMap<>();
+
     // process/executeScheduled are deliberately not @Transactional: matching and planning run in one short
     // transaction, the device commands (each waits for an ACK) run outside any, and each result is saved in its own.
     // A transaction held across the ACK waits pins a pooled DB connection per running rule and starves other requests.
@@ -82,7 +97,7 @@ public class AutomationEngineImpl implements AutomationEngine {
         int[] evaluated = new int[1];
         List<RulePlan> plans = inTx(() -> {
             Device source = requireSourceDeviceInHome(homeId, event);
-            if (source != null && !event.isTest()) {
+            if (source != null && !event.isTest() && !event.isCommandEcho()) {
                 try {
                     behaviorEventRecorder.recordSensor(source, event);
                 } catch (Exception ex) {
@@ -100,8 +115,14 @@ public class AutomationEngineImpl implements AutomationEngine {
             List<RulePlan> planned = new ArrayList<>();
             for (AutomationRule rule : rules.stream().sorted(OLDEST_FIRST).toList()) {
                 boolean matched = ruleMatcher.matches(rule, event);
+                // The conditions turned false while a hold was counting: it starts over at the next match.
+                if (!matched && ruleMatcher.isRelevant(rule, event)) cancelHold(rule.getId());
                 // Claimed before running, so a conflict skip also waits for the next edge (no SKIPPED row on every report).
                 if (!triggerGate.tryClaim(rule.getId(), event, matched, emergency)) continue;
+                if (rule.getHoldSeconds() > 0 && !emergency && !event.isTest()) {
+                    startHold(homeId, rule, event);
+                    continue;
+                }
                 if (conflicts.conflictsWithReserved(rule)) {
                     planned.add(RulePlan.done(saveSkippedConflict(rule, event)));
                     continue;
@@ -135,68 +156,237 @@ public class AutomationEngineImpl implements AutomationEngine {
         return run(plan);
     }
 
+    // ---------------------------------------------------------------- "true for X seconds"
+
+    /** Runs the rule once its conditions stayed true for its hold time (no relevant non-matching event meanwhile). */
+    private void startHold(UUID homeId, AutomationRule rule, AutomationEventRequest event) {
+        UUID ruleId = rule.getId();
+        OffsetDateTime version = rule.getUpdatedAt();
+        long millis = rule.getHoldSeconds() * 1000L;
+        @SuppressWarnings("unchecked")
+        Future<?>[] self = new Future<?>[1];
+        Runnable hold = () -> {
+            try {
+                sleeper.sleep(millis);
+            } catch (InterruptedException cancelled) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            synchronized (self) {
+                if (!pendingHolds.remove(ruleId, self[0])) return; // cancelled or replaced
+            }
+            try {
+                RulePlan plan = inTx(() -> {
+                    AutomationRule current = findRule(homeId, ruleId);
+                    // Edited or switched off while counting: the old conditions no longer apply.
+                    if (!current.isEnabled() || !java.util.Objects.equals(current.getUpdatedAt(), version)) return null;
+                    ruleRepository.fetchActionsByIdIn(List.of(ruleId));
+                    return plan(current, event, false);
+                });
+                if (plan != null) run(plan);
+            } catch (RuntimeException failure) {
+                log.warn("Held rule {} failed", ruleId, failure);
+            }
+        };
+        synchronized (self) {
+            self[0] = background.submit(hold);
+            Future<?> previous = pendingHolds.put(ruleId, self[0]);
+            if (previous != null) previous.cancel(true);
+        }
+    }
+
+    private void cancelHold(UUID ruleId) {
+        Future<?> pending = pendingHolds.remove(ruleId);
+        if (pending == null) return;
+        pending.cancel(true);
+        // Nothing ran, so the cooldown taken when the hold started must not block the next hold.
+        triggerGate.clearCooldown(ruleId);
+    }
+
     // ---------------------------------------------------------------- running a rule
 
-    /** One rule's run, worked out inside the transaction; {@code result} is set when there is nothing left to run. */
+    /**
+     * One rule's run, worked out inside the transaction; {@code result} is set when there is nothing left to run.
+     * The steps are split into stages at each DELAY step: a stage starts after its wait and runs like a whole rule did.
+     */
     private record RulePlan(AutomationRule rule, AutomationEventRequest event, OffsetDateTime startedAt, ArrayNode details,
-                            List<SceneStep> scenes, List<PlannedCommand> deviceCommands, AutomationExecutionResponse result) {
+                            List<Stage> stages, int waitRows, AutomationExecutionResponse result) {
         static RulePlan done(AutomationExecutionResponse result) {
-            return new RulePlan(null, null, null, null, List.of(), List.of(), result);
+            return new RulePlan(null, null, null, null, List.of(), 0, result);
         }
 
         boolean willAttempt() {
-            return !scenes.isEmpty() || !deviceCommands.isEmpty();
+            return stages.stream().anyMatch(stage -> !stage.scenes().isEmpty() || !stage.commands().isEmpty());
+        }
+
+        boolean waits() {
+            return stages.stream().anyMatch(stage -> stage.waitSeconds() > 0);
         }
     }
 
     private record SceneStep(UUID homeId, UUID sceneId, ObjectNode detail) {}
 
-    /** Reads everything the run needs (lazy actions, scenes, overrides) while the transaction is open. */
+    /** Commands of one stage; {@code autoOffs} are undone that many seconds after their command succeeded. */
+    private record Stage(int waitSeconds, ObjectNode waitDetail, List<SceneStep> scenes, List<PlannedCommand> commands,
+                         List<AutoOff> autoOffs) {
+        static Stage after(int waitSeconds, ObjectNode waitDetail) {
+            return new Stage(waitSeconds, waitDetail, new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+        }
+    }
+
+    private record AutoOff(PlannedCommand command, String undoAction, int seconds) {}
+
+    /** Reads everything the run needs (lazy actions, scenes, groups, overrides) while the transaction is open. */
     private RulePlan plan(AutomationRule rule, AutomationEventRequest event, boolean emergency) {
         ArrayNode details = JsonNodeFactory.instance.arrayNode();
-        List<SceneStep> scenes = new ArrayList<>();
-        List<PlannedCommand> deviceCommands = new ArrayList<>();
+        List<RuleAction> steps = rule.getActions().stream().sorted(Comparator.comparingInt(RuleAction::getOrder)).toList();
         // One query for every device of the rule instead of one per action (each is a remote DB round trip).
-        Set<UUID> overridden = event.isTest() ? Set.of() : manualOverrideService.getOverridesUntil(rule.getActions().stream()
-                .filter(action -> action.getScene() == null && action.getDevice() != null)
-                .map(action -> action.getDevice().getId()).toList()).keySet();
-        for (RuleAction action : rule.getActions().stream().sorted(Comparator.comparingInt(RuleAction::getOrder)).toList()) {
-            ObjectNode detail = detailFor(action);
-            details.add(detail);
-            if (event.isTest()) {
-                CommandBatchRunner.skip(detail, "PREVIEW");
-            } else if (action.getScene() != null) {
-                // Checked here so a disabled scene never reaches the scene service (which would throw SCENE_DISABLED).
-                if (action.getScene().isEnabled()) {
-                    scenes.add(new SceneStep(rule.getHome().getId(), action.getScene().getId(), detail));
+        Set<UUID> overridden = event.isTest() ? Set.of() : manualOverrideService.getOverridesUntil(steps.stream()
+                .flatMap(action -> targets(action).stream()).map(Device::getId).distinct().toList()).keySet();
+        List<Stage> stages = new ArrayList<>();
+        Stage stage = Stage.after(0, null);
+        stages.add(stage);
+        int waitRows = 0;
+        for (RuleAction action : steps) {
+            if (RuleTiming.DELAY.equals(action.getAction())) {
+                ObjectNode wait = detailFor(action);
+                details.add(wait);
+                waitRows++;
+                if (event.isTest()) {
+                    CommandBatchRunner.skip(wait, "PREVIEW");
+                } else {
+                    stage = Stage.after(RuleTiming.delaySeconds(action.getParameters()), wait);
+                    stages.add(stage);
+                }
+                continue;
+            }
+            if (action.getScene() != null) {
+                ObjectNode detail = detailFor(action);
+                details.add(detail);
+                if (event.isTest()) {
+                    CommandBatchRunner.skip(detail, "PREVIEW");
+                } else if (action.getScene().isEnabled()) {
+                    // Checked here so a disabled scene never reaches the scene service (which would throw SCENE_DISABLED).
+                    stage.scenes().add(new SceneStep(rule.getHome().getId(), action.getScene().getId(), detail));
                 } else {
                     CommandBatchRunner.skip(detail, "SKIPPED_DISABLED");
                 }
-            } else if (blockedByManualOverride(rule, action, event, emergency, detail, overridden)) {
-                CommandBatchRunner.skip(detail, "SKIPPED_OVERRIDE");
-            } else {
-                deviceCommands.add(new PlannedCommand(action.getDevice(), action.getAction(), action.getParameters(), detail));
+                continue;
+            }
+            Map<String, Object> parameters = RuleTiming.commandParameters(action.getParameters());
+            int autoOff = RuleTiming.autoOffSeconds(action.getParameters());
+            String undo = autoOff > 0 ? RuleTiming.undoAction(action.getAction(), action.getParameters()) : null;
+            for (Device device : targets(action)) {
+                // A group step means "the members that can": e.g. the sensor in a group of lights is left out.
+                if (action.getGroup() != null && !device.supportsAction(action.getAction())) continue;
+                ObjectNode detail = detailFor(action);
+                detail.put("deviceId", device.getId().toString());
+                details.add(detail);
+                if (event.isTest()) {
+                    CommandBatchRunner.skip(detail, "PREVIEW");
+                } else if (blockedByManualOverride(rule, device, event, emergency, detail, overridden)) {
+                    CommandBatchRunner.skip(detail, "SKIPPED_OVERRIDE");
+                } else {
+                    PlannedCommand command = new PlannedCommand(device, action.getAction(), parameters, detail);
+                    stage.commands().add(command);
+                    if (undo != null && device.supportsAction(undo)) stage.autoOffs().add(new AutoOff(command, undo, autoOff));
+                }
             }
         }
-        return new RulePlan(rule, event, OffsetDateTime.now(), details, scenes, deviceCommands, null);
+        return new RulePlan(rule, event, OffsetDateTime.now(), details, stages, waitRows, null);
     }
 
-    /** Sends the planned commands with no transaction open, then saves the result in a short one. */
+    /** The devices a step commands: its device, or every member of its group. */
+    private static List<Device> targets(RuleAction action) {
+        if (action.getGroup() != null) return List.copyOf(action.getGroup().getDevices());
+        return action.getDevice() == null ? List.of() : List.of(action.getDevice());
+    }
+
+    /**
+     * Sends the planned commands with no transaction open, then saves the result in a short one.
+     * A rule with wait steps is saved as PENDING at once and finishes on a background thread.
+     */
     private AutomationExecutionResponse run(RulePlan plan) {
-        int attempted = plan.deviceCommands().size();
+        if (!plan.waits()) {
+            int[] counts = runStage(plan.stages().getFirst());
+            return finish(plan, counts[0], counts[1], null);
+        }
+        AutomationExecutionResponse pending = inTx(() -> save(plan.rule(), plan.event(), ExecutionStatus.PENDING,
+                plan.details(), plan.startedAt()));
+        background.execute(() -> {
+            int attempted = 0;
+            int succeeded = 0;
+            for (Stage stage : plan.stages()) {
+                if (stage.waitSeconds() > 0) {
+                    try {
+                        sleeper.sleep(stage.waitSeconds() * 1000L);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    stage.waitDetail().put("success", true);
+                    stage.waitDetail().put("status", "WAITED");
+                }
+                int[] counts = runStage(stage);
+                attempted += counts[0];
+                succeeded += counts[1];
+            }
+            try {
+                finish(plan, attempted, succeeded, pending.getId());
+            } catch (RuntimeException failure) {
+                log.warn("Could not save the result of rule {}", plan.rule().getId(), failure);
+            }
+        });
+        return pending;
+    }
+
+    /** @return {attempted, succeeded} */
+    private int[] runStage(Stage stage) {
+        int attempted = stage.commands().size();
         int succeeded = 0;
-        for (SceneStep scene : plan.scenes()) {
+        for (SceneStep scene : stage.scenes()) {
             SceneOutcome outcome = runScene(scene);
             if (outcome.attempted()) attempted++;
             if (outcome.succeeded()) succeeded++;
         }
-        succeeded += commandBatchRunner.run(plan.deviceCommands(), StateChangeSource.AUTOMATION);
+        succeeded += commandBatchRunner.run(stage.commands(), StateChangeSource.AUTOMATION);
+        for (AutoOff autoOff : stage.autoOffs()) {
+            if (autoOff.command().detail().path("success").asBoolean(false)) scheduleAutoOff(autoOff);
+        }
+        return new int[]{attempted, succeeded};
+    }
 
+    /** Sends the undo command later, unless the user changed the device by hand in the meantime. */
+    private void scheduleAutoOff(AutoOff autoOff) {
+        Device device = autoOff.command().device();
+        autoOff.command().detail().put("autoOffSeconds", autoOff.seconds());
+        // shortcut: in memory, lost on a backend restart; persist pending auto-offs if that matters.
+        background.execute(() -> {
+            try {
+                sleeper.sleep(autoOff.seconds() * 1000L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            try {
+                if (!manualOverrideService.getOverridesUntil(List.of(device.getId())).isEmpty()) return;
+                commandBatchRunner.run(List.of(new PlannedCommand(device, autoOff.undoAction(), Map.of(),
+                        CommandBatchRunner.detail(device.getId(), autoOff.undoAction()))), StateChangeSource.AUTOMATION);
+            } catch (RuntimeException failure) {
+                log.warn("Auto-off of device {} failed", device.getId(), failure);
+            }
+        });
+    }
+
+    private AutomationExecutionResponse finish(RulePlan plan, int attempted, int succeeded, UUID pendingId) {
         AutomationRule rule = plan.rule();
         AutomationEventRequest event = plan.event();
+        // Wait rows are not device results: leave them out of SUCCESS/PARTIAL.
         ExecutionStatus status = event.isTest() ? ExecutionStatus.SKIPPED
-                : CommandBatchRunner.status(plan.details().size(), attempted, succeeded);
-        AutomationExecutionResponse response = inTx(() -> save(rule, event, status, plan.details(), plan.startedAt()));
+                : CommandBatchRunner.status(plan.details().size() - plan.waitRows(), attempted, succeeded);
+        AutomationExecutionResponse response = inTx(() -> pendingId == null
+                ? save(rule, event, status, plan.details(), plan.startedAt())
+                : complete(pendingId, status, plan.details()));
         if (!event.isTest()) {
             try {
                 behaviorEventRecorder.recordExecution(rule.getHome(), null, "AUTOMATION_EXECUTION", rule.getId(), response.getStatus());
@@ -205,6 +395,14 @@ public class AutomationEngineImpl implements AutomationEngine {
             }
         }
         return response;
+    }
+
+    private AutomationExecutionResponse complete(UUID executionId, ExecutionStatus status, ArrayNode details) {
+        AutomationExecution execution = executionRepository.findById(executionId).orElseThrow();
+        execution.setStatus(status);
+        execution.setResultDetail(details);
+        execution.setCompletedAt(OffsetDateTime.now());
+        return AutomationRuleServiceImpl.toExecutionResponse(executionRepository.save(execution));
     }
 
     /** Runs {@code work} in its own short transaction; plain unit tests have no transaction manager. */
@@ -232,12 +430,12 @@ public class AutomationEngineImpl implements AutomationEngine {
     }
 
     /** A device the user just changed by hand is left alone, except in an emergency. */
-    private boolean blockedByManualOverride(AutomationRule rule, RuleAction action, AutomationEventRequest event,
+    private boolean blockedByManualOverride(AutomationRule rule, Device device, AutomationEventRequest event,
                                             boolean emergency, ObjectNode detail, Set<UUID> overridden) {
-        if (!overridden.contains(action.getDevice().getId())) return false;
+        if (!overridden.contains(device.getId())) return false;
         if (!emergency) return true;
         log.warn("[SAFETY BYPASS] Emergency event '{}' / rule '{}' bypassed manual override on device {}",
-                event.getEventType(), rule.getName(), action.getDevice().getId());
+                event.getEventType(), rule.getName(), device.getId());
         detail.put("emergencyBypassed", true);
         return false;
     }
@@ -260,6 +458,8 @@ public class AutomationEngineImpl implements AutomationEngine {
     private static ObjectNode detailFor(RuleAction action) {
         ObjectNode detail = CommandBatchRunner.detail(action.getDevice() == null ? null : action.getDevice().getId(), action.getAction());
         if (action.getScene() != null) detail.put("sceneId", action.getScene().getId().toString());
+        if (action.getGroup() != null) detail.put("groupId", action.getGroup().getId().toString());
+        if (RuleTiming.DELAY.equals(action.getAction())) detail.put("seconds", RuleTiming.delaySeconds(action.getParameters()));
         return detail;
     }
 
