@@ -97,6 +97,24 @@ public class SceneController {
                 .result(result).build());
     }
 
+    /** One-off run after {@code delaySeconds} (1s..24h); a new call replaces the pending one. */
+    @PostMapping("/{sceneId}/run-later")
+    public ResponseEntity<ApiResponse<java.time.OffsetDateTime>> runLater(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId,
+            @RequestParam int delaySeconds) {
+        return ResponseEntity.ok(ApiResponse.<java.time.OffsetDateTime>builder().code(1000)
+                .result(sceneExecutionService.runLater(userDetails.getId(), homeId, sceneId, delaySeconds)).build());
+    }
+
+    @DeleteMapping("/{sceneId}/run-later")
+    public ResponseEntity<ApiResponse<Void>> cancelRunLater(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId, @PathVariable UUID sceneId) {
+        sceneExecutionService.cancelRunLater(userDetails.getId(), homeId, sceneId);
+        return ResponseEntity.ok(ApiResponse.<Void>builder().code(1000).build());
+    }
+
     @GetMapping("/{sceneId}/executions")
     public ResponseEntity<ApiResponse<List<SceneExecutionResponse>>> sceneExecutions(
             @AuthenticationPrincipal CustomUserDetails userDetails,
