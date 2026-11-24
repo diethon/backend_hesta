@@ -20,6 +20,8 @@ public class RoomResponse {
     private BigDecimal layoutY;
     private int deviceCount;
     private OffsetDateTime createdAt;
+    /** Storey from the home's digital-twin layout; null when the room is not placed on one. */
+    private Integer floor;
 
     public static RoomResponse fromEntity(Room room, int deviceCount) {
         if (room == null) return null;

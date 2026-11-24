@@ -16,8 +16,11 @@ public class AutomationRuleResponse {
     String description;
     String triggerType;
     boolean enabled;
+    int holdSeconds;
     List<RuleConditionResponse> conditions;
     List<RuleActionResponse> actions;
+    /** Times of a SCHEDULE rule, so lists can say "18:00 hằng ngày" instead of "at the set time". */
+    List<ScheduleResponse> schedules;
     OffsetDateTime createdAt;
     OffsetDateTime updatedAt;
 }
