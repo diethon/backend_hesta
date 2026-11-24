@@ -1375,7 +1375,7 @@ activate Schedule
 Schedule --> Schedule: Hoàn tất
 deactivate Schedule
 end
-Schedule -> Schedule: Gán time.withSecond(0).withNano(0), repeatDays, active
+Schedule -> Schedule: Gán time.withNano(0), repeatDays, active
 activate Schedule
 Schedule --> Schedule: Hoàn tất
 deactivate Schedule
@@ -1457,7 +1457,7 @@ participant "JdbcTemplate" as Jdbc
 participant "SceneExecutionServiceImpl" as Execution
 participant "AutomationEngineImpl" as Engine
 database "Database" as DB
-Clock -> Runner: runDueSchedules() - mỗi phút theo hesta.scheduler.zone
+Clock -> Runner: runDueSchedules() - mỗi phút theo hesta.scheduler.zone, hẹn từng lịch chạy đúng giây
 activate Runner
 Runner -> Runner: Tính time (bỏ giây/nano), localDate và day 1..7
 activate Runner
@@ -1546,7 +1546,7 @@ deactivate Runner
 - Status: không có action được thử → `SKIPPED`; tất cả actions thành công → `SUCCESS`; có thử nhưng không thành công → `FAILED`; còn lại → `PARTIAL`. Lỗi command không dừng các action sau.
 - `BehaviorEventRecorderImpl` ghi command/state history và execution event bằng transaction `REQUIRES_NEW`. Lỗi ghi command/execution được service log và không đổi kết quả execution.
 - `repeatDays` là danh sách duy nhất trong 1–7; rỗng nghĩa là mỗi ngày. `scheduledTime` được bỏ giây/nano. `nextRunAt` chỉ tính trong DTO.
-- `ScheduleRunner` quét mỗi phút, mặc định zone `Asia/Ho_Chi_Minh`, có thể tắt bằng `hesta.scheduler.enabled=false`. Runner kiểm tra active/time/day/enabled, claim lịch trước thực thi, và tiếp tục nếu một lịch lỗi.
+- `ScheduleRunner` quét mỗi phút rồi hẹn từng lịch chạy đúng giây (giờ lưu dạng HH:mm:ss), mặc định zone `Asia/Ho_Chi_Minh`, có thể tắt bằng `hesta.scheduler.enabled=false`. Runner kiểm tra active/time/day/enabled, claim lịch trước thực thi, và tiếp tục nếu một lịch lỗi.
 - Claim dùng khóa `(schedule_type, schedule_id, local_date)` trong `scheduled_run_claims`; đã claim thì không tự chạy lại cùng ngày dù lần chạy lỗi.
 
 Migration liên quan: `20260911160000_scene_management_foundation.sql`, `20260911170000_scene_crud_management.sql`, `20260920120000_repair_scene_action_target_state_nullability.sql`, `20260922160000_scene_execution_history.sql`, `20260922161000_scheduled_run_claims.sql`. Trạng thái migration trên database đích được kiểm tra theo [DATABASE_MIGRATION_GUIDE.md](../DATABASE_MIGRATION_GUIDE.md); tài liệu mô tả source code, không xác nhận deployment.

@@ -223,4 +223,37 @@ class SceneExecutionServiceTest {
         verify(commands).sendCommand(eq(acDevice.getId()), eq("SET_TEMPERATURE"), argThat(map -> Integer.valueOf(24).equals(map.get("temperature"))), eq(StateChangeSource.SCENE));
         verify(commands).sendCommand(eq(acDevice.getId()), eq("SET_SWING"), argThat(map -> Boolean.TRUE.equals(map.get("swing"))), eq(StateChangeSource.SCENE));
     }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void runLaterRunsOnceAndANewTimerReplacesTheOldOne() {
+        Device device = Device.builder().id(UUID.randomUUID()).build();
+        Scene scene = Scene.builder().id(sceneId).home(Home.builder().id(homeId).build()).enabled(true)
+                .actions(new ArrayList<>()).build();
+        scene.getActions().add(SceneAction.builder().scene(scene).targetDevice(device).action("TURN_ON").order(0).build());
+        when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
+        when(commands.sendCommand(device.getId(), "TURN_ON", Map.of(), StateChangeSource.SCHEDULE))
+                .thenReturn(CompletableFuture.completedFuture(CommandResult.builder().success(true).status("SUCCESS").build()));
+        when(executions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var scheduler = mock(org.springframework.scheduling.TaskScheduler.class);
+        var first = mock(java.util.concurrent.ScheduledFuture.class);
+        var second = mock(java.util.concurrent.ScheduledFuture.class);
+        ArgumentCaptor<Runnable> tasks = ArgumentCaptor.forClass(Runnable.class);
+        when(scheduler.schedule(tasks.capture(), any(java.time.Instant.class))).thenReturn(first, second);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "taskScheduler", scheduler);
+
+        assertThatThrownBy(() -> service.runLater(userId, homeId, sceneId, 0)).isInstanceOf(AppException.class);
+        service.runLater(userId, homeId, sceneId, 120);
+        var runAt = service.runLater(userId, homeId, sceneId, 2);
+
+        verify(first).cancel(false);
+        assertThat(service.pendingRunAt(sceneId)).isEqualTo(runAt);
+        tasks.getAllValues().get(0).run(); // the replaced timer must not run
+        verifyNoInteractions(commands);
+        tasks.getAllValues().get(1).run();
+        assertThat(service.pendingRunAt(sceneId)).isNull();
+        ArgumentCaptor<SceneExecution> saved = ArgumentCaptor.forClass(SceneExecution.class);
+        verify(executions).save(saved.capture());
+        assertThat(saved.getValue().getTriggerSource()).isEqualTo("TIMER");
+    }
 }

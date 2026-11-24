@@ -15,6 +15,7 @@ public class RuleActionRequest {
     UUID deviceId;
 
     UUID sceneId;
+    UUID groupId;
 
     @NotBlank(message = "AUTOMATION_ACTION_INVALID")
     String action;

@@ -32,4 +32,9 @@ public class AutomationEventRequest {
     @com.fasterxml.jackson.annotation.JsonIgnore
     @Builder.Default
     boolean stateReport = false;
+
+    // Set when a device's state changed because it ACKed a command: not a sensor sample for the habit data.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Builder.Default
+    boolean commandEcho = false;
 }

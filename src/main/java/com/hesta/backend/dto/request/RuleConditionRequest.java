@@ -11,6 +11,7 @@ import java.util.UUID;
 @AllArgsConstructor
 public class RuleConditionRequest {
     UUID deviceId;
+    UUID groupId;
 
     @NotBlank(message = "AUTOMATION_CONDITION_INVALID")
     @Size(max = 100, message = "AUTOMATION_CONDITION_INVALID")

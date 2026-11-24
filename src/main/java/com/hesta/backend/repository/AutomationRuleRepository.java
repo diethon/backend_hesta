@@ -22,7 +22,7 @@ public interface AutomationRuleRepository extends JpaRepository<AutomationRule, 
     List<AutomationRule> findAllByHomeIdAndEnabledTrueAndTriggerTypeIn(UUID homeId, List<TriggerType> triggerTypes);
 
     // Call in the same transaction as a rule lookup to initialize actions on those managed rules.
-    @EntityGraph(attributePaths = {"actions", "actions.device", "actions.scene"})
+    @EntityGraph(attributePaths = {"actions", "actions.device", "actions.scene", "actions.group"})
     @Query("select distinct rule from AutomationRule rule where rule.id in :ids")
     List<AutomationRule> fetchActionsByIdIn(@Param("ids") List<UUID> ids);
 
@@ -35,4 +35,8 @@ public interface AutomationRuleRepository extends JpaRepository<AutomationRule, 
     @Query("select distinct rule from AutomationRule rule left join rule.actions action left join rule.conditions condition "
             + "where action.device.id = :deviceId or condition.device.id = :deviceId")
     List<AutomationRule> findAllReferencingDevice(@Param("deviceId") UUID deviceId);
+
+    @Query("select distinct rule from AutomationRule rule left join rule.actions action left join rule.conditions condition "
+            + "where action.group.id = :groupId or condition.group.id = :groupId")
+    List<AutomationRule> findAllReferencingGroup(@Param("groupId") UUID groupId);
 }

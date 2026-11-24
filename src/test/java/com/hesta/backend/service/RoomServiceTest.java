@@ -39,6 +39,12 @@ class RoomServiceTest {
     @Mock
     private HomeAuthorizationService homeAuthorizationService;
 
+    @Mock
+    private com.hesta.backend.repository.TwinLayoutRepository twinLayoutRepository;
+
+    @Mock
+    private com.hesta.backend.repository.TwinRoomLayoutRepository twinRoomLayoutRepository;
+
     @InjectMocks
     private RoomServiceImpl roomService;
 
@@ -76,6 +82,21 @@ class RoomServiceTest {
         assertThat(result.get(0).getName()).isEqualTo("Living Room");
         assertThat(result.get(0).getDeviceCount()).isEqualTo(2);
         verify(homeAuthorizationService).requireAccess(userId, homeId);
+    }
+
+    @Test
+    void getRoomsByHome_includesFloorFromTwinLayout() {
+        when(homeAuthorizationService.requireAccess(userId, homeId)).thenReturn(home);
+        when(roomRepository.findByHomeIdOrderByCreatedAtAsc(homeId)).thenReturn(List.of(room));
+        UUID layoutId = UUID.randomUUID();
+        when(twinLayoutRepository.findByHomeId(homeId))
+                .thenReturn(java.util.Optional.of(com.hesta.backend.entity.TwinLayout.builder().id(layoutId).build()));
+        when(twinRoomLayoutRepository.findByLayoutIdOrderByRoomId(layoutId)).thenReturn(List.of(
+                com.hesta.backend.entity.TwinRoomLayout.builder().layoutId(layoutId).roomId(roomId).floor((short) 2).build()));
+
+        List<RoomResponse> result = roomService.getRoomsByHome(userId, homeId);
+
+        assertThat(result.get(0).getFloor()).isEqualTo(2);
     }
 
     @Test
