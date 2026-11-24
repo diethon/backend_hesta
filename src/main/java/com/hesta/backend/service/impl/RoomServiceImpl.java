@@ -12,6 +12,9 @@ import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.RoomRepository;
+import com.hesta.backend.repository.TwinLayoutRepository;
+import com.hesta.backend.repository.TwinRoomLayoutRepository;
+import com.hesta.backend.entity.TwinRoomLayout;
 import com.hesta.backend.service.HomeAuthorizationService;
 import com.hesta.backend.service.MemberAccessContext;
 import com.hesta.backend.service.RoomService;
@@ -34,6 +37,8 @@ public class RoomServiceImpl implements RoomService {
     private final RoomRepository roomRepository;
     private final DeviceRepository deviceRepository;
     private final HomeAuthorizationService homeAuthorizationService;
+    private final TwinLayoutRepository twinLayoutRepository;
+    private final TwinRoomLayoutRepository twinRoomLayoutRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -54,6 +59,7 @@ public class RoomServiceImpl implements RoomService {
                 .filter(d -> !isCustomMember || homeAuthorizationService.effectiveLevel(ctx, d).canView())
                 .collect(Collectors.groupingBy(d -> d.getRoom().getId(), Collectors.counting()));
 
+        Map<UUID, Integer> floorByRoom = floorsByRoom(homeId);
         return rooms.stream()
                 .filter(room -> {
                     if (!isCustomMember) return true;
@@ -61,8 +67,19 @@ public class RoomServiceImpl implements RoomService {
                     boolean hasVisibleDeviceOverride = deviceCountByRoom.getOrDefault(room.getId(), 0L) > 0L;
                     return roomLevel.canView() || hasVisibleDeviceOverride;
                 })
-                .map(room -> RoomResponse.fromEntity(room, deviceCountByRoom.getOrDefault(room.getId(), 0L).intValue()))
+                .map(room -> {
+                    RoomResponse response = RoomResponse.fromEntity(room, deviceCountByRoom.getOrDefault(room.getId(), 0L).intValue());
+                    response.setFloor(floorByRoom.get(room.getId()));
+                    return response;
+                })
                 .collect(Collectors.toList());
+    }
+
+    private Map<UUID, Integer> floorsByRoom(UUID homeId) {
+        return twinLayoutRepository.findByHomeId(homeId)
+                .map(layout -> twinRoomLayoutRepository.findByLayoutIdOrderByRoomId(layout.getId()).stream()
+                        .collect(Collectors.toMap(TwinRoomLayout::getRoomId, item -> (int) item.getFloor(), (a, b) -> a)))
+                .orElse(Map.of());
     }
 
     @Override

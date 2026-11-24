@@ -1,5 +1,7 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.request.AutomationEventRequest;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
@@ -45,6 +47,11 @@ import java.util.concurrent.TimeUnit;
 public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
     private final MqttGateway mqttGateway;
+    // Lazy: the engine sends its commands through this service.
+    @org.springframework.beans.factory.annotation.Autowired(required = false) @org.springframework.context.annotation.Lazy
+    private com.hesta.backend.service.AutomationEngine automationEngine;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.config.mqtt.AutomationDispatcher automationDispatcher;
     private final DeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
 
@@ -1234,9 +1241,22 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             deviceRepository.save(device);
             log.info("Updated device {} currentState in DB: {}", device.getId(), currentState);
             publishStateChanged(device);
+            triggerAutomationOnState(device, currentState);
         } catch (Exception e) {
             log.error("Failed to update currentState for device {}", device.getId(), e);
         }
+    }
+
+    /**
+     * A device changed because it ACKed a command (app, web, scene or rule): rules watching it ("when the light
+     * turns on") see it like a state report. Async and edge-triggered, so a rule chain cannot loop on itself.
+     */
+    private void triggerAutomationOnState(Device device, Map<String, Object> state) {
+        UUID homeId = getHomeId(device);
+        if (homeId == null || automationEngine == null || automationDispatcher == null) return;
+        AutomationEventRequest event = AutomationEventRequest.builder().sourceDeviceId(device.getId()).eventType("EVENT")
+                .data(new HashMap<>(state)).stateReport(true).commandEcho(true).build();
+        automationDispatcher.dispatch(() -> automationEngine.process(homeId, event));
     }
 
     /**

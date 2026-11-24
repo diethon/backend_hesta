@@ -72,6 +72,11 @@ public class RuleTriggerGate {
         lastFired.put(ruleId, Instant.now());
     }
 
+    /** A claimed run that never happened (a cancelled hold): the next match may fire at once. */
+    public void clearCooldown(UUID ruleId) {
+        lastFired.remove(ruleId);
+    }
+
     /** Called when a rule is edited, toggled or deleted. */
     public void forget(UUID ruleId) {
         String prefix = ruleId + ":";

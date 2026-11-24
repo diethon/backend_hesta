@@ -39,6 +39,8 @@ import java.util.stream.Collectors;
 public class DeviceGroupServiceImpl implements DeviceGroupService {
 
     private final DeviceGroupRepository groupRepository;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.automation.DeviceReferenceCleaner deviceReferenceCleaner;
     private final DeviceRepository deviceRepository;
     private final HomeRepository homeRepository;
     private final HomeAuthorizationService homeAuthorizationService;
@@ -156,6 +158,7 @@ public class DeviceGroupServiceImpl implements DeviceGroupService {
         DeviceGroup group = groupRepository.findById(groupId)
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
         homeAuthorizationService.requireSceneManagement(userId, group.getHome().getId());
+        if (deviceReferenceCleaner != null) deviceReferenceCleaner.detachGroup(groupId); // rules must not point at it
         groupRepository.delete(group);
     }
 

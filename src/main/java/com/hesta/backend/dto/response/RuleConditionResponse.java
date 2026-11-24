@@ -11,6 +11,8 @@ public class RuleConditionResponse {
     UUID id;
     UUID deviceId;
     String deviceName;
+    UUID groupId;
+    String groupName;
     String attribute;
     String operator;
     Object expectedValue;
