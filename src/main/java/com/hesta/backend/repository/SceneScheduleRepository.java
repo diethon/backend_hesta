@@ -13,5 +13,5 @@ public interface SceneScheduleRepository extends JpaRepository<SceneSchedule, UU
     List<SceneSchedule> findAllBySceneIdOrderByScheduledTimeAsc(UUID sceneId);
 
     @EntityGraph(attributePaths = {"scene", "scene.home"})
-    List<SceneSchedule> findAllByActiveTrueAndScheduledTime(LocalTime scheduledTime);
+    List<SceneSchedule> findAllByActiveTrueAndScheduledTimeBetween(LocalTime from, LocalTime to);
 }

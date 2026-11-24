@@ -34,10 +34,16 @@ public class ActionConflictDetector {
         }
     }
 
-    /** Device-level view of a rule: a scene action is replaced by the scene's own device actions. */
+    /** Device-level view of a rule: a scene or group action is replaced by its devices' actions; waits are dropped. */
     private static List<RuleAction> deviceActions(AutomationRule rule) {
         List<RuleAction> result = new ArrayList<>();
         for (RuleAction action : rule.getActions()) {
+            if (RuleTiming.DELAY.equals(action.getAction())) continue;
+            if (action.getGroup() != null) {
+                action.getGroup().getDevices().forEach(device -> result.add(RuleAction.builder().device(device)
+                        .action(action.getAction()).parameters(RuleTiming.commandParameters(action.getParameters())).build()));
+                continue;
+            }
             if (action.getScene() == null) {
                 result.add(action);
                 continue;
