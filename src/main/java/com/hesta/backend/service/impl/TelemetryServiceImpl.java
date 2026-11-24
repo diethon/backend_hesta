@@ -47,6 +47,9 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final ApplicationEventPublisher applicationEventPublisher;
     private final TwinSnapshotMapper twinSnapshotMapper;
 
+    @Autowired(required = false)
+    private com.hesta.backend.energy.EnergyRollupService energyRollupService;
+
     @Autowired
     public TelemetryServiceImpl(
             DeviceRepository deviceRepository,
@@ -119,6 +122,10 @@ public class TelemetryServiceImpl implements TelemetryService {
                     .build();
 
             SensorReading saved = sensorReadingRepository.save(reading);
+            if (energyRollupService != null) {
+                energyRollupService.recordTelemetryReading(
+                        device, payload.getMetricType(), payload.getValue(), payload.getUnit(), now);
+            }
             log.info("Saved SensorReading for device [{}] ({}): {} {}",
                     device.getName(), payload.getMetricType(), payload.getValue(), payload.getUnit());
 

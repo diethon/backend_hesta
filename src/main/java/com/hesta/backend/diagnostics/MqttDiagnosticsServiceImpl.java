@@ -451,6 +451,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             if (t.lastPingAt != null) {
                 long elapsedSeconds = Duration.between(t.lastPingAt, now).getSeconds();
                 if (elapsedSeconds > 60 && node.getStatus() == EdgeNodeStatus.ONLINE) {
+                    if (hasRecentChildActivity(node, now)) {
+                        t.isOnline.set(true);
+                        continue;
+                    }
                     node.setStatus(EdgeNodeStatus.OFFLINE);
                     edgeNodeRepository.save(node);
                     t.isOnline.set(false);
@@ -473,6 +477,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     }
                 }
             } else if (uptimeMs > 60000 && node.getStatus() == EdgeNodeStatus.ONLINE) {
+                if (hasRecentChildActivity(node, now)) {
+                    t.isOnline.set(true);
+                    continue;
+                }
                 // Node trong DB ghi ONLINE nhưng qua 60s kể từ server start vẫn không gửi 1 ping nào -> đánh OFFLINE
                 node.setStatus(EdgeNodeStatus.OFFLINE);
                 edgeNodeRepository.save(node);
@@ -485,6 +493,20 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
             }
         }
+    }
+
+    private boolean hasRecentChildActivity(EdgeNode node, OffsetDateTime now) {
+        if (deviceRepository == null || node == null) return false;
+        try {
+            for (com.hesta.backend.entity.Device dev : deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode())) {
+                if (dev.getStatus() == com.hesta.backend.enums.DeviceStatus.ONLINE
+                        && dev.getLastSeen() != null
+                        && Math.abs(Duration.between(dev.getLastSeen(), now).getSeconds()) <= 90) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     private void cascadeNodeStatusToDevices(EdgeNode node, com.hesta.backend.enums.DeviceStatus newStatus) {

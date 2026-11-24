@@ -104,9 +104,9 @@ public class DeviceController {
             } catch (Exception ignored) {}
         }
         if (minutes <= 0) minutes = 30;
-        if (minutes != 30 && manualOverrideService != null) {
+        if (minutes != 30) {
             return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
-                    .result(manualOverrideService.recordOverride(deviceId, userDetails.getId(), minutes)).build());
+                    .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId, minutes)).build());
         }
         return ResponseEntity.ok(ApiResponse.<OffsetDateTime>builder().code(1000)
                 .result(manualControlService.cancelAutomation(userDetails.getId(), deviceId)).build());
@@ -123,7 +123,7 @@ public class DeviceController {
                 .message("Đã khôi phục tự động hóa").build());
     }
 
-    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/automation/extend")
     public ResponseEntity<ApiResponse<OffsetDateTime>> extendAutomation(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -331,7 +331,7 @@ public class DeviceController {
                 .build());
     }
 
-    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<CommandResult>>> sendCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -351,7 +351,7 @@ public class DeviceController {
                 .thenApply(result -> CommandResponseHelper.toResponseEntity(result, null));
     }
 
-    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessRoom(principal.id, #roomId)")
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canControlRoom(principal.id, #roomId)")
     @PostMapping("/rooms/{roomId}/command")
     public CompletableFuture<ResponseEntity<ApiResponse<List<CommandResult>>>> sendRoomCommand(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -371,6 +371,7 @@ public class DeviceController {
                 .thenApply(result -> ResponseEntity.ok(ApiResponse.<List<CommandResult>>builder().result(result).build()));
     }
 
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canAccessDevice(principal.id, #deviceId)")
     @GetMapping("/devices/{deviceId}/shadow")
     public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> getDeviceShadow(
             @PathVariable UUID deviceId) {
@@ -384,6 +385,7 @@ public class DeviceController {
                 .build());
     }
 
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
     @PutMapping("/devices/{deviceId}/shadow/desired")
     public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> updateDesiredShadow(
             @PathVariable UUID deviceId,
@@ -399,6 +401,7 @@ public class DeviceController {
                 .build());
     }
 
+    @PreAuthorize("isAuthenticated() and @deviceAccessValidator.canControlDevice(principal.id, #deviceId)")
     @PostMapping("/devices/{deviceId}/shadow/reconcile")
     public ResponseEntity<ApiResponse<com.hesta.backend.shadow.DeviceShadowDto>> reconcileDeviceShadow(
             @PathVariable UUID deviceId) {

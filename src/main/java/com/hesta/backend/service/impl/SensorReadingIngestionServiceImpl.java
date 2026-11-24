@@ -33,6 +33,9 @@ public class SensorReadingIngestionServiceImpl implements SensorReadingIngestion
     private final TwinSnapshotMapper mapper;
     private final ApplicationEventPublisher applicationEventPublisher;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.energy.EnergyRollupService energyRollupService;
+
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public SensorReadingAcceptedResponse ingest(UUID currentUserId, SensorReadingInput input) {
@@ -54,6 +57,10 @@ public class SensorReadingIngestionServiceImpl implements SensorReadingIngestion
             SensorReading saved = sensorReadingRepository.save(SensorReading.builder()
                     .device(device).metricType(input.metricType()).value(input.value())
                     .unit(input.unit()).recordedAt(input.observedAt()).build());
+            if (energyRollupService != null) {
+                energyRollupService.recordTelemetryReading(
+                        device, input.metricType(), input.value(), input.unit(), input.observedAt());
+            }
             boolean latest = sensorReadingRepository
                     .findFirstByDeviceIdAndMetricTypeOrderByRecordedAtDescIdDesc(device.getId(), input.metricType())
                     .map(reading -> reading.getId().equals(saved.getId())).orElse(false);

@@ -69,13 +69,10 @@ public class DeviceHealthServiceImpl implements DeviceHealthService {
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
-        int dbCycles = 0;
-        OffsetDateTime lastDbChange = null;
-        List<DeviceStateHistory> histories = historyRepository.findByDeviceIdOrderByChangedAtDesc(deviceId);
-        if (histories != null && !histories.isEmpty()) {
-            dbCycles = histories.size();
-            lastDbChange = histories.get(0).getChangedAt();
-        }
+        int dbCycles = (int) Math.min(Integer.MAX_VALUE, historyRepository.countByDeviceId(deviceId));
+        OffsetDateTime lastDbChange = historyRepository.findFirstByDeviceIdOrderByChangedAtDesc(deviceId)
+                .map(DeviceStateHistory::getChangedAt)
+                .orElse(null);
 
         AtomicInteger memoryCounter = cycleCounters.get(deviceId);
         int totalCycles = Math.max(dbCycles, memoryCounter != null ? memoryCounter.get() : 0);

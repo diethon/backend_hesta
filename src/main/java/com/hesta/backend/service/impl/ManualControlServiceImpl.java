@@ -63,6 +63,12 @@ public class ManualControlServiceImpl implements ManualControlService {
     }
 
     @Override
+    public OffsetDateTime cancelAutomation(UUID userId, UUID deviceId, int minutes) {
+        Device device = authorizedDevice(userId, deviceId, AccessLevel.CONTROL);
+        return minutes == 30 ? overrides.activate(device, userId, "CANCEL") : overrides.recordOverride(deviceId, userId, minutes);
+    }
+
+    @Override
     public void resumeAutomation(UUID userId, UUID deviceId) {
         Device device = authorizedDevice(userId, deviceId, AccessLevel.CONTROL);
         overrides.resumeAutomation(device, userId);
