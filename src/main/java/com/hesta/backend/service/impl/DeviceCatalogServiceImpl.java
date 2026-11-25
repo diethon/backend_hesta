@@ -90,6 +90,12 @@ public class DeviceCatalogServiceImpl implements DeviceCatalogService {
                 .defaultCapabilities(request.getDefaultCapabilities() != null
                         ? new DeviceCapabilities(request.getDefaultCapabilities())
                         : new DeviceCapabilities())
+                .unitPrice(request.getUnitPrice() != null && request.getUnitPrice().signum() >= 0
+                        ? request.getUnitPrice()
+                        : java.math.BigDecimal.ZERO)
+                .warrantyMonths(request.getWarrantyMonths() != null && request.getWarrantyMonths() > 0
+                        ? request.getWarrantyMonths()
+                        : 12)
                 .isActive(true)
                 .build();
 
@@ -124,6 +130,12 @@ public class DeviceCatalogServiceImpl implements DeviceCatalogService {
         catalog.setIcon(request.getIcon() != null ? request.getIcon().trim() : null);
         if (request.getDefaultCapabilities() != null) {
             catalog.setDefaultCapabilities(new DeviceCapabilities(request.getDefaultCapabilities()));
+        }
+        if (request.getUnitPrice() != null && request.getUnitPrice().signum() >= 0) {
+            catalog.setUnitPrice(request.getUnitPrice());
+        }
+        if (request.getWarrantyMonths() != null && request.getWarrantyMonths() > 0) {
+            catalog.setWarrantyMonths(request.getWarrantyMonths());
         }
 
         DeviceCatalog updated = catalogRepository.save(catalog);

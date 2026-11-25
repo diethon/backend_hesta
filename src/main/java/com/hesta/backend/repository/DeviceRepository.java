@@ -107,6 +107,15 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
 
     long countByStatus(com.hesta.backend.enums.DeviceStatus status);
 
+    @Query("""
+        SELECT d FROM Device d
+        LEFT JOIN FETCH d.catalog
+        LEFT JOIN FETCH d.node
+        WHERE d.status = :status AND d.isDeleted = false
+        ORDER BY d.createdAt DESC
+    """)
+    List<Device> findAllByStatusWithCatalogAndNode(@Param("status") com.hesta.backend.enums.DeviceStatus status);
+
     long countByCatalogId(UUID catalogId);
 
     long countByCatalogIdAndStatus(UUID catalogId, com.hesta.backend.enums.DeviceStatus status);

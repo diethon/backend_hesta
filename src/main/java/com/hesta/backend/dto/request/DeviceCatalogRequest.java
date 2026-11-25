@@ -3,6 +3,7 @@ package com.hesta.backend.dto.request;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -32,4 +33,8 @@ public class DeviceCatalogRequest {
     private String icon;
 
     private Map<String, List<String>> defaultCapabilities;
+
+    private BigDecimal unitPrice;
+
+    private Integer warrantyMonths;
 }

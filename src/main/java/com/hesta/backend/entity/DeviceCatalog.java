@@ -7,6 +7,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -48,6 +49,14 @@ public class DeviceCatalog {
     @Column(name = "default_capabilities", columnDefinition = "jsonb")
     @Builder.Default
     private DeviceCapabilities defaultCapabilities = new DeviceCapabilities();
+
+    @Column(name = "unit_price", nullable = false, precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal unitPrice = BigDecimal.ZERO;
+
+    @Column(name = "warranty_months", nullable = false)
+    @Builder.Default
+    private Integer warrantyMonths = 12;
 
     @Column(name = "is_active", nullable = false)
     @Builder.Default
