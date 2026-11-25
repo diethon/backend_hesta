@@ -74,6 +74,15 @@ public interface MaintenanceTicketRepository extends JpaRepository<MaintenanceTi
             @Param("statuses") Collection<MaintenanceTicketStatus> statuses);
 
     @Query("""
+        SELECT d.ticket FROM MaintenanceTicketDevice d
+        WHERE d.device.id = :deviceId AND d.ticket.status IN :statuses
+        ORDER BY d.ticket.createdAt DESC
+    """)
+    java.util.List<MaintenanceTicket> findTicketsByDeviceInStatuses(
+            @Param("deviceId") UUID deviceId,
+            @Param("statuses") Collection<MaintenanceTicketStatus> statuses);
+
+    @Query("""
         SELECT COUNT(t) > 0 FROM MaintenanceTicket t
         WHERE t.id <> :ticketId
           AND t.status IN :statuses

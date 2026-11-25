@@ -42,6 +42,10 @@ public class AutomationRule {
     @Column(name = "enabled", nullable = false)
     private boolean enabled;
 
+    /** The conditions must stay true this long (seconds) before the rule runs; 0 runs at once. */
+    @Column(name = "hold_seconds", nullable = false)
+    private int holdSeconds;
+
     @OneToMany(mappedBy = "rule", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("order ASC, id ASC")
     @Builder.Default

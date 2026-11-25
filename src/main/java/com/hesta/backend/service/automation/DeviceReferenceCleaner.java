@@ -38,6 +38,9 @@ public class DeviceReferenceCleaner {
     private final AutomationRecommendationRepository recommendations;
     private final RuleTriggerGate triggerGate;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.repository.DeviceGroupRepository deviceGroups;
+
     /** Call in the same transaction, before the device is marked deleted. */
     public void detach(UUID deviceId) {
         Set<Scene> affectedScenes = new LinkedHashSet<>();
@@ -52,10 +55,11 @@ public class DeviceReferenceCleaner {
             rule.getActions().removeIf(action -> action.getDevice() != null && deviceId.equals(action.getDevice().getId()));
             rules.saveAndFlush(rule);
             renumber(rule.getActions(), RuleAction::getOrder, RuleAction::setOrder, rules::flush);
+            boolean onlyWaits = rule.getActions().stream().allMatch(action -> RuleTiming.DELAY.equals(action.getAction()));
             boolean watchesDevice = rule.getConditions().stream()
                     .anyMatch(condition -> condition.getDevice() != null && deviceId.equals(condition.getDevice().getId()));
             // Dropping a condition would silently change what the rule means, so the user has to fix it.
-            if (rule.isEnabled() && (watchesDevice || rule.getActions().isEmpty())) {
+            if (rule.isEnabled() && (watchesDevice || onlyWaits)) {
                 rule.setEnabled(false);
                 log.info("Disabled rule {} because device {} was removed", rule.getId(), deviceId);
             }
@@ -67,6 +71,34 @@ public class DeviceReferenceCleaner {
             // Not the user's answer, so no feedback is sent to the ML training data.
             recommendation.setStatus("EXPIRED");
             recommendation.setResolvedAt(now);
+        }
+
+        if (deviceGroups != null) {
+            for (com.hesta.backend.entity.DeviceGroup group : deviceGroups.findAllContainingDevice(deviceId)) {
+                if (group.getDevices().removeIf(d -> deviceId.equals(d.getId()))) {
+                    deviceGroups.save(group);
+                }
+            }
+        }
+    }
+
+    /** Call in the same transaction, before the group is deleted: same rules as for a removed device. */
+    public void detachGroup(UUID groupId) {
+        for (AutomationRule rule : rules.findAllReferencingGroup(groupId)) {
+            rule.getActions().removeIf(action -> action.getGroup() != null && groupId.equals(action.getGroup().getId()));
+            boolean watchesGroup = rule.getConditions().stream()
+                    .anyMatch(condition -> condition.getGroup() != null && groupId.equals(condition.getGroup().getId()));
+            rule.getConditions().removeIf(condition -> condition.getGroup() != null && groupId.equals(condition.getGroup().getId()));
+            rules.saveAndFlush(rule);
+            renumber(rule.getActions(), RuleAction::getOrder, RuleAction::setOrder, rules::flush);
+            renumber(rule.getConditions(), com.hesta.backend.entity.RuleCondition::getOrder,
+                    com.hesta.backend.entity.RuleCondition::setOrder, rules::flush);
+            boolean onlyWaits = rule.getActions().stream().allMatch(action -> RuleTiming.DELAY.equals(action.getAction()));
+            if (rule.isEnabled() && (watchesGroup || onlyWaits)) {
+                rule.setEnabled(false);
+                log.info("Disabled rule {} because group {} was removed", rule.getId(), groupId);
+            }
+            triggerGate.forget(rule.getId());
         }
     }
 

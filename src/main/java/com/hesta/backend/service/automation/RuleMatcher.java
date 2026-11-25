@@ -63,13 +63,33 @@ public class RuleMatcher {
      * Conditions on other devices and on the time of day are read as current state, not triggers.
      */
     private boolean isTriggeredBy(List<RuleCondition> conditions, AutomationEventRequest event) {
-        return conditions.stream().anyMatch(condition -> condition.getDevice() == null
-                ? !TIME_OF_DAY.equals(condition.getAttribute())
-                : condition.getDevice().getId().equals(event.getSourceDeviceId()));
+        return conditions.stream().anyMatch(condition -> {
+            if (condition.getGroup() != null) return inGroup(condition, event.getSourceDeviceId());
+            return condition.getDevice() == null
+                    ? !TIME_OF_DAY.equals(condition.getAttribute())
+                    : condition.getDevice().getId().equals(event.getSourceDeviceId());
+        });
+    }
+
+    /** Whether this event is about something the rule watches (so a non-match means its conditions became false). */
+    public boolean isRelevant(AutomationRule rule, AutomationEventRequest event) {
+        return rule.getTriggerType() != TriggerType.SCHEDULE && isTriggeredBy(rule.getConditions(), event);
+    }
+
+    private static boolean inGroup(RuleCondition condition, java.util.UUID deviceId) {
+        return deviceId != null && condition.getGroup().getDevices().stream().anyMatch(d -> deviceId.equals(d.getId()));
     }
 
     private boolean holds(RuleCondition condition, AutomationEventRequest event) {
-        Object actual = actualValue(condition, event);
+        if (condition.getGroup() == null) return holds(condition, actualValue(condition, event));
+        // Any member: the event's device from the event, the others from their last known state.
+        return condition.getGroup().getDevices().stream().anyMatch(member -> {
+            Map<String, Object> values = member.getId().equals(event.getSourceDeviceId()) ? event.getData() : member.getCurrentState();
+            return holds(condition, values == null ? null : values.get(condition.getAttribute()));
+        });
+    }
+
+    private boolean holds(RuleCondition condition, Object actual) {
         if (actual == null) return false;
         int comparison = compare(plain(actual), plain(condition.getExpectedValue()));
         return switch (condition.getOperator()) {

@@ -92,6 +92,21 @@ public class AdminMaintenanceTicketController {
                 maintenanceTicketService.reject(admin.getId(), ticketId, request)));
     }
 
+    public record DiagnosisQualityRequest(
+            @jakarta.validation.constraints.NotNull com.hesta.backend.enums.MaintenanceDiagnosisQuality quality,
+            @jakarta.validation.constraints.Size(max = 500) String note
+    ) {
+    }
+
+    @PutMapping("/{ticketId}/diagnosis-quality")
+    public ResponseEntity<ApiResponse<MaintenanceTicketResponse>> rateDiagnosisQuality(
+            @AuthenticationPrincipal CustomUserDetails admin,
+            @PathVariable UUID ticketId,
+            @Valid @RequestBody DiagnosisQualityRequest request) {
+        return ResponseEntity.ok(ok("Đã lưu đánh giá chất lượng chẩn đoán",
+                maintenanceTicketService.rateDiagnosisQuality(admin.getId(), ticketId, request.quality(), request.note())));
+    }
+
     private static <T> ApiResponse<T> ok(String message, T result) {
         return ApiResponse.<T>builder().code(1000).message(message).result(result).build();
     }

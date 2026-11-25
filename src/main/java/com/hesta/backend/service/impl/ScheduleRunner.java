@@ -6,11 +6,12 @@ import com.hesta.backend.repository.AutomationScheduleRepository;
 import com.hesta.backend.repository.SceneScheduleRepository;
 import com.hesta.backend.service.AutomationEngine;
 import com.hesta.backend.service.SceneExecutionService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -25,13 +26,25 @@ import java.util.UUID;
 @Component
 @ConditionalOnProperty(name = "hesta.scheduler.enabled", havingValue = "true", matchIfMissing = true)
 @Slf4j
-@RequiredArgsConstructor
 public class ScheduleRunner {
     private final SceneScheduleRepository sceneSchedules;
     private final AutomationScheduleRepository ruleSchedules;
     private final SceneExecutionService sceneExecutionService;
     private final AutomationEngine automationEngine;
     private final JdbcTemplate jdbcTemplate;
+    // Fires each schedule at its exact second inside the minute the cron tick covers.
+    private final TaskScheduler taskScheduler;
+
+    public ScheduleRunner(SceneScheduleRepository sceneSchedules, AutomationScheduleRepository ruleSchedules,
+                          SceneExecutionService sceneExecutionService, AutomationEngine automationEngine,
+                          JdbcTemplate jdbcTemplate, @Qualifier("taskScheduler") TaskScheduler taskScheduler) {
+        this.sceneSchedules = sceneSchedules;
+        this.ruleSchedules = ruleSchedules;
+        this.sceneExecutionService = sceneExecutionService;
+        this.automationEngine = automationEngine;
+        this.jdbcTemplate = jdbcTemplate;
+        this.taskScheduler = taskScheduler;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.ParentalGuardianService parentalGuardianService;
@@ -61,28 +74,49 @@ public class ScheduleRunner {
         }
     }
 
-    void runDueSchedules(ZonedDateTime now) {
-        LocalTime time = now.toLocalTime().withSecond(0).withNano(0);
-        LocalDate date = now.toLocalDate();
-        short day = (short) now.getDayOfWeek().getValue();
-        for (SceneSchedule schedule : sceneSchedules.findAllByActiveTrueAndScheduledTime(time)) {
-            if (!schedule.getScene().isEnabled() || !matchesDay(schedule.getRepeatDays(), day)
-                    || !claim("SCENE", schedule.getId(), date, time)) continue;
-            try {
-                sceneExecutionService.executeScheduled(schedule.getScene().getHome().getId(), schedule.getScene().getId());
-            } catch (RuntimeException exception) {
-                log.error("Scheduled scene execution failed for schedule {}", schedule.getId(), exception);
-            }
+    void runDueSchedules(ZonedDateTime minute) {
+        runDueSchedules(minute, ZonedDateTime.now(minute.getZone()));
+    }
+
+    /** Runs every schedule whose time falls inside {@code minute}: now if its second has passed, else at that second. */
+    void runDueSchedules(ZonedDateTime minute, ZonedDateTime now) {
+        LocalTime from = minute.toLocalTime().withSecond(0).withNano(0);
+        LocalTime to = from.withSecond(59);
+        LocalDate date = minute.toLocalDate();
+        short day = (short) minute.getDayOfWeek().getValue();
+        for (SceneSchedule schedule : sceneSchedules.findAllByActiveTrueAndScheduledTimeBetween(from, to)) {
+            if (!schedule.getScene().isEnabled() || !matchesDay(schedule.getRepeatDays(), day)) continue;
+            UUID homeId = schedule.getScene().getHome().getId();
+            UUID sceneId = schedule.getScene().getId();
+            fireAt(minute, now, schedule.getScheduledTime(), () -> {
+                if (!claim("SCENE", schedule.getId(), date, schedule.getScheduledTime())) return;
+                try {
+                    sceneExecutionService.executeScheduled(homeId, sceneId);
+                } catch (RuntimeException exception) {
+                    log.error("Scheduled scene execution failed for schedule {}", schedule.getId(), exception);
+                }
+            });
         }
-        for (AutomationSchedule schedule : ruleSchedules.findAllByActiveTrueAndScheduledTime(time)) {
-            if (!schedule.getRule().isEnabled() || !matchesDay(schedule.getRepeatDays(), day)
-                    || !claim("RULE", schedule.getId(), date, time)) continue;
-            try {
-                automationEngine.executeScheduled(schedule.getRule().getHome().getId(), schedule.getRule().getId());
-            } catch (RuntimeException exception) {
-                log.error("Scheduled automation execution failed for schedule {}", schedule.getId(), exception);
-            }
+        for (AutomationSchedule schedule : ruleSchedules.findAllByActiveTrueAndScheduledTimeBetween(from, to)) {
+            if (!schedule.getRule().isEnabled() || !matchesDay(schedule.getRepeatDays(), day)) continue;
+            UUID homeId = schedule.getRule().getHome().getId();
+            UUID ruleId = schedule.getRule().getId();
+            fireAt(minute, now, schedule.getScheduledTime(), () -> {
+                if (!claim("RULE", schedule.getId(), date, schedule.getScheduledTime())) return;
+                try {
+                    automationEngine.executeScheduled(homeId, ruleId);
+                } catch (RuntimeException exception) {
+                    log.error("Scheduled automation execution failed for schedule {}", schedule.getId(), exception);
+                }
+            });
         }
+    }
+
+    // The claim is taken when the task fires, so a restart before that second re-schedules it instead of losing it.
+    private void fireAt(ZonedDateTime minute, ZonedDateTime now, LocalTime time, Runnable task) {
+        ZonedDateTime runAt = minute.with(time.withNano(0));
+        if (runAt.isAfter(now)) taskScheduler.schedule(task, runAt.toInstant());
+        else task.run();
     }
 
     // Claims are only needed for the current day; keep a week for debugging.
@@ -103,7 +137,7 @@ public class ScheduleRunner {
 
     private boolean claim(String type, UUID scheduleId, LocalDate date, LocalTime time) {
         // Time is part of the key so a schedule moved to a later time still runs that day.
-        // shortcut: packed into schedule_type (VARCHAR 20, e.g. "SCENE@07:30") to avoid a PK migration.
+        // shortcut: packed into schedule_type (VARCHAR 20, e.g. "SCENE@07:30:15") to avoid a PK migration.
         return jdbcTemplate.update("INSERT INTO scheduled_run_claims (schedule_type, schedule_id, local_date) "
                 + "VALUES (?, ?, ?) ON CONFLICT DO NOTHING", type + "@" + time, scheduleId, date) == 1;
     }

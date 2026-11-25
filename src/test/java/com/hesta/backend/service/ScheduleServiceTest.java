@@ -55,10 +55,11 @@ class ScheduleServiceTest {
         when(scenes.findByIdAndHomeId(sceneId, homeId)).thenReturn(Optional.of(scene));
         when(sceneSchedules.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         ScheduleRequest request = request(List.of((short) 1, (short) 3));
+        request.setScheduledTime(LocalTime.of(7, 0, 15, 500));
 
         var response = service.saveSceneSchedule(userId, homeId, sceneId, null, request);
 
-        assertThat(response.getScheduledTime()).isEqualTo(LocalTime.of(7, 0));
+        assertThat(response.getScheduledTime()).isEqualTo(LocalTime.of(7, 0, 15));
         assertThat(response.getRepeatDays()).containsExactly((short) 1, (short) 3);
         assertThat(response.getNextRunAt()).isNotNull();
         verify(authorization).requireSceneManagement(userId, homeId);

@@ -235,17 +235,6 @@ public class FallIncidentServiceImpl implements FallIncidentService {
                     return byCode.get().getHome().getId();
                 }
             }
-            List<com.hesta.backend.entity.EdgeNode> allNodes = edgeNodeRepository.findAllWithHome();
-            for (var n : allNodes) {
-                if (n.getStatus() == com.hesta.backend.enums.EdgeNodeStatus.ONLINE && n.getHome() != null) {
-                    return n.getHome().getId();
-                }
-            }
-            for (var n : allNodes) {
-                if (n.getHome() != null) {
-                    return n.getHome().getId();
-                }
-            }
         }
         return UUID.fromString("00000000-0000-0000-0000-000000000001");
     }

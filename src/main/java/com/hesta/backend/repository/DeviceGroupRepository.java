@@ -18,4 +18,7 @@ public interface DeviceGroupRepository extends JpaRepository<DeviceGroup, UUID> 
 
     @Query("SELECT g FROM DeviceGroup g LEFT JOIN FETCH g.devices WHERE g.id = :id AND g.home.id = :homeId")
     Optional<DeviceGroup> findByIdAndHomeId(@Param("id") UUID id, @Param("homeId") UUID homeId);
+
+    @Query("SELECT DISTINCT g FROM DeviceGroup g LEFT JOIN FETCH g.devices WHERE EXISTS (SELECT 1 FROM g.devices d WHERE d.id = :deviceId)")
+    List<DeviceGroup> findAllContainingDevice(@Param("deviceId") UUID deviceId);
 }

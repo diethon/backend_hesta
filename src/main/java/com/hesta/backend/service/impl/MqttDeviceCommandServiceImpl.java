@@ -1,5 +1,7 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.dto.request.AutomationEventRequest;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.config.mqtt.MqttGateway;
 import com.hesta.backend.dto.command.CommandResult;
@@ -45,6 +47,11 @@ import java.util.concurrent.TimeUnit;
 public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
     private final MqttGateway mqttGateway;
+    // Lazy: the engine sends its commands through this service.
+    @org.springframework.beans.factory.annotation.Autowired(required = false) @org.springframework.context.annotation.Lazy
+    private com.hesta.backend.service.AutomationEngine automationEngine;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.config.mqtt.AutomationDispatcher automationDispatcher;
     private final DeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
 
@@ -73,6 +80,22 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
     public static final ConcurrentHashMap<String, UUID> commandDeviceMap = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, CompletableFuture<CommandResult>> activeDeviceCommands = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> commandStartTimes = new ConcurrentHashMap<>();
+    public static final ConcurrentHashMap<UUID, Long> apertureTransitionStartTimes = new ConcurrentHashMap<>();
+
+    private static final long APERTURE_MAX_TRANSIT_LOCK_MS = 15_000L;
+    private static final long APERTURE_DEFAULT_TRAVEL_MS = 5_000L;
+
+    private static boolean isApertureMotorDevice(Device device) {
+        if (device == null || device.getDeviceType() == null) {
+            return false;
+        }
+        String dt = device.getDeviceType().trim().toUpperCase(java.util.Locale.ROOT);
+        return "GATE".equals(dt)
+                || "GATE_MOTOR".equals(dt)
+                || "ROLLING_DOOR".equals(dt)
+                || "DOOR".equals(dt)
+                || "CURTAIN".equals(dt);
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.BehaviorEventRecorder behaviorEventRecorder;
@@ -149,7 +172,10 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         Long lastStartTime = commandStartTimes.get(deviceId);
         long now = System.currentTimeMillis();
 
-        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming 60ms để kéo mượt, Relay nguồn 400ms)
+        // 1. Anti-spam click window: Chặn click spam (RGB/Dimming 60ms để kéo mượt, Relay nguồn 400ms; STOP khẩn cấp luôn ưu tiên)
+        String rawActUpper = action != null ? action.trim().toUpperCase(java.util.Locale.ROOT) : "";
+        boolean isEmergencyStop = isApertureMotorDevice(device)
+                && ("STOP".equals(rawActUpper) || "GATE_STOP".equals(rawActUpper) || "STOP_GATE".equals(rawActUpper));
         boolean isColorOrDimmer = "SET_RGB".equalsIgnoreCase(action)
                 || "SET_BRIGHTNESS".equalsIgnoreCase(action)
                 || "SET_COLOR".equalsIgnoreCase(action)
@@ -158,8 +184,8 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 || "SET_FAN".equalsIgnoreCase(action);
         long antiSpamWindowMs = isColorOrDimmer ? 60L : 400L;
         if (lastStartTime != null && (now - lastStartTime < antiSpamWindowMs)) {
-            // Only human double-clicks are spam; scenes/automations queue their next command after the ACK.
-            if (!isColorOrDimmer && source == StateChangeSource.MANUAL) {
+            // Only human double-clicks are spam; emergency STOP & scenes/automations pass through.
+            if (!isColorOrDimmer && !isEmergencyStop && source == StateChangeSource.MANUAL) {
                 log.warn("Idempotency / Anti-spam: Device {} click spam rejected ({} ms < {} ms).", deviceId, now - lastStartTime, antiSpamWindowMs);
                 return CompletableFuture.completedFuture(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
@@ -174,14 +200,14 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // 2. Pending execution: Nếu lệnh trước chưa hoàn tất (đang đợi ACK)
         CompletableFuture<CommandResult> existing = activeDeviceCommands.get(deviceId);
         if (existing != null && !existing.isDone()) {
-            if (isColorOrDimmer || source == StateChangeSource.VOICE) {
-                // Continuous adjustment or Voice direct override: Lệnh mới nhất sẽ ghi đè (supersede) lệnh trước để phản hồi tức thì
+            if (isColorOrDimmer || isEmergencyStop || source == StateChangeSource.VOICE) {
+                // Continuous adjustment, emergency STOP, or Voice direct override: supersede previous in-flight command
                 log.info("Idempotency: Superseding previous in-flight command for device {} with new {} command (source: {})", deviceId, action, source);
                 existing.complete(CommandResult.builder()
                         .commandId(UUID.randomUUID().toString())
                         .success(true)
                         .status("SUPERSEDED")
-                        .message("Superseded by newer stream or voice command")
+                        .message("Superseded by newer stream, emergency STOP, or voice command")
                         .build());
             } else if (source != StateChangeSource.MANUAL) {
                 // Khi chạy kịch bản Automation / Scene: nối chuỗi thực thi sau khi lệnh trước xong
@@ -203,7 +229,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         // 3. Nguyên tử hóa việc chiếm giữ Lock (Atomic Lock Acquisition chống Race Condition)
         String commandId = UUID.randomUUID().toString();
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
-        if (isColorOrDimmer || source == StateChangeSource.VOICE) {
+        if (isColorOrDimmer || isEmergencyStop || source == StateChangeSource.VOICE) {
             activeDeviceCommands.put(deviceId, future);
         } else {
             CompletableFuture<CommandResult> previous = activeDeviceCommands.putIfAbsent(deviceId, future);
@@ -328,11 +354,28 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
             // Normalize action and parameters for devices (including Air Conditioner and Gate)
             String normalizedAction = normalizeAction(device, action, effectiveParams);
-            boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
+            boolean isGateOrDoor = isApertureMotorDevice(device)
                     || "OPEN".equalsIgnoreCase(normalizedAction)
                     || "CLOSE".equalsIgnoreCase(normalizedAction)
                     || "STOP".equalsIgnoreCase(normalizedAction);
+
+            Long apertureTransitToken = null;
+            if (device != null && isApertureMotorDevice(device)) {
+                CommandResult interlockRejection = checkApertureInterlock(device, deviceId, commandId, normalizedAction, now);
+                if (interlockRejection != null) {
+                    log.warn("Aperture interlock rejected command {} for device {} ({}): {} [{}]",
+                            normalizedAction, deviceId, device.getName(), interlockRejection.getErrorCode(), interlockRejection.getMessage());
+                    activeDeviceCommands.remove(deviceId, future);
+                    commandStartTimes.remove(deviceId);
+                    return CompletableFuture.completedFuture(interlockRejection);
+                }
+                if ("STOP".equalsIgnoreCase(normalizedAction)) {
+                    apertureTransitionStartTimes.remove(deviceId);
+                } else if ("OPEN".equalsIgnoreCase(normalizedAction) || "CLOSE".equalsIgnoreCase(normalizedAction)) {
+                    apertureTransitToken = now;
+                    apertureTransitionStartTimes.put(deviceId, now);
+                }
+            }
 
             if ("SET_BRIGHTNESS".equalsIgnoreCase(normalizedAction)) {
                 Object br = effectiveParams.get("brightness");
@@ -533,6 +576,15 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                 effectiveTimeout = commandTimeoutMs;
             }
 
+            final Long finalTransitToken = apertureTransitToken;
+            final boolean shouldScheduleSettle = device != null && isApertureMotorDevice(device)
+                    && ("OPEN".equalsIgnoreCase(normalizedAction) || "CLOSE".equalsIgnoreCase(normalizedAction));
+            final long travelDurationMs = shouldScheduleSettle
+                    ? resolveApertureTravelDurationMs(device, normalizedAction, effectiveParams)
+                    : APERTURE_DEFAULT_TRAVEL_MS;
+            final String expectedTransitState = "OPEN".equalsIgnoreCase(normalizedAction) ? "OPENING" : "CLOSING";
+            final String settledTargetState = "OPEN".equalsIgnoreCase(normalizedAction) ? "OPEN" : "CLOSED";
+
             return future.orTimeout(effectiveTimeout, TimeUnit.MILLISECONDS)
                     .handle((res, ex) -> {
                         activeDeviceCommands.remove(deviceId, future);
@@ -544,6 +596,9 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                             res.setLatencyMs(roundtrip);
                             if (diagnosticsService != null && targetNodeCode != null && !"unknown".equalsIgnoreCase(targetNodeCode)) {
                                 diagnosticsService.recordCommandSuccess(targetNodeCode, roundtrip);
+                            }
+                            if (shouldScheduleSettle && !"SUPERSEDED".equals(res.getStatus())) {
+                                scheduleApertureAutoSettle(deviceId, expectedTransitState, settledTargetState, finalTransitToken, travelDurationMs);
                             }
                             return res;
                         } else {
@@ -591,6 +646,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             activeDeviceCommands.remove(deviceId, future);
             pendingCommands.remove(commandId, future);
             commandStartTimes.remove(deviceId);
+            apertureTransitionStartTimes.remove(deviceId, now);
             if (diagnosticsService != null && resolvedNodeCode != null && !"unknown".equalsIgnoreCase(resolvedNodeCode)) {
                 diagnosticsService.recordCommandFailure(resolvedNodeCode);
             }
@@ -709,8 +765,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
 
         boolean isAc = !isFan && isAcDevice(device, act, parameters);
 
-        boolean isGateOrDoor = (device != null && device.getDeviceType() != null &&
-                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType())))
+        boolean isGateOrDoor = isApertureMotorDevice(device)
                 || "OPEN".equalsIgnoreCase(act)
                 || "CLOSE".equalsIgnoreCase(act)
                 || "STOP".equalsIgnoreCase(act)
@@ -1173,8 +1228,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
                     break;
             }
 
-            boolean isGateOrDoor = device.getDeviceType() != null &&
-                    ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
+            boolean isGateOrDoor = isApertureMotorDevice(device);
             if (isGateOrDoor) {
                 Object stateVal = currentState.get("state");
                 currentState.clear();
@@ -1187,9 +1241,22 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             deviceRepository.save(device);
             log.info("Updated device {} currentState in DB: {}", device.getId(), currentState);
             publishStateChanged(device);
+            triggerAutomationOnState(device, currentState);
         } catch (Exception e) {
             log.error("Failed to update currentState for device {}", device.getId(), e);
         }
+    }
+
+    /**
+     * A device changed because it ACKed a command (app, web, scene or rule): rules watching it ("when the light
+     * turns on") see it like a state report. Async and edge-triggered, so a rule chain cannot loop on itself.
+     */
+    private void triggerAutomationOnState(Device device, Map<String, Object> state) {
+        UUID homeId = getHomeId(device);
+        if (homeId == null || automationEngine == null || automationDispatcher == null) return;
+        AutomationEventRequest event = AutomationEventRequest.builder().sourceDeviceId(device.getId()).eventType("EVENT")
+                .data(new HashMap<>(state)).stateReport(true).commandEcho(true).build();
+        automationDispatcher.dispatch(() -> automationEngine.process(homeId, event));
     }
 
     /**
@@ -1231,8 +1298,7 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
             new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                     deviceRepository.findByIdWithNode(deviceId).ifPresent(device -> {
                         if (!optimistic.equals(device.getCurrentState())) return;
-                        boolean isActuator = device.getDeviceType() != null &&
-                                ("GATE".equalsIgnoreCase(device.getDeviceType()) || "ROLLING_DOOR".equalsIgnoreCase(device.getDeviceType()) || "CURTAIN".equalsIgnoreCase(device.getDeviceType()));
+                        boolean isActuator = isApertureMotorDevice(device);
                         if (isActuator) {
                             Object optState = optimistic.get("state");
                             if ("OPENING".equalsIgnoreCase(String.valueOf(optState)) || "CLOSING".equalsIgnoreCase(String.valueOf(optState))) {
@@ -1249,6 +1315,139 @@ public class MqttDeviceCommandServiceImpl implements DeviceCommandService {
         } catch (Exception e) {
             log.warn("Could not revert unconfirmed state of device {}: {}", deviceId, e.getMessage());
         }
+    }
+
+    /** Hardware protection interlock for limitless motorized doors, rolling doors, gates, and curtains. */
+    private CommandResult checkApertureInterlock(
+            Device device,
+            UUID deviceId,
+            String commandId,
+            String normalizedAction,
+            long now
+    ) {
+        if (!"OPEN".equals(normalizedAction) && !"CLOSE".equals(normalizedAction)) {
+            return null;
+        }
+        String curState = device.getCurrentState() != null && device.getCurrentState().get("state") != null
+                ? device.getCurrentState().get("state").toString().trim().toUpperCase(java.util.Locale.ROOT)
+                : "";
+        Long transitStartedAt = apertureTransitionStartTimes.get(deviceId);
+        boolean withinTransitWindow = transitStartedAt != null && (now - transitStartedAt < APERTURE_MAX_TRANSIT_LOCK_MS);
+
+        if ("OPEN".equals(normalizedAction)) {
+            if ("OPEN".equals(curState)) {
+                return buildRejectedResult(commandId, "ALREADY_AT_OPEN_LIMIT",
+                        "Thiết bị đang ở trạng thái mở hoàn toàn, không thể mở tiếp để tránh hư hành trình");
+            }
+            if ("OPENING".equals(curState)) {
+                String code = (withinTransitWindow || transitStartedAt == null) ? "MOTOR_IN_TRANSIT" : "ALREADY_AT_OPEN_LIMIT";
+                return buildRejectedResult(commandId, code,
+                        "Thiết bị đang mở, không thể nhấn mở tiếp để tránh hư hành trình");
+            }
+            if ("CLOSING".equals(curState) && (transitStartedAt == null || withinTransitWindow)) {
+                return buildRejectedResult(commandId, "MOTOR_IN_TRANSIT",
+                        "Thiết bị đang đóng, vui lòng nhấn Dừng trước khi mở lại");
+            }
+        } else {
+            if ("CLOSED".equals(curState) || "CLOSE".equals(curState)) {
+                return buildRejectedResult(commandId, "ALREADY_AT_CLOSE_LIMIT",
+                        "Thiết bị đang ở trạng thái đóng hoàn toàn, không thể đóng tiếp để tránh hư hành trình");
+            }
+            if ("CLOSING".equals(curState)) {
+                String code = (withinTransitWindow || transitStartedAt == null) ? "MOTOR_IN_TRANSIT" : "ALREADY_AT_CLOSE_LIMIT";
+                return buildRejectedResult(commandId, code,
+                        "Thiết bị đang đóng, không thể nhấn đóng tiếp để tránh hư hành trình");
+            }
+            if ("OPENING".equals(curState) && (transitStartedAt == null || withinTransitWindow)) {
+                return buildRejectedResult(commandId, "MOTOR_IN_TRANSIT",
+                        "Thiết bị đang mở, vui lòng nhấn Dừng trước khi đóng lại");
+            }
+        }
+        return null;
+    }
+
+    private CommandResult buildRejectedResult(String commandId, String errorCode, String message) {
+        return CommandResult.builder()
+                .commandId(commandId)
+                .success(false)
+                .status("REJECTED")
+                .errorCode(errorCode)
+                .message(message)
+                .build();
+    }
+
+    private long resolveApertureTravelDurationMs(Device device, String normalizedAction, Map<String, Object> effectiveParams) {
+        long duration = APERTURE_DEFAULT_TRAVEL_MS;
+        Long paramDuration = parsePositiveMillis(effectiveParams != null ? effectiveParams.get("duration") : null);
+        if (paramDuration != null) {
+            duration = paramDuration;
+        } else if (device != null && device.getSettings() != null) {
+            Map<String, Object> settings = device.getSettings();
+            String key = "OPEN".equalsIgnoreCase(normalizedAction) ? "openDurationMs" : "closeDurationMs";
+            Long settingDuration = parsePositiveMillis(settings.get(key));
+            if (settingDuration == null) {
+                settingDuration = parsePositiveMillis(settings.get("travelDurationMs"));
+            }
+            if (settingDuration == null) {
+                settingDuration = parsePositiveMillis(settings.get("durationMs"));
+            }
+            if (settingDuration != null) {
+                duration = settingDuration;
+            }
+        }
+        return Math.max(1000L, Math.min(30_000L, duration));
+    }
+
+    private Long parsePositiveMillis(Object raw) {
+        if (raw == null) return null;
+        try {
+            long val = (raw instanceof Number n) ? n.longValue() : Long.parseLong(raw.toString().trim());
+            return val > 0 ? val : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void scheduleApertureAutoSettle(
+            UUID deviceId,
+            String expectedTransitState,
+            String settledTargetState,
+            Long transitToken,
+            long travelDurationMs
+    ) {
+        if (transitToken == null) return;
+        CompletableFuture.runAsync(() -> {
+            try {
+                Runnable applySettle = () -> deviceRepository.findByIdWithNode(deviceId).ifPresent(fresh -> {
+                    if (!java.util.Objects.equals(apertureTransitionStartTimes.get(deviceId), transitToken)) {
+                        return;
+                    }
+                    Map<String, Object> stateMap = fresh.getCurrentState();
+                    String cur = stateMap != null && stateMap.get("state") != null
+                            ? stateMap.get("state").toString().trim().toUpperCase(java.util.Locale.ROOT)
+                            : "";
+                    if (!expectedTransitState.equals(cur)) {
+                        apertureTransitionStartTimes.remove(deviceId, transitToken);
+                        return;
+                    }
+                    Map<String, Object> nextState = new HashMap<>(stateMap);
+                    nextState.put("state", settledTargetState);
+                    fresh.setCurrentState(nextState);
+                    deviceRepository.save(fresh);
+                    apertureTransitionStartTimes.remove(deviceId, transitToken);
+                    log.info("Auto-settled aperture device {} from {} -> {} after {}ms",
+                            deviceId, expectedTransitState, settledTargetState, travelDurationMs);
+                    publishStateChanged(fresh);
+                });
+                if (transactionManager != null) {
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> applySettle.run());
+                } else {
+                    applySettle.run();
+                }
+            } catch (Exception ex) {
+                log.warn("Could not auto-settle aperture device {}: {}", deviceId, ex.getMessage());
+            }
+        }, CompletableFuture.delayedExecutor(travelDurationMs, TimeUnit.MILLISECONDS));
     }
 
     private UUID getHomeId(Device device) {

@@ -3,6 +3,7 @@ package com.hesta.backend.dto.response;
 import com.hesta.backend.entity.MaintenanceTicket;
 import com.hesta.backend.entity.MaintenanceTicketDevice;
 import com.hesta.backend.enums.MaintenancePriority;
+import com.hesta.backend.enums.MaintenanceTicketSource;
 import com.hesta.backend.enums.MaintenanceTicketStatus;
 
 import java.math.BigDecimal;
@@ -19,6 +20,7 @@ public record MaintenanceTicketSummaryResponse(
         String title,
         MaintenancePriority priority,
         MaintenanceTicketStatus status,
+        MaintenanceTicketSource source,
         List<String> deviceNames,
         OffsetDateTime scheduledStart,
         OffsetDateTime scheduledEnd,
@@ -37,6 +39,7 @@ public record MaintenanceTicketSummaryResponse(
                 t.getTitle(),
                 t.getPriority(),
                 t.getStatus(),
+                t.getSource() != null ? t.getSource() : MaintenanceTicketSource.MANUAL,
                 t.getDevices().stream().map(MaintenanceTicketDevice::getDeviceName).toList(),
                 t.getScheduledStart(),
                 t.getScheduledEnd(),

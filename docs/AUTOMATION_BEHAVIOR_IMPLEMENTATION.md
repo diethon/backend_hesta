@@ -170,7 +170,7 @@ Kết quả lịch sử ở lần cập nhật 2026-09-20 (không phải kết q
 
 ## 7. Phạm vi và giới hạn hiện tại
 
-- Scheduler và MQTT sensor input đã có trong source. Scheduler quét mỗi phút, dùng `scheduled_run_claims` để chống chạy trùng theo loại lịch/ID/ngày; lỗi sau claim không tự retry cùng ngày.
+- Scheduler và MQTT sensor input đã có trong source. Scheduler quét mỗi phút, lấy các lịch trong phút đó (HH:mm:00–HH:mm:59) và hẹn chạy đúng giây; dùng `scheduled_run_claims` để chống chạy trùng theo loại lịch/ID/ngày; lỗi sau claim không tự retry cùng ngày.
 - Rule SCHEDULE chạy qua `executeScheduled`, không đi qua vòng conflict giữa nhiều Rule của `process`. Command vẫn có source AUTOMATION; Scene được Rule gọi dùng trigger/source AUTOMATION.
 - Scene lịch trực tiếp dùng trigger/source SCHEDULE; Scene thủ công dùng MANUAL/SCENE và bỏ qua override.
 - Behavior Pattern vẫn dùng hai cửa sổ MORNING/BEDTIME, chưa dùng ML và chưa lưu BehaviorPattern. Prediction cần confidence >= 0.6, TURN_ON/TURN_OFF, trong 45 phút quanh averageTime và trạng thái power chưa đúng mục tiêu.
@@ -1674,7 +1674,7 @@ activate Schedule
 Schedule --> Schedule: Hoàn tất
 deactivate Schedule
 end
-Schedule -> Schedule: Gán time.withSecond(0).withNano(0), repeatDays, active
+Schedule -> Schedule: Gán time.withNano(0), repeatDays, active
 activate Schedule
 Schedule --> Schedule: Hoàn tất
 deactivate Schedule
@@ -1756,7 +1756,7 @@ participant "JdbcTemplate" as Jdbc
 participant "SceneExecutionServiceImpl" as Execution
 participant "AutomationEngineImpl" as Engine
 database "Database" as DB
-Clock -> Runner: runDueSchedules() - mỗi phút theo hesta.scheduler.zone
+Clock -> Runner: runDueSchedules() - mỗi phút theo hesta.scheduler.zone, hẹn từng lịch chạy đúng giây
 activate Runner
 Runner -> Runner: Tính time (bỏ giây/nano), localDate và day 1..7
 activate Runner

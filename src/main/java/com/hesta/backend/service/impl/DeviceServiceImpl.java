@@ -117,6 +117,8 @@ public class DeviceServiceImpl implements DeviceService {
     private static final long PHYSICAL_SWITCH_GRACE_MS = 15_000;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.BehaviorEventRecorder behaviorEventRecorder;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.repository.SensorReadingRepository sensorReadingRepository;
 
     private void checkHomeAccess(UUID userId, UUID homeId) {
 
@@ -191,7 +193,7 @@ public class DeviceServiceImpl implements DeviceService {
 
                 : Collections.emptyMap();
 
-        return visibleDevices.stream().map(device -> {
+        List<DeviceResponse> responses = visibleDevices.stream().map(device -> {
             DeviceResponse res = DeviceResponse.fromEntity(device);
 
             if (res != null) {
@@ -208,6 +210,9 @@ public class DeviceServiceImpl implements DeviceService {
             return res;
 
         }).collect(Collectors.toList());
+
+        hydrateLatestSensorReadings(responses);
+        return responses;
 
     }
 
@@ -226,7 +231,7 @@ public class DeviceServiceImpl implements DeviceService {
         checkHomeAccess(userId, homeId);
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
 
-        return deviceRepository.findByRoomId(roomId).stream()
+        List<DeviceResponse> responses = deviceRepository.findByRoomId(roomId).stream()
                 .filter(d -> !d.isDeleted())
                 .filter(d -> {
                     if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
@@ -244,6 +249,9 @@ public class DeviceServiceImpl implements DeviceService {
                     return res;
                 })
                 .collect(Collectors.toList());
+
+        hydrateLatestSensorReadings(responses);
+        return responses;
 
     }
 
@@ -297,8 +305,85 @@ public class DeviceServiceImpl implements DeviceService {
         if (res != null) {
             AccessLevel level = (ctx != null) ? homeAuthorizationService.effectiveLevel(ctx, device) : null;
             res.setAccessLevel(level != null ? level : AccessLevel.CONTROL);
+            hydrateLatestSensorReadings(List.of(res));
         }
         return res;
+    }
+
+    private void hydrateLatestSensorReadings(List<DeviceResponse> responses) {
+        if (sensorReadingRepository == null || responses == null || responses.isEmpty()) {
+            return;
+        }
+        List<UUID> ids = responses.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(DeviceResponse::getId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        List<com.hesta.backend.entity.SensorReading> latestReadings = sensorReadingRepository.findLatestByDeviceIds(ids);
+        if (latestReadings == null || latestReadings.isEmpty()) {
+            return;
+        }
+        Map<UUID, List<com.hesta.backend.entity.SensorReading>> byDevice = latestReadings.stream()
+                .filter(r -> r.getDevice() != null && r.getDevice().getId() != null)
+                .collect(Collectors.groupingBy(r -> r.getDevice().getId()));
+
+        for (DeviceResponse res : responses) {
+            if (res == null || res.getId() == null) continue;
+            List<com.hesta.backend.entity.SensorReading> readings = byDevice.get(res.getId());
+            if (readings == null || readings.isEmpty()) continue;
+
+            Map<String, Object> merged = res.getCurrentState() != null
+                    ? new HashMap<>(res.getCurrentState())
+                    : new HashMap<>();
+            OffsetDateTime newestAt = res.getLastSeen();
+
+            for (com.hesta.backend.entity.SensorReading reading : readings) {
+                if (reading.getMetricType() == null || reading.getValue() == null) continue;
+                java.math.BigDecimal bd = reading.getValue().stripTrailingZeros();
+                Number numVal = bd.scale() <= 0 ? bd.longValue() : bd.doubleValue();
+                String metric = reading.getMetricType().trim();
+                String metricLower = metric.toLowerCase(java.util.Locale.ROOT);
+                boolean isNewer = reading.getRecordedAt() != null
+                        && (newestAt == null || reading.getRecordedAt().isAfter(newestAt));
+
+                if (!merged.containsKey(metric) || isNewer) {
+                    merged.put(metric, numVal);
+                }
+                if ("temp".equals(metricLower) || "temperature".equals(metricLower)) {
+                    if (!merged.containsKey("temperature") || isNewer) merged.put("temperature", numVal);
+                } else if ("hum".equals(metricLower) || "humid".equals(metricLower) || "humidity".equals(metricLower)) {
+                    if (!merged.containsKey("humidity") || isNewer) merged.put("humidity", numVal);
+                } else if ("light".equals(metricLower) || "light_sensor".equals(metricLower) || "lux".equals(metricLower) || "illuminance".equals(metricLower)) {
+                    if (!merged.containsKey("lux") || isNewer) merged.put("lux", numVal);
+                    if (("light".equals(metricLower) || "light_sensor".equals(metricLower)) && (!merged.containsKey("LIGHT_SENSOR") || isNewer)) {
+                        merged.put("LIGHT_SENSOR", numVal);
+                    }
+                } else if ("motion".equals(metricLower) || "motion_sensor".equals(metricLower)) {
+                    boolean detected = numVal.doubleValue() > 0;
+                    if (!merged.containsKey("motion") || isNewer) merged.put("motion", detected);
+                } else if ("smoke".equals(metricLower) || "smoke_sensor".equals(metricLower)) {
+                    if (!merged.containsKey("smoke") || isNewer) merged.put("smoke", numVal);
+                } else if ("gas".equals(metricLower) || "gas_ppm".equals(metricLower)) {
+                    if (!merged.containsKey("gas") || isNewer) merged.put("gas", numVal);
+                    if (!merged.containsKey("gas_ppm") || isNewer) merged.put("gas_ppm", numVal);
+                } else if ("flame".equals(metricLower) || "flame_sensor".equals(metricLower) || "fire".equals(metricLower)) {
+                    boolean detected = numVal.doubleValue() > 0;
+                    if (!merged.containsKey("flame") || isNewer) merged.put("flame", detected);
+                }
+
+                if (reading.getRecordedAt() != null && (newestAt == null || reading.getRecordedAt().isAfter(newestAt))) {
+                    newestAt = reading.getRecordedAt();
+                }
+            }
+            res.setCurrentState(merged);
+            if (newestAt != null) {
+                res.setLastSeen(newestAt);
+            }
+        }
     }
 
 
@@ -1290,7 +1375,7 @@ public class DeviceServiceImpl implements DeviceService {
 
                 }
 
-                case "GATE", "ROLLING_DOOR", "DOOR", "CURTAIN" -> {
+                case "GATE", "GATE_MOTOR", "ROLLING_DOOR", "DOOR", "CURTAIN" -> {
 
                     result.put("GATE", List.of("OPEN", "CLOSE", "STOP", "GATE_OPEN", "GATE_CLOSE", "GATE_STOP"));
 
@@ -1338,6 +1423,22 @@ public class DeviceServiceImpl implements DeviceService {
 
                     result.put("AI_INTRUSION_DETECT", List.of("SET_AI_MODE"));
 
+                }
+
+                case "TV" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE", "POWER_ON", "POWER_OFF", "SET_POWER"));
+                    result.put("VOLUME", List.of("VOL_UP", "VOL_DOWN", "MUTE"));
+                    result.put("CHANNEL", List.of("CH_UP", "CH_DOWN", "SET_CHANNEL"));
+                    result.put("NAVIGATION", List.of("UP", "DOWN", "LEFT", "RIGHT", "OK", "HOME", "BACK", "MENU", "INPUT"));
+                    result.put("IR_TRANSMIT", List.of("SEND_IR_CODE", "SEND_BUTTON"));
+                }
+
+                case "WATER_PUMP" -> {
+                    result.put("POWER", List.of("TURN_ON", "TURN_OFF", "TOGGLE", "MOTOR_ON", "MOTOR_OFF"));
+                }
+
+                case "LUX_SENSOR", "LIGHT_SENSOR" -> {
+                    result.put("LIGHT_READ", List.of());
                 }
 
                 default -> {

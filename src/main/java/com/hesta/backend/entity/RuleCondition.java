@@ -31,6 +31,11 @@ public class RuleCondition {
     @JoinColumn(name = "device_id")
     private Device device;
 
+    /** Holds when ANY device of the group satisfies it; any member can trigger the rule. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id")
+    private DeviceGroup group;
+
     @Column(name = "attribute", nullable = false, length = 100)
     private String attribute;
 

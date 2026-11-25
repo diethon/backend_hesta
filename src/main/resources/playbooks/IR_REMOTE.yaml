@@ -1,0 +1,57 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Bộ phát hồng ngoại thông minh (IR_REMOTE)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: IR_REMOTE
+label: Bộ phát hồng ngoại (IR Remote)
+deviceTypes:
+  - IR_REMOTE
+imageHints:
+  - Vị trí đặt bộ phát IR so với thiết bị đích (TV/điều hòa/quạt)
+  - Đèn báo trạng thái và dây nguồn USB/pin của bộ phát IR
+  - Khu vực giữa bộ phát IR và mắt nhận hồng ngoại trên thiết bị đích
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Bộ phát IR vẫn mất kết nối hoặc không điều khiển được thiết bị đích sau khi đã kiểm tra vị trí, nguồn và thiết bị đích.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, pin phồng/chảy nước hoặc nước vào
+  advice: "DỪNG SỬ DỤNG BỘ PHÁT IR NGAY LẬP TỨC! Không chạm vào thiết bị nếu thấy mùi khét, nóng bất thường, pin phồng/chảy dịch hoặc nước vào gần nguồn điện. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - phồng
+symptoms:
+  - id: IR_OFFLINE
+    label: Mất kết nối / Bộ phát IR không phản hồi trên ứng dụng
+    ticketDescription: Bộ phát hồng ngoại thông minh bị mất kết nối mạng, không nhận lệnh từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_POWER_OR_BATTERY
+        title: Kiểm tra nguồn điện USB / pin và đèn báo trên bộ phát IR
+        instruction: Kiểm tra dây nguồn USB/adapter cắm ngoài vỏ xem có bị lỏng không (hoặc kiểm tra pin nếu là loại dùng pin), đồng thời quan sát đèn báo trạng thái trên thân bộ phát IR có sáng không.
+      - id: CHECK_WIFI_GATEWAY_LED
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Quan sát đèn Wi-Fi/Internet trên router (sáng ổn định, không nháy đỏ) và đèn nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node). Chờ 1 phút rồi thử lại trên ứng dụng.
+  - id: IR_NOT_CONTROLLING_TARGET
+    label: Bộ phát IR online nhưng thiết bị đích (TV/điều hòa/quạt) không nhận lệnh
+    ticketDescription: Bộ phát IR vẫn trực tuyến nhưng thiết bị đích không phản hồi khi gửi lệnh điều khiển từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_PLACEMENT_AND_OBSTACLE
+        title: Kiểm tra vị trí đặt và vật cản đường truyền tín hiệu hồng ngoại
+        instruction: Đảm bảo bộ phát IR đặt trong cùng phòng, hướng về phía mắt nhận tín hiệu của thiết bị đích (khoảng cách dưới 5–7m) và không bị che khuất bởi vật dụng, kính mờ hay rèm cửa.
+      - id: CHECK_TARGET_DEVICE
+        title: Kiểm tra thiết bị đích bằng remote gốc
+        instruction: Thử bấm bật/tắt thiết bị đích bằng remote gốc đi kèm để xác nhận thiết bị đích đang có điện và mắt nhận hồng ngoại vẫn hoạt động bình thường.
+  - id: IR_HARDWARE_FAULT
+    label: Bộ phát IR rơi vỡ, vào nước hoặc hỏng phần cứng
+    ticketDescription: Bộ phát hồng ngoại có dấu hiệu hư hỏng vật lý bên ngoài, cần kỹ thuật viên kiểm tra hoặc thay thế.
+    hardwareOnly: true
+    steps: []

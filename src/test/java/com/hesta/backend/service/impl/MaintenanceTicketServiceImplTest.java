@@ -39,6 +39,7 @@ class MaintenanceTicketServiceImplTest {
     private static final Instant NOW = ZonedDateTime.of(2026, 11, 23, 8, 0, 0, 0, VN).toInstant();
 
     @Mock private MaintenanceTicketRepository ticketRepository;
+    @Mock private MaintenanceTicketAttachmentRepository attachmentRepository;
     @Mock private DeviceRepository deviceRepository;
     @Mock private DeviceAnomalyRepository deviceAnomalyRepository;
     @Mock private UserRepository userRepository;
@@ -61,7 +62,7 @@ class MaintenanceTicketServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new MaintenanceTicketServiceImpl(ticketRepository, deviceRepository, deviceAnomalyRepository,
+        service = new MaintenanceTicketServiceImpl(ticketRepository, attachmentRepository, deviceRepository, deviceAnomalyRepository,
                 userRepository, homeMemberRepository, homeAuthorizationService, anomalyDetectionService,
                 eventPublisher, Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -288,6 +289,32 @@ class MaintenanceTicketServiceImplTest {
 
         assertThatThrownBy(() -> service.getForHome(strangerId, homeId, ticket.getId()))
                 .extracting("errorCode").isEqualTo(ErrorCode.MAINTENANCE_TICKET_NOT_FOUND);
+    }
+
+    @Test
+    void createRejectsAttachmentBelongingToAnotherUserOrMoreThanFive() {
+        memberWithDeviceLevel(AccessLevel.VIEW);
+        UUID attId = UUID.randomUUID();
+        User otherUser = User.builder().id(UUID.randomUUID()).fullName("Other").email("other@x.vn").build();
+        MaintenanceTicketAttachment foreign = MaintenanceTicketAttachment.builder()
+                .id(attId).home(home).uploadedBy(otherUser).storagePublicId("p").url("https://u").contentType("image/jpeg").sizeBytes(100).build();
+        when(attachmentRepository.findAllByIdIn(List.of(attId))).thenReturn(List.of(foreign));
+
+        CreateMaintenanceTicketRequest foreignReq = new CreateMaintenanceTicketRequest(
+                "Đèn hỏng", null, null, null,
+                List.of(new CreateMaintenanceTicketRequest.DeviceItem(deviceId, null, null)),
+                List.of(validSlot(1)), null, null, List.of(attId), null);
+        assertThatThrownBy(() -> service.create(userId, homeId, foreignReq))
+                .extracting("errorCode").isEqualTo(ErrorCode.MAINTENANCE_ATTACHMENT_NOT_FOUND);
+
+        List<UUID> sixIds = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        CreateMaintenanceTicketRequest tooManyReq = new CreateMaintenanceTicketRequest(
+                "Đèn hỏng", null, null, null,
+                List.of(new CreateMaintenanceTicketRequest.DeviceItem(deviceId, null, null)),
+                List.of(validSlot(1)), null, null, sixIds, null);
+        assertThatThrownBy(() -> service.create(userId, homeId, tooManyReq))
+                .extracting("errorCode").isEqualTo(ErrorCode.MAINTENANCE_ATTACHMENT_LIMIT_EXCEEDED);
     }
 
     // ---- fixtures ----

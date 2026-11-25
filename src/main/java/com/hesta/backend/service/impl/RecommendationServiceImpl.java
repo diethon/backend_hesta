@@ -150,6 +150,12 @@ public class RecommendationServiceImpl implements RecommendationService {
         if (proposal.getDeviceId() == null || proposal.getAction() == null) return null;
         Device device = devices.findById(proposal.getDeviceId()).orElse(null);
         if (device == null || device.getRoom() == null || !home.getId().equals(device.getRoom().getHome().getId())) return null;
+        // Sensors only report; "turn on the light sensor at 06:44" is a habit nobody has. Some have no
+        // capability list, which supportsAction reads as "anything goes", so check the type too.
+        if (device.getDeviceType() != null && device.getDeviceType().toUpperCase(java.util.Locale.ROOT).contains("SENSOR")) {
+            log.info("Skipping recommendation: {} is a sensor", device.getName());
+            return null;
+        }
         if (!device.supportsAction(proposal.getAction())) {
             log.info("Skipping recommendation: device {} does not support {}", device.getName(), proposal.getAction());
             return null;

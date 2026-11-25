@@ -60,6 +60,7 @@ public final class EndpointPolicyRegistry {
         // Specific method overrides (Owner only or specific level)
         METHOD_POLICIES.put("HomeMemberAccessController.updateMemberAccess", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("EnergyController.updateDemandResponseSettings", AccessPolicyType.HOME_OWNER);
+        METHOD_POLICIES.put("EnergyController.evaluateDemandResponse", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("HomeController.updateMemberRole", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("HomeController.removeMember", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("RoomController.createRoom", AccessPolicyType.HOME_OWNER);

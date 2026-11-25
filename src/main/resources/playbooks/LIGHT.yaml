@@ -1,0 +1,76 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho nhóm Đèn thông minh (LIGHT, LED, LED_RGB)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: LIGHT
+label: Đèn thông minh
+deviceTypes:
+  - LIGHT
+  - LED
+  - LED_RGB
+imageHints:
+  - Đèn báo trạng thái trên thân đèn hoặc công tắc tường
+  - Bề mặt chao đèn và vỏ ngoài (có nứt vỡ hay đổi màu không)
+  - Tem model/serial dán ở mặt ngoài nếu dễ tiếp cận
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Đèn vẫn không sáng, mất kết nối quá 1 giờ hoặc nhấp nháy bất thường sau khi đã thử các bước kiểm tra an toàn.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, nước vào hoặc rò điện
+  advice: "DỪNG THAO TÁC NGAY LẬP TỨC! Không chạm vào đèn hay công tắc nếu nghi ngờ rò điện hoặc có mùi khét. Nếu đảm bảo an toàn, hãy ngắt aptomat khu vực này. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP để kỹ thuật viên kiểm tra."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - phồng
+symptoms:
+  - id: LIGHT_OFFLINE
+    label: Mất kết nối / Không điều khiển được trên ứng dụng
+    ticketDescription: Đèn thông minh bị mất kết nối, không phản hồi lệnh bật/tắt từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_WALL_SWITCH
+        title: Kiểm tra công tắc nguồn và nguồn điện phòng
+        instruction: Đảm bảo công tắc tường cấp nguồn cho đèn đang ở trạng thái BẬT và các thiết bị khác trong phòng vẫn có điện bình thường.
+      - id: POWER_CYCLE
+        title: Khởi động lại đèn (bật/tắt nguồn sau 30 giây)
+        instruction: Tắt công tắc tường của đèn, chờ đúng 30 giây rồi bật lại. Quan sát xem đèn có sáng hoặc nháy tín hiệu khởi động không.
+      - id: CHECK_WIFI_GATEWAY
+        title: Kiểm tra Wi-Fi và bộ điều khiển trung tâm (Edge Node)
+        instruction: Kiểm tra bộ phát Wi-Fi và bộ điều khiển trung tâm Hesta xem đèn báo mạng có sáng ổn định không. Chờ khoảng 1 phút rồi thử bật/tắt lại trên ứng dụng.
+  - id: LIGHT_NOT_TURNING_ON
+    label: Bật không sáng cả trên ứng dụng lẫn công tắc
+    ticketDescription: Đèn không sáng khi thao tác cả trên ứng dụng và công tắc tường.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_ROOM_POWER
+        title: Kiểm tra nguồn điện chung trong phòng
+        instruction: Kiểm tra xem các thiết bị điện khác trong cùng phòng có hoạt động bình thường không và aptomat chiếu sáng có bị gạt xuống không (không tự mở tủ điện nếu có dấu hiệu bất thường).
+      - id: TOGGLE_CYCLE
+        title: Tắt công tắc chờ 30 giây rồi bật lại
+        instruction: Gạt công tắc về vị trí TẮT, chờ 30 giây rồi gạt lại BẬT. Kiểm tra mức độ sáng trên ứng dụng có đang để 0% không.
+  - id: LIGHT_FLICKER_OR_COLOR
+    label: Đèn nhấp nháy liên tục hoặc sai màu / kẹt độ sáng
+    ticketDescription: Đèn có hiện tượng nhấp nháy liên tục, không đổi được màu hoặc kẹt độ sáng.
+    hardwareOnly: false
+    steps:
+      - id: RESET_APP_STATE
+        title: Đặt lại độ sáng và màu mặc định trên ứng dụng
+        instruction: Trên ứng dụng Hesta, thử chỉnh độ sáng lên 100% và chọn màu trắng mặc định, sau đó tắt rồi bật lại đèn.
+      - id: POWER_CYCLE_30S
+        title: Khởi động lại nguồn đèn sau 30 giây
+        instruction: Tắt công tắc nguồn của đèn trong 30 giây rồi bật lại để bộ điều khiển tự cân bằng lại.
+      - id: CHECK_AUTOMATION
+        title: Kiểm tra kịch bản tự động hóa đang chạy
+        instruction: Kiểm tra mục Tự động hóa xem có luật hoặc kịch bản nào đang liên tục gửi lệnh bật/tắt gây nhấp nháy đèn không.
+  - id: LIGHT_PHYSICAL_DAMAGE
+    label: Vỡ chao đèn, lỏng đui hoặc hư hỏng vật lý bên ngoài
+    ticketDescription: Đèn có hư hỏng vật lý bên ngoài, cần kỹ thuật viên kiểm tra và thay thế an toàn.
+    hardwareOnly: true
+    steps: []

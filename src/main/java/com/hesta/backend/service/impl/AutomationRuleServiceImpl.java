@@ -3,6 +3,8 @@ package com.hesta.backend.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.request.*;
 import com.hesta.backend.dto.response.*;
+import com.hesta.backend.service.automation.RuleTiming;
+import com.hesta.backend.entity.DeviceGroup;
 import com.hesta.backend.entity.*;
 import com.hesta.backend.enums.*;
 import com.hesta.backend.exception.AppException;
@@ -26,6 +28,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class AutomationRuleServiceImpl implements AutomationRuleService {
     private final HomeAuthorizationService homeAuthorizationService;
+    private final com.hesta.backend.repository.DeviceGroupRepository groupRepository;
     private final AutomationRuleRepository ruleRepository;
     private final AutomationExecutionRepository executionRepository;
     private final DeviceRepository deviceRepository;
@@ -52,7 +55,8 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         TriggerType triggerType = parseTrigger(request.getTriggerType());
         AutomationRule rule = AutomationRule.builder()
                 .home(home).name(request.getName().trim()).description(normalize(request.getDescription()))
-                .triggerType(triggerType).enabled(request.getEnabled()).build();
+                .triggerType(triggerType).enabled(request.getEnabled())
+                .holdSeconds(holdSeconds(request.getHoldSeconds(), triggerType)).build();
         replaceChildren(rule, request.getConditions(), request.getActions(), home);
         AutomationRule saved = ruleRepository.saveAndFlush(rule);
         saveSchedules(saved, request.getSchedules());
@@ -65,7 +69,12 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         checkAutomationAccess(userId, homeId);
         List<AutomationRule> rules = ruleRepository.findAllByHomeIdOrderByNameAsc(homeId);
         fetchActions(rules);
-        return rules.stream().map(this::toResponse).toList();
+        // One query for every schedule rule's times instead of one per rule.
+        List<UUID> scheduled = rules.stream().filter(r -> r.getTriggerType() == TriggerType.SCHEDULE).map(AutomationRule::getId).toList();
+        Map<UUID, List<AutomationSchedule>> times = scheduled.isEmpty() ? Map.of()
+                : scheduleRepository.findAllByRuleIdInOrderByScheduledTimeAsc(scheduled).stream()
+                        .collect(java.util.stream.Collectors.groupingBy(s -> s.getRule().getId()));
+        return rules.stream().map(rule -> toResponse(rule, times.getOrDefault(rule.getId(), List.of()))).toList();
     }
 
     @Override
@@ -86,6 +95,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         rule.setDescription(normalize(request.getDescription()));
         rule.setTriggerType(parseTrigger(request.getTriggerType()));
         rule.setEnabled(request.getEnabled());
+        rule.setHoldSeconds(holdSeconds(request.getHoldSeconds(), rule.getTriggerType()));
         replaceChildren(rule, request.getConditions(), request.getActions(), home);
         if (rule.getTriggerType() != TriggerType.SCHEDULE) {
             // Schedules of a rule that is no longer SCHEDULE would fail on every tick.
@@ -155,13 +165,17 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         }
         validateOrders(actionRequests.stream().map(RuleActionRequest::getOrder).toList(), ErrorCode.AUTOMATION_ACTION_INVALID);
         Map<UUID, Device> devices = loadDevices(conditionRequests, actionRequests);
+        Map<UUID, DeviceGroup> groups = loadGroups(conditionRequests, actionRequests, home);
+        if (actionRequests.stream().allMatch(a -> a != null && RuleTiming.DELAY.equalsIgnoreCase(String.valueOf(a.getAction()).trim()))) {
+            throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID); // a rule of only waits does nothing
+        }
 
         List<RuleCondition> conditions = conditionRequests.stream()
                 .sorted(Comparator.comparingInt(RuleConditionRequest::getOrder))
-                .map(request -> buildCondition(rule, request, devices, home)).toList();
+                .map(request -> buildCondition(rule, request, devices, groups, home)).toList();
         List<RuleAction> actions = actionRequests.stream()
                 .sorted(Comparator.comparingInt(RuleActionRequest::getOrder))
-                .map(request -> buildAction(rule, request, devices, home)).toList();
+                .map(request -> buildAction(rule, request, devices, groups, home)).toList();
 
         rule.getConditions().clear();
         rule.getActions().clear();
@@ -174,7 +188,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     }
 
     private RuleCondition buildCondition(AutomationRule rule, RuleConditionRequest request,
-                                         Map<UUID, Device> devices, Home home) {
+                                         Map<UUID, Device> devices, Map<UUID, DeviceGroup> groups, Home home) {
         if (request == null || request.getAttribute() == null || request.getAttribute().isBlank()
                 || request.getExpectedValue() == null) {
             throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
@@ -189,19 +203,21 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         }
         Device device = request.getDeviceId() == null ? null : devices.get(request.getDeviceId());
         validateHome(device, home);
+        DeviceGroup group = request.getGroupId() == null ? null : groups.get(request.getGroupId());
+        if (device != null && group != null) throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
         if (RuleMatcher.TIME_OF_DAY.equals(request.getAttribute().trim())
-                && (device != null || !String.valueOf(request.getExpectedValue()).matches("([01]\\d|2[0-3]):[0-5]\\d"))) {
+                && (device != null || group != null || !String.valueOf(request.getExpectedValue()).matches("([01]\\d|2[0-3]):[0-5]\\d"))) {
             // Engine compares "HH:mm" strings, so the expected value must be zero-padded.
             throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
         }
-        return RuleCondition.builder().rule(rule).device(device).attribute(request.getAttribute().trim())
+        return RuleCondition.builder().rule(rule).device(device).group(group).attribute(request.getAttribute().trim())
                 .operator(operator).expectedValue(objectMapper.valueToTree(request.getExpectedValue()))
                 .logicalOperator(logicalOperator)
                 .order(request.getOrder()).build();
     }
 
     private RuleAction buildAction(AutomationRule rule, RuleActionRequest request,
-                                   Map<UUID, Device> devices, Home home) {
+                                   Map<UUID, Device> devices, Map<UUID, DeviceGroup> groups, Home home) {
         if (request == null || request.getAction() == null) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
@@ -210,6 +226,30 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
             action = request.getAction().trim().toUpperCase(Locale.ROOT);
         } catch (RuntimeException exception) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+        }
+        if (RuleTiming.DELAY.equals(action)) {
+            if (request.getDeviceId() != null || request.getSceneId() != null || request.getGroupId() != null
+                    || RuleTiming.delaySeconds(request.getParameters()) < 0) {
+                throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+            }
+            return RuleAction.builder().rule(rule).action(action)
+                    .parameters(new HashMap<>(Map.of(RuleTiming.SECONDS, RuleTiming.delaySeconds(request.getParameters()))))
+                    .order(request.getOrder()).build();
+        }
+        if (request.getGroupId() != null) {
+            if (request.getDeviceId() != null || request.getSceneId() != null) {
+                throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+            }
+            DeviceGroup group = groups.get(request.getGroupId());
+            Map<String, Object> commandParameters = RuleTiming.commandParameters(request.getParameters());
+            // At least one member must be able to do it; the others are skipped (and shown) when the rule runs.
+            if (!DeviceActionValues.isValidParameters(action, commandParameters)
+                    || group.getDevices().stream().noneMatch(member -> supportsWithUndo(member, action, request.getParameters()))) {
+                throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+            }
+            return RuleAction.builder().rule(rule).group(group).action(action)
+                    .parameters(request.getParameters() == null ? new HashMap<>() : new HashMap<>(request.getParameters()))
+                    .order(request.getOrder()).build();
         }
         if ("EXECUTE_SCENE".equals(action)) {
             if (request.getSceneId() == null || request.getDeviceId() != null
@@ -228,12 +268,45 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         }
         Device device = devices.get(request.getDeviceId());
         validateHome(device, home);
-        if (!DeviceActionValues.isValidParameters(action, request.getParameters()) || !device.supportsAction(action)) {
+        if (!DeviceActionValues.isValidParameters(action, RuleTiming.commandParameters(request.getParameters()))
+                || !supportsWithUndo(device, action, request.getParameters())) {
             throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
         }
         return RuleAction.builder().rule(rule).device(device).action(action)
                 .parameters(request.getParameters() == null ? new HashMap<>() : new HashMap<>(request.getParameters()))
                 .order(request.getOrder()).build();
+    }
+
+    /** The device can run the action and, when auto-off is set, also the command that undoes it. */
+    private static boolean supportsWithUndo(Device device, String action, Map<String, Object> parameters) {
+        int autoOff = RuleTiming.autoOffSeconds(parameters);
+        if (autoOff < 0 || !device.supportsAction(action)) return false;
+        if (autoOff == 0) return true;
+        String undo = RuleTiming.undoAction(action, parameters);
+        return undo != null && device.supportsAction(undo);
+    }
+
+    private int holdSeconds(Integer requested, TriggerType triggerType) {
+        int seconds = requested == null ? 0 : requested;
+        // A SCHEDULE rule has no conditions to hold.
+        if (seconds < 0 || seconds > RuleTiming.MAX_HOLD_SECONDS || (seconds > 0 && triggerType == TriggerType.SCHEDULE)) {
+            throw new AppException(ErrorCode.AUTOMATION_CONDITION_INVALID);
+        }
+        return seconds;
+    }
+
+    private Map<UUID, DeviceGroup> loadGroups(List<RuleConditionRequest> conditions, List<RuleActionRequest> actions, Home home) {
+        Set<UUID> ids = new HashSet<>();
+        conditions.stream().map(RuleConditionRequest::getGroupId).filter(Objects::nonNull).forEach(ids::add);
+        actions.stream().filter(Objects::nonNull).map(RuleActionRequest::getGroupId).filter(Objects::nonNull).forEach(ids::add);
+        Map<UUID, DeviceGroup> result = new HashMap<>();
+        for (UUID id : ids) {
+            DeviceGroup group = groupRepository.findByIdAndHomeId(id, home.getId())
+                    .orElseThrow(() -> new AppException(ErrorCode.AUTOMATION_DEVICE_HOME_MISMATCH));
+            if (group.getDevices().isEmpty()) throw new AppException(ErrorCode.AUTOMATION_ACTION_INVALID);
+            result.put(id, group);
+        }
+        return result;
     }
 
     private Map<UUID, Device> loadDevices(List<RuleConditionRequest> conditions, List<RuleActionRequest> actions) {
@@ -297,13 +370,22 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     }
 
     private AutomationRuleResponse toResponse(AutomationRule rule) {
+        return toResponse(rule, rule.getTriggerType() == TriggerType.SCHEDULE
+                ? scheduleRepository.findAllByRuleIdOrderByScheduledTimeAsc(rule.getId()) : List.of());
+    }
+
+    private AutomationRuleResponse toResponse(AutomationRule rule, List<AutomationSchedule> times) {
         return AutomationRuleResponse.builder().id(rule.getId()).homeId(rule.getHome().getId())
+                .schedules(times.stream().map(t -> ScheduleResponse.builder().id(t.getId()).scheduledTime(t.getScheduledTime())
+                        .repeatDays(java.util.Arrays.asList(t.getRepeatDays())).active(t.isActive()).build()).toList())
                 .name(rule.getName()).description(rule.getDescription()).triggerType(rule.getTriggerType().name())
-                .enabled(rule.isEnabled()).createdAt(rule.getCreatedAt()).updatedAt(rule.getUpdatedAt())
+                .enabled(rule.isEnabled()).holdSeconds(rule.getHoldSeconds()).createdAt(rule.getCreatedAt()).updatedAt(rule.getUpdatedAt())
                 .conditions(rule.getConditions().stream().sorted(Comparator.comparingInt(RuleCondition::getOrder))
                         .map(condition -> RuleConditionResponse.builder().id(condition.getId())
                                 .deviceId(condition.getDevice() == null ? null : condition.getDevice().getId())
                                 .deviceName(condition.getDevice() == null ? null : condition.getDevice().getName())
+                                .groupId(condition.getGroup() == null ? null : condition.getGroup().getId())
+                                .groupName(condition.getGroup() == null ? null : condition.getGroup().getName())
                                 .attribute(condition.getAttribute()).operator(condition.getOperator().name())
                                 .expectedValue(condition.getExpectedValue())
                                 .logicalOperator(condition.getLogicalOperator().name()).order(condition.getOrder()).build()).toList())
@@ -313,6 +395,8 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                                 .deviceName(action.getDevice() == null ? null : action.getDevice().getName())
                                 .sceneId(action.getScene() == null ? null : action.getScene().getId())
                                 .sceneName(action.getScene() == null ? null : action.getScene().getName())
+                                .groupId(action.getGroup() == null ? null : action.getGroup().getId())
+                                .groupName(action.getGroup() == null ? null : action.getGroup().getName())
                                 .action(action.getAction())
                                 .parameters(action.getParameters()).order(action.getOrder()).build()).toList())
                 .build();

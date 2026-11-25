@@ -26,6 +26,8 @@ public class SceneResponse {
     boolean enabled;
     @Builder.Default
     List<SceneActionResponse> actions = new ArrayList<>();
+    /** When a one-off "run after X" will fire; null if none is pending. */
+    OffsetDateTime pendingRunAt;
     OffsetDateTime createdAt;
     OffsetDateTime updatedAt;
 }

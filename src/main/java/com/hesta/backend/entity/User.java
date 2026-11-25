@@ -71,6 +71,10 @@ public class User {
     @Column(name = "last_active_at")
     OffsetDateTime lastActiveAt;
 
+    @Column(name = "maintenance_email_enabled", nullable = false)
+    @Builder.Default
+    boolean maintenanceEmailEnabled = true;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     OffsetDateTime createdAt;

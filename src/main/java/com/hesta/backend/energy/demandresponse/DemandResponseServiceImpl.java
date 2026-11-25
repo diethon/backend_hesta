@@ -1,17 +1,25 @@
 package com.hesta.backend.energy.demandresponse;
 
+import com.hesta.backend.dto.command.DeviceStateChangedEvent;
+import com.hesta.backend.dto.command.SensorReadingUpdatedEvent;
+import com.hesta.backend.energy.EnergyPowerCalculator;
 import com.hesta.backend.entity.Device;
+import com.hesta.backend.entity.HomeEnergySettings;
+import com.hesta.backend.enums.DeviceStatus;
 import com.hesta.backend.enums.StateChangeSource;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
+import com.hesta.backend.repository.HomeEnergySettingsRepository;
 import com.hesta.backend.service.DeviceCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,7 +30,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DemandResponseServiceImpl implements DemandResponseService {
 
+    private static final long AUTO_EVAL_COOLDOWN_MS = 15_000L;
+
     private final DeviceRepository deviceRepository;
+
+    @Autowired(required = false)
+    private HomeEnergySettingsRepository settingsRepository;
 
     @Autowired
     @Lazy
@@ -32,16 +45,29 @@ public class DemandResponseServiceImpl implements DemandResponseService {
         this.deviceCommandService = deviceCommandService;
     }
 
+    public void setSettingsRepository(HomeEnergySettingsRepository settingsRepository) {
+        this.settingsRepository = settingsRepository;
+    }
+
     private final ConcurrentHashMap<UUID, DemandResponseSettings> settingsMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Long> lastAutoEvalAt = new ConcurrentHashMap<>();
 
     @Override
     public DemandResponseSettings getSettings(UUID homeId) {
+        if (settingsRepository != null) {
+            Optional<HomeEnergySettings> stored = settingsRepository.findById(homeId);
+            if (stored.isPresent()) {
+                DemandResponseSettings mapped = toDto(stored.get());
+                settingsMap.put(homeId, mapped);
+                return mapped;
+            }
+        }
         return settingsMap.computeIfAbsent(homeId, id -> DemandResponseSettings.builder()
                 .homeId(id)
                 .enabled(true)
                 .peakThresholdWatts(4000.0)
                 .mode("AUTO_SHED")
-                .updatedAt(OffsetDateTime.now())
+                .updatedAt(EnergyPowerCalculator.nowVn())
                 .build());
     }
 
@@ -58,11 +84,33 @@ public class DemandResponseServiceImpl implements DemandResponseService {
         if (settings.getMode() != null && !settings.getMode().isBlank()) {
             current.setMode(settings.getMode().toUpperCase());
         }
-        current.setUpdatedAt(OffsetDateTime.now());
+        current.setUpdatedAt(EnergyPowerCalculator.nowVn());
         settingsMap.put(homeId, current);
+        if (settingsRepository != null) {
+            HomeEnergySettings entity = HomeEnergySettings.builder()
+                    .homeId(homeId)
+                    .drEnabled(current.isEnabled())
+                    .peakThresholdWatts(BigDecimal.valueOf(current.getPeakThresholdWatts()))
+                    .drMode(current.getMode() != null ? current.getMode() : "AUTO_SHED")
+                    .billingStartDay(1)
+                    .timezone(EnergyPowerCalculator.ENERGY_ZONE.getId())
+                    .updatedAt(current.getUpdatedAt())
+                    .build();
+            settingsRepository.save(entity);
+        }
         log.info("Updated Demand Response settings for home [{}]: threshold={}W, mode={}",
                 homeId, current.getPeakThresholdWatts(), current.getMode());
         return current;
+    }
+
+    private static DemandResponseSettings toDto(HomeEnergySettings entity) {
+        return DemandResponseSettings.builder()
+                .homeId(entity.getHomeId())
+                .enabled(entity.isDrEnabled())
+                .peakThresholdWatts(entity.getPeakThresholdWatts() != null ? entity.getPeakThresholdWatts().doubleValue() : 4000.0)
+                .mode(entity.getDrMode() != null ? entity.getDrMode() : "AUTO_SHED")
+                .updatedAt(entity.getUpdatedAt())
+                .build();
     }
 
     @Override
@@ -82,17 +130,20 @@ public class DemandResponseServiceImpl implements DemandResponseService {
             return DevicePriorityCategory.SAFETY;
         }
 
-        // 2. ESSENTIAL: Tủ lạnh, camera an ninh, gateway router, cổng chính
+        // 2. ESSENTIAL: Tủ lạnh, camera an ninh, gateway router, cổng/cửa chính, bộ điều khiển IR và các cảm biến môi trường
         if (type.contains("FRIDGE") || type.contains("CAMERA") || type.contains("ROUTER") ||
-            type.contains("GATE") || type.contains("DOOR") || name.contains("TỦ LẠNH") ||
+            type.contains("GATE") || type.contains("DOOR") || type.contains("SENSOR") ||
+            "IR_REMOTE".equals(type) || name.contains("TỦ LẠNH") ||
             name.contains("CAMERA") || name.contains("CỔNG")) {
             return DevicePriorityCategory.ESSENTIAL;
         }
 
-        // 3. COMFORT: Điều hòa không khí, bình nước nóng, máy sưởi, quạt
+        // 3. COMFORT: Điều hòa, bình nước nóng, máy sưởi, máy bơm nước, quạt
         if (type.contains("AIR_CONDITIONER") || type.equals("AC") || type.startsWith("AC_") || type.endsWith("_AC") ||
-            type.contains("HEATER") || type.contains("WATER_HEATER") || type.contains("FAN") ||
-            name.contains("ĐIỀU HÒA") || name.contains("BÌNH NÓNG LẠNH") || name.contains("QUẠT")) {
+            type.contains("HEATER") || type.contains("WATER_HEATER") || type.contains("WATER_PUMP") ||
+            type.contains("PUMP") || type.contains("FAN") ||
+            name.contains("ĐIỀU HÒA") || name.contains("BÌNH NÓNG LẠNH") ||
+            name.contains("MÁY BƠM") || name.contains("QUẠT")) {
             return DevicePriorityCategory.COMFORT;
         }
 
@@ -103,9 +154,11 @@ public class DemandResponseServiceImpl implements DemandResponseService {
     @Override
     public DemandResponseEvaluationResult evaluateAndShed(UUID homeId, Double simulatedWatts) {
         DemandResponseSettings settings = getSettings(homeId);
-        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
+        List<Device> devices = deviceRepository.findByHomeIdWithRoomAndNode(homeId).stream()
+                .filter(d -> !d.isDeleted())
+                .toList();
 
-        // Calculate current total power
+        // Calculate current total power (excluding OFFLINE/UNKNOWN devices)
         double computedWatts = 0.0;
         List<Device> activeDevices = new ArrayList<>();
 
@@ -130,7 +183,7 @@ public class DemandResponseServiceImpl implements DemandResponseService {
                     .sheddedDevices(Collections.emptyList())
                     .wattsSaved(0.0)
                     .message("Công suất tiêu thụ an toàn trong hạn mức quy định")
-                    .evaluatedAt(OffsetDateTime.now())
+                    .evaluatedAt(EnergyPowerCalculator.nowVn())
                     .build();
         }
 
@@ -146,7 +199,7 @@ public class DemandResponseServiceImpl implements DemandResponseService {
                     .sheddedDevices(Collections.emptyList())
                     .wattsSaved(0.0)
                     .message("CẢNH BÁO: Công suất tiêu thụ vượt hạn mức đỉnh " + (int) excess + "W")
-                    .evaluatedAt(OffsetDateTime.now())
+                    .evaluatedAt(EnergyPowerCalculator.nowVn())
                     .build();
         }
 
@@ -195,8 +248,44 @@ public class DemandResponseServiceImpl implements DemandResponseService {
                 .sheddedDevices(shedded)
                 .wattsSaved(Math.round(savedWatts * 10.0) / 10.0)
                 .message("Đã tự động ngắt tải " + shedded.size() + " thiết bị để bảo vệ lưới điện gia đình")
-                .evaluatedAt(OffsetDateTime.now())
+                .evaluatedAt(EnergyPowerCalculator.nowVn())
                 .build();
+    }
+
+    @EventListener
+    public void onDeviceStateChanged(DeviceStateChangedEvent event) {
+        if (event != null && event.homeId() != null) {
+            triggerAutoEvaluation(event.homeId());
+        }
+    }
+
+    @EventListener
+    public void onSensorReadingUpdated(SensorReadingUpdatedEvent event) {
+        if (event == null || event.homeId() == null || event.payload() == null) {
+            return;
+        }
+        String metric = event.payload().metricType();
+        if (metric != null && (metric.equalsIgnoreCase("POWER") || metric.equalsIgnoreCase("WATT")
+                || metric.equalsIgnoreCase("WATTS") || metric.equalsIgnoreCase("ACTIVE_POWER"))) {
+            triggerAutoEvaluation(event.homeId());
+        }
+    }
+
+    private void triggerAutoEvaluation(UUID homeId) {
+        long nowMs = System.currentTimeMillis();
+        Long lastMs = lastAutoEvalAt.get(homeId);
+        if (lastMs != null && nowMs - lastMs < AUTO_EVAL_COOLDOWN_MS) {
+            return;
+        }
+        lastAutoEvalAt.put(homeId, nowMs);
+        try {
+            DemandResponseSettings settings = getSettings(homeId);
+            if (settings.isEnabled()) {
+                evaluateAndShed(homeId, null);
+            }
+        } catch (Exception ex) {
+            log.debug("Auto Demand Response check skipped for home [{}]: {}", homeId, ex.getMessage());
+        }
     }
 
     private boolean shedDevice(Device dev) {
@@ -215,33 +304,15 @@ public class DemandResponseServiceImpl implements DemandResponseService {
     }
 
     private boolean isDeviceOn(Device dev) {
-        if (dev == null || dev.getCurrentState() == null) return false;
-        Object p = dev.getCurrentState().get("power");
-        if (p != null) {
-            String s = p.toString().trim();
-            return "ON".equalsIgnoreCase(s) || "TRUE".equalsIgnoreCase(s) || "1".equals(s);
+        if (dev == null || dev.isDeleted()) return false;
+        if (dev.getStatus() == DeviceStatus.OFFLINE || dev.getStatus() == DeviceStatus.UNKNOWN) {
+            return false;
         }
-        Object st = dev.getCurrentState().get("state");
-        if (st != null) {
-            String s = st.toString().trim();
-            return "OPEN".equalsIgnoreCase(s) || "RUNNING".equalsIgnoreCase(s) || "OPENING".equalsIgnoreCase(s);
-        }
-        return false;
+        return EnergyPowerCalculator.isStateOn(dev, dev.getCurrentState());
     }
 
     private double resolveDeviceWattage(Device dev) {
-        if (dev == null) return 60.0;
-        if (dev.getSettings() != null && dev.getSettings().get("wattage") != null) {
-            try {
-                return Double.parseDouble(dev.getSettings().get("wattage").toString().trim());
-            } catch (Exception ignored) {}
-        }
-        String type = dev.getDeviceType() != null ? dev.getDeviceType().toUpperCase() : "";
-        if (type.contains("AIR_CONDITIONER") || type.contains("AC")) return 1800.0;
-        if (type.contains("WATER_HEATER") || type.contains("HEATER")) return 2500.0;
-        if (type.contains("FRIDGE")) return 150.0;
-        if (type.contains("FAN")) return 65.0;
-        if (type.contains("LIGHT")) return 30.0;
-        return 80.0;
+        int baseWattage = EnergyPowerCalculator.resolveBaseWattage(dev);
+        return EnergyPowerCalculator.resolveEffectiveWattage(dev, baseWattage, dev != null ? dev.getCurrentState() : null);
     }
 }
