@@ -51,7 +51,7 @@ ALLOWED_ORIGINS = {
     origin.strip()
     for origin in os.environ.get(
         "ALLOWED_ORIGINS",
-        "https://hesta.homes,http://localhost:5173,http://localhost:3000",
+        "https://dashboard.hesta.homes,https://hesta.homes,http://localhost:5173,http://localhost:3000",
     ).split(",")
     if origin.strip()
 }
