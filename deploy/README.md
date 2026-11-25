@@ -1,9 +1,9 @@
 # HESTA Production Deployment
 
-VPS: `root@103.77.209.19` (alias: `hesta`) | Domain: `https://hesta.homes` (Let's Encrypt qua `certbot --nginx`)
+VPS: `root@103.77.209.19` (alias: `hesta`) | Landing: `https://hesta.homes` (repo hesta_landingpage) | Dashboard: `https://dashboard.hesta.homes` (Let's Encrypt qua `certbot --nginx`)
 
 ## 1. Kiến trúc
-- **Nginx (Host):** Phục vụ frontend từ `/var/www/hesta`; `api.hesta.homes` reverse proxy toàn bộ tới backend (`127.0.0.1:8080`).
+- **Nginx (Host):** Phục vụ dashboard (`dashboard.hesta.homes`) từ `/var/www/hesta`, landing (`hesta.homes`) từ `/var/www/hesta-landing`; `api.hesta.homes` reverse proxy toàn bộ tới backend (`127.0.0.1:8080`).
 - **Docker Compose (`/opt/hesta`):**
   - `backend`: Chạy `app.jar` trên `eclipse-temurin:21-jre` (`127.0.0.1:8080`).
   - `recommendation`: Build từ source (`127.0.0.1:8000`).
