@@ -24,5 +24,5 @@ device_directory:
   refresh_interval_seconds: 60
 intent:
   mapping_file: "intents_vi.json"
-  min_confidence: 50.0
+  min_confidence: 68.0
   context_ttl_seconds: 45

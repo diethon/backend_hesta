@@ -226,6 +226,101 @@ class DispatchBatchResult:
             return f"Không thể {action_vi} {type_vi}{room_str} — thiết bị không phản hồi."
 
 
+@dataclass
+class SceneDispatchResult:
+    """Kết quả thực thi / tắt 1 kịch bản qua REST nội bộ (/internal/scenes/{id}/execute|deactivate)."""
+    scene_id: str
+    scene_name: str
+    mode: str = "ACTIVATE"  # ACTIVATE hoặc DEACTIVATE
+    success: bool = False
+    status: str = "FAILED"  # SUCCESS, PARTIAL, ALREADY_IN_STATE, FAILED, SKIPPED
+    status_code: int = 0
+    total_devices: int = 0
+    executed_count: int = 0
+    already_in_state_count: int = 0
+    conflict_resolved_count: int = 0
+    overridden_count: int = 0
+    overridden_scene_name: str | None = None
+    offline_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    error_code: str | None = None
+    error_message: str | None = None
+    duration_ms: float = 0.0
+
+    def summary_message(self) -> str:
+        """Sinh câu phản hồi tiếng Việt tự nhiên, rõ ràng về xung đột và trạng thái kịch bản."""
+        name = self.scene_name
+        is_deactivate = self.mode.upper() == "DEACTIVATE"
+        verb = "tắt" if is_deactivate else "bật"
+
+        if self.error_code in ("ACCESS_DENIED", "UNAUTHORIZED") or self.status_code in (401, 403):
+            return f"Bạn không có quyền {verb} kịch bản {name}."
+        if self.error_code == "SCENE_DISABLED":
+            return f"Kịch bản {name} hiện đang bị vô hiệu hóa."
+        if self.error_code == "SCENE_NOT_FOUND" or self.status_code == 404:
+            return f"Không tìm thấy kịch bản {name}."
+        if self.error_code == "CONNECTION_ERROR":
+            return f"Không thể kết nối máy chủ để {verb} kịch bản {name}."
+
+        if is_deactivate:
+            if self.status == "ALREADY_IN_STATE":
+                return f"Các thiết bị trong kịch bản {name} đều đã tắt sẵn rồi."
+            if self.status == "SKIPPED":
+                return f"Đã dừng kịch bản {name}."
+            if self.status == "SUCCESS":
+                if self.already_in_state_count > 0 and self.executed_count > 0:
+                    return f"Đã tắt kịch bản {name}, tắt {self.executed_count} thiết bị và giữ nguyên {self.already_in_state_count} thiết bị đã tắt."
+                return f"Đã tắt kịch bản {name}."
+            if self.status == "PARTIAL":
+                ok_total = self.executed_count + self.already_in_state_count
+                if self.offline_count > 0:
+                    return f"Đã tắt kịch bản {name} cho {ok_total} thiết bị, {self.offline_count} thiết bị đang ngoại tuyến."
+                return f"Đã tắt kịch bản {name} cho {ok_total} thiết bị, {self.failed_count} thiết bị không phản hồi."
+            if self.offline_count > 0:
+                return f"Không thể tắt kịch bản {name}, thiết bị hiện đang ngoại tuyến."
+            return f"Không thể tắt kịch bản {name}, thiết bị không phản hồi."
+
+        # ACTIVATE
+        if self.status == "ALREADY_IN_STATE":
+            return f"Kịch bản {name} đã sẵn sàng, tất cả thiết bị đều đang ở đúng trạng thái."
+
+        if self.status == "SKIPPED":
+            return f"Kịch bản {name} chưa có hành động thiết bị nào."
+
+        if self.status == "SUCCESS":
+            if self.overridden_scene_name:
+                base = f"Đã chuyển từ kịch bản {self.overridden_scene_name} sang kịch bản {name}"
+            else:
+                base = f"Đã bật kịch bản {name}"
+
+            extras: list[str] = []
+            if self.already_in_state_count > 0 and self.executed_count > 0:
+                extras.append(f"điều chỉnh {self.executed_count} thiết bị, {self.already_in_state_count} thiết bị đã đúng trạng thái")
+            if self.conflict_resolved_count > 0:
+                extras.append("đã tự động ưu tiên trạng thái sau cùng cho thiết bị cấu hình trùng")
+
+            if extras:
+                return f"{base}, " + "; ".join(extras) + "."
+            return f"{base}."
+
+        if self.status == "PARTIAL":
+            ok_total = self.executed_count + self.already_in_state_count
+            if self.overridden_scene_name:
+                prefix = f"Đã chuyển sang kịch bản {name} cho {ok_total} thiết bị"
+            else:
+                prefix = f"Đã bật kịch bản {name} cho {ok_total} thiết bị"
+            if self.offline_count > 0 and self.failed_count == 0:
+                return f"{prefix}, {self.offline_count} thiết bị đang ngoại tuyến."
+            if self.offline_count > 0:
+                return f"{prefix}, {self.offline_count} thiết bị ngoại tuyến và {self.failed_count} thiết bị lỗi."
+            return f"{prefix}, {self.failed_count} thiết bị không phản hồi."
+
+        if self.offline_count > 0:
+            return f"Không thể bật kịch bản {name}, các thiết bị hiện đang ngoại tuyến."
+        return f"Không thể bật kịch bản {name}, thiết bị không phản hồi."
+
+
 class Dispatcher:
     """
     Dispatch actions tới Spring Boot qua REST nội bộ.
@@ -430,6 +525,92 @@ class Dispatcher:
         )
 
         return batch_result
+
+    def dispatch_scene(
+        self,
+        scene_id: str,
+        scene_name: str,
+        mode: str = "ACTIVATE",
+        home_id: str = "",
+        user_id: str = "",
+    ) -> SceneDispatchResult:
+        """Gửi lệnh kích hoạt (/execute) hoặc tắt (/deactivate) kịch bản tới Spring Boot."""
+        action_suffix = "deactivate" if mode.upper() == "DEACTIVATE" else "execute"
+        endpoint = f"/internal/scenes/{scene_id}/{action_suffix}"
+        payload: dict[str, Any] = {}
+        if home_id:
+            payload["homeId"] = home_id
+        if user_id:
+            payload["userId"] = user_id
+
+        headers = {"X-Internal-Api-Key": self._get_api_key()}
+        if user_id:
+            headers["X-User-Id"] = user_id
+
+        try:
+            client = self._get_client()
+            t0 = time.perf_counter()
+            response = client.post(endpoint, json=payload, headers=headers, timeout=max(self.config.request_timeout_seconds, 10.0))
+            duration_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+            data = response.json() if response.content else {}
+            if response.status_code in (200, 201):
+                res_obj = data.get("result") if isinstance(data, dict) else {}
+                if not isinstance(res_obj, dict):
+                    res_obj = {}
+                return SceneDispatchResult(
+                    scene_id=scene_id,
+                    scene_name=str(res_obj.get("sceneName") or scene_name),
+                    mode=str(res_obj.get("mode") or mode).upper(),
+                    success=bool(res_obj.get("success", True)),
+                    status=str(res_obj.get("status") or "SUCCESS"),
+                    status_code=response.status_code,
+                    total_devices=int(res_obj.get("totalDevices") or 0),
+                    executed_count=int(res_obj.get("executedCount") or 0),
+                    already_in_state_count=int(res_obj.get("alreadyInStateCount") or 0),
+                    conflict_resolved_count=int(res_obj.get("conflictResolvedCount") or 0),
+                    overridden_count=int(res_obj.get("overriddenCount") or 0),
+                    overridden_scene_name=res_obj.get("overriddenSceneName"),
+                    offline_count=int(res_obj.get("offlineCount") or 0),
+                    failed_count=int(res_obj.get("failedCount") or 0),
+                    skipped_count=int(res_obj.get("skippedCount") or 0),
+                    error_code=res_obj.get("errorCode"),
+                    duration_ms=duration_ms,
+                )
+
+            err_msg = str(data.get("message") or response.text) if isinstance(data, dict) else response.text
+            err_code = None
+            if response.status_code == 401:
+                err_code = "UNAUTHORIZED"
+            elif response.status_code == 403:
+                err_code = "ACCESS_DENIED"
+            elif response.status_code == 404:
+                err_code = "SCENE_NOT_FOUND"
+            elif "disabled" in err_msg.lower() or "vô hiệu" in err_msg.lower() or (isinstance(data, dict) and data.get("code") == 3006):
+                err_code = "SCENE_DISABLED"
+
+            return SceneDispatchResult(
+                scene_id=scene_id,
+                scene_name=scene_name,
+                mode=mode.upper(),
+                success=False,
+                status="FAILED",
+                status_code=response.status_code,
+                error_code=err_code or "FAILED",
+                error_message=err_msg,
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            logger.error("Dispatch scene error (%s %s): %s", mode, scene_id, e)
+            return SceneDispatchResult(
+                scene_id=scene_id,
+                scene_name=scene_name,
+                mode=mode.upper(),
+                success=False,
+                status="FAILED",
+                error_code="CONNECTION_ERROR",
+                error_message=str(e),
+            )
 
     def close(self) -> None:
         """Đóng HTTP client nếu tự tạo."""
