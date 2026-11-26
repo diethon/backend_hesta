@@ -2802,7 +2802,7 @@ S --> C: throws AppException(SCENE_SCHEDULE_NOT_FOUND)
 C --> U: HTTP error / ApiResponse(ErrorCode)
 end
 end
-S -> S: Normalize scheduledTime.withSecond(0).withNano(0); set repeatDays, active
+S -> S: Normalize scheduledTime.withNano(0); set repeatDays, active
 activate S
 S --> S: Hoàn tất
 deactivate S
@@ -3299,7 +3299,7 @@ S --> C: throws AppException(SCENE_SCHEDULE_NOT_FOUND)
 C --> U: HTTP error / ApiResponse(ErrorCode)
 end
 end
-S -> S: Normalize scheduledTime.withSecond(0).withNano(0); set repeatDays, active
+S -> S: Normalize scheduledTime.withNano(0); set repeatDays, active
 activate S
 S --> S: Hoàn tất
 deactivate S

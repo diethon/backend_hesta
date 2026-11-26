@@ -214,6 +214,23 @@ class RecommendationServiceTest {
     }
 
     @Test
+    void skipsSensorsEvenWithoutACapabilityList() {
+        when(homeRepository.findById(homeId)).thenReturn(Optional.of(home));
+        when(recommendations.findAllByHomeIdOrderByCreatedAtDesc(homeId)).thenReturn(List.of());
+        device.setDeviceType("LUX_SENSOR");
+        device.setCapabilities(new java.util.HashMap<>()); // empty: supportsAction would say yes to anything
+        when(devices.findById(deviceId)).thenReturn(Optional.of(device));
+        OffsetDateTime to = OffsetDateTime.now();
+        OffsetDateTime from = to.minusDays(14);
+        when(mlServiceClient.generateRecommendations(eq(homeId), eq(from), eq(to), anyDouble())).thenReturn(List.of(
+                MlRecommendationProposal.builder().deviceId(deviceId).deviceName(device.getName()).action("TURN_ON")
+                        .time("06:44:00").confidence(0.95).eligible(true).engineType("ML").modelVersion("rf").build()));
+
+        assertThat(service.generateForSystem(homeId, from, to)).isEmpty();
+        verify(recommendations, never()).save(any());
+    }
+
+    @Test
     void getTopRecommendationReturnsHighestConfidencePending() {
         when(recommendations.findFirstByHomeIdAndStatusOrderByConfidenceScoreDescCreatedAtDesc(homeId, "PENDING"))
                 .thenReturn(Optional.of(pending()));

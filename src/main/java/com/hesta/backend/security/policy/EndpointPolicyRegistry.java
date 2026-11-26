@@ -18,6 +18,7 @@ public final class EndpointPolicyRegistry {
         // Public allowlist (no auth required)
         PUBLIC_ALLOWLIST.add("com.hesta.backend.controller.AuthController");
         PUBLIC_ALLOWLIST.add("com.hesta.backend.controller.MockSensorController");
+        PUBLIC_ALLOWLIST.add("com.hesta.backend.controller.PublicInstallationContractController");
 
         // Admin controllers
         CLASS_POLICIES.put("AdminController", AccessPolicyType.PLATFORM_ADMIN);
@@ -26,6 +27,8 @@ public final class EndpointPolicyRegistry {
         CLASS_POLICIES.put("AdminDiagnosticsController", AccessPolicyType.PLATFORM_ADMIN);
         CLASS_POLICIES.put("AdminOtaController", AccessPolicyType.PLATFORM_ADMIN);
         CLASS_POLICIES.put("AdminUserController", AccessPolicyType.PLATFORM_ADMIN);
+        CLASS_POLICIES.put("AdminMaintenanceTicketController", AccessPolicyType.PLATFORM_ADMIN);
+        CLASS_POLICIES.put("AdminInstallationContractController", AccessPolicyType.PLATFORM_ADMIN);
 
         // Internal service controller
         CLASS_POLICIES.put("InternalDeviceController", AccessPolicyType.INTERNAL_SERVICE);
@@ -33,6 +36,7 @@ public final class EndpointPolicyRegistry {
         // User / Profile
         CLASS_POLICIES.put("UserController", AccessPolicyType.AUTHENTICATED);
         CLASS_POLICIES.put("NotificationController", AccessPolicyType.AUTHENTICATED);
+        CLASS_POLICIES.put("InstallationContractController", AccessPolicyType.AUTHENTICATED);
 
         // Home controllers
         CLASS_POLICIES.put("HomeController", AccessPolicyType.HOME_ACCESS);
@@ -59,6 +63,7 @@ public final class EndpointPolicyRegistry {
         // Specific method overrides (Owner only or specific level)
         METHOD_POLICIES.put("HomeMemberAccessController.updateMemberAccess", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("EnergyController.updateDemandResponseSettings", AccessPolicyType.HOME_OWNER);
+        METHOD_POLICIES.put("EnergyController.evaluateDemandResponse", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("HomeController.updateMemberRole", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("HomeController.removeMember", AccessPolicyType.HOME_OWNER);
         METHOD_POLICIES.put("RoomController.createRoom", AccessPolicyType.HOME_OWNER);

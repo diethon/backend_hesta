@@ -3,6 +3,7 @@ package com.hesta.backend.service.impl;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.hesta.backend.dto.response.HomeDataChangedPayload;
 import com.hesta.backend.dto.response.SceneExecutionResponse;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Scene;
@@ -29,6 +30,8 @@ import com.hesta.backend.realtime.model.RealtimeEventType;
 import com.hesta.backend.realtime.publisher.RealtimeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -43,7 +46,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Executors;
 
 /** Runs a scene: turns each scene action into device commands, sends them, stores the result. */
@@ -51,6 +56,7 @@ import java.util.concurrent.Executors;
 @RequiredArgsConstructor
 @Slf4j
 public class SceneExecutionServiceImpl implements SceneExecutionService {
+    static final int MAX_DELAY_SECONDS = 24 * 60 * 60;
     private final HomeAuthorizationService homeAuthorizationService;
     private final SceneRepository sceneRepository;
     private final SceneExecutionRepository executionRepository;
@@ -67,6 +73,11 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
     });
     @Autowired(required = false) private PlatformTransactionManager transactionManager;
     @Autowired(required = false) private RealtimeEventPublisher realtimeEventPublisher;
+    @Autowired(required = false) @Qualifier("taskScheduler") private TaskScheduler taskScheduler;
+
+    // One pending "run after X" per scene. shortcut: in memory, lost on a backend restart; persist it if that matters.
+    private record PendingRun(OffsetDateTime runAt, ScheduledFuture<?> future) {}
+    private final Map<UUID, PendingRun> pendingRuns = new ConcurrentHashMap<>();
 
     // execute/executeScheduled/executeFromAutomation are deliberately not @Transactional: see runAndRecord.
     @Override
@@ -151,6 +162,66 @@ public class SceneExecutionServiceImpl implements SceneExecutionService {
             realtimeEventPublisher.publish(RealtimeEvent.create(RealtimeEventType.SCENE_EXECUTION_UPDATED, homeId, execution));
         } catch (RuntimeException publishFailure) {
             log.warn("Could not publish scene execution {}", execution.getId(), publishFailure);
+        }
+    }
+
+    @Override
+    public OffsetDateTime runLater(UUID userId, UUID homeId, UUID sceneId, int delaySeconds) {
+        if (delaySeconds < 1 || delaySeconds > MAX_DELAY_SECONDS) throw new AppException(ErrorCode.INVALID_REQUEST);
+        inTx(() -> {
+            requireRunAccess(userId, homeId, sceneId);
+            Scene scene = find(homeId, sceneId);
+            if (!scene.isEnabled()) throw new AppException(ErrorCode.SCENE_DISABLED);
+            if (scene.getActions().isEmpty()) throw new AppException(ErrorCode.INVALID_REQUEST);
+            return null;
+        });
+        OffsetDateTime runAt = OffsetDateTime.now().plusSeconds(delaySeconds);
+        PendingRun[] self = new PendingRun[1];
+        ScheduledFuture<?> future = taskScheduler.schedule(() -> {
+            if (!pendingRuns.remove(sceneId, self[0])) return; // cancelled or replaced meanwhile
+            publishSceneChanged(homeId);
+            try {
+                runAndRecord(homeId, sceneId, userId, "TIMER", StateChangeSource.SCHEDULE);
+            } catch (RuntimeException failure) {
+                log.warn("Timed run of scene {} failed", sceneId, failure);
+            }
+        }, runAt.toInstant());
+        self[0] = new PendingRun(runAt, future);
+        PendingRun previous = pendingRuns.put(sceneId, self[0]);
+        if (previous != null) previous.future().cancel(false);
+        publishSceneChanged(homeId);
+        return runAt;
+    }
+
+    @Override
+    public void cancelRunLater(UUID userId, UUID homeId, UUID sceneId) {
+        inTx(() -> {
+            requireRunAccess(userId, homeId, sceneId);
+            return find(homeId, sceneId);
+        });
+        cancelRunLater(sceneId);
+        publishSceneChanged(homeId);
+    }
+
+    @Override
+    public void cancelRunLater(UUID sceneId) {
+        PendingRun pending = pendingRuns.remove(sceneId);
+        if (pending != null) pending.future().cancel(false);
+    }
+
+    @Override
+    public OffsetDateTime pendingRunAt(UUID sceneId) {
+        PendingRun pending = pendingRuns.get(sceneId);
+        return pending == null ? null : pending.runAt();
+    }
+
+    private void publishSceneChanged(UUID homeId) {
+        if (realtimeEventPublisher == null) return;
+        try {
+            realtimeEventPublisher.publish(RealtimeEvent.create(RealtimeEventType.SCENE_CHANGED, homeId,
+                    new HomeDataChangedPayload("Scene")));
+        } catch (RuntimeException publishFailure) {
+            log.warn("Could not publish scene change for home {}", homeId, publishFailure);
         }
     }
 

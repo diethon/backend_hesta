@@ -23,6 +23,8 @@ public class UpdateAutomationRuleRequest {
 
     @NotNull(message = "AUTOMATION_ENABLED_REQUIRED")
     Boolean enabled;
+    /** Seconds the conditions must stay true before running (0..3600); null means 0. */
+    Integer holdSeconds;
 
     @Valid
     @NotNull(message = "AUTOMATION_CONDITION_INVALID")

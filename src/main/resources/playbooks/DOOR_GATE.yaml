@@ -1,0 +1,68 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Cửa / Cổng / Cửa cuốn (DOOR, GATE, ROLLING_DOOR, GATE_MOTOR)
+# QUY TẮC AN TOÀN: Thiết bị đấu nối cố định và có động cơ công suất lớn.
+# Tuyệt đối KHÔNG hướng dẫn rút phích, ngắt cầu dao, tháo vỏ motor hay đụng vào cơ cấu truyền động.
+# ==============================================================================
+id: DOOR_GATE
+label: Cửa / Cổng tự động & Cửa cuốn
+deviceTypes:
+  - DOOR
+  - GATE
+  - ROLLING_DOOR
+  - GATE_MOTOR
+imageHints:
+  - Đèn báo trạng thái trên hộp điều khiển gắn tường (không mở nắp hộp)
+  - Khu vực ray trượt / hành trình đóng mở bên ngoài (kiểm tra vật cản)
+  - Bề mặt bên ngoài thân cửa/cổng hoặc tay bấm tường
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Cửa/cổng vẫn mất kết nối, không đóng mở được hoặc phát tiếng bất thường sau khi đã kiểm tra an toàn bên ngoài.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, kẹt cửa, tiếng kêu to bất thường hoặc rò điện/rò nước gần điện
+  advice: "DỪNG VẬN HÀNH CỬA/CỔNG NGAY LẬP TỨC! Đứng tránh xa vùng chuyển động của cửa/cổng, không cố đẩy hay kéo bằng tay khi đang kẹt, không chạm vào hộp điều khiển nếu có mùi khét, tiếng kêu to bất thường, tia lửa hoặc ẩm ướt gần nguồn điện. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - rò nước
+    - kẹt
+    - vật cản
+    - tiếng kêu to
+    - kêu to bất thường
+symptoms:
+  - id: DOOR_GATE_OFFLINE
+    label: Mất kết nối / Không điều khiển được trên ứng dụng
+    ticketDescription: Cửa/cổng tự động mất kết nối mạng, không nhận lệnh đóng/mở từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_CLEAR_PATH
+        title: Đảm bảo không có người hoặc vật cản trong vùng chuyển động
+        instruction: Quan sát toàn bộ khu vực hành trình đóng/mở và cảm biến an toàn hai bên cổng/cửa, đảm bảo không có người, thú cưng hay vật cản trước khi thử bất kỳ lệnh nào.
+      - id: CHECK_WALL_REMOTE
+        title: Thử điều khiển bằng nút bấm tường hoặc remote gốc
+        instruction: Nhấn thử nút bấm tường hoặc remote cầm tay gốc của cửa/cổng (đứng ngoài vùng chuyển động) để xác định lỗi nằm ở bộ kết nối thông minh hay ở bộ cửa/cổng.
+      - id: CHECK_WIFI_GATEWAY_LED
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Quan sát đèn báo Wi-Fi/Internet trên router (cần sáng ổn định, không nháy đỏ) và đèn báo nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node). Chờ 1 phút rồi thử kiểm tra lại trạng thái trên ứng dụng.
+  - id: DOOR_GATE_NOT_MOVING
+    label: Nhận lệnh nhưng cửa/cổng không chạy hoặc chạy nửa chừng rồi dừng
+    ticketDescription: Cửa/cổng không di chuyển hoặc dừng giữa chừng khi nhận lệnh đóng/mở.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_OBSTRUCTION_SAFETY_SENSOR
+        title: Đảm bảo không có người/vật cản vùng chuyển động và mắt cảm biến
+        instruction: Đứng ở vị trí an toàn, quan sát xem có vật cản trên ray trượt hoặc vật che mắt cảm biến chống kẹt bên ngoài không. Chỉ dọn vật cản nhẹ bên ngoài khi cửa đang dừng hẳn.
+      - id: CHECK_INDICATOR_LED
+        title: Quan sát đèn báo trạng thái trên hộp điều khiển bên ngoài
+        instruction: Nhìn đèn báo bên ngoài hộp điều khiển/bộ thu (không mở nắp hộp) xem có sáng nguồn hay nhấp nháy báo lỗi không để ghi chú lại cho kỹ thuật viên.
+  - id: DOOR_GATE_MECHANICAL_FAULT
+    label: Cửa/cổng bị kẹt cứng, lệch ray, kêu to bất thường hoặc hỏng phần cứng
+    ticketDescription: Cửa/cổng có dấu hiệu kẹt cơ khí, lệch ray hoặc tiếng kêu to bất thường, cần kỹ thuật viên kiểm tra trực tiếp.
+    hardwareOnly: true
+    steps: []

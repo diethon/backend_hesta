@@ -50,6 +50,9 @@ public class SceneServiceImpl implements SceneService {
     private final SceneActionRepository sceneActionRepository;
     private final DeviceRepository deviceRepository;
     private final AutomationRuleRepository automationRuleRepository;
+    // Field-injected so existing constructors stay unchanged; only used for the pending "run after X".
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.service.SceneExecutionService sceneExecutionService;
 
     @Override
     @Transactional(readOnly = true)
@@ -153,6 +156,7 @@ public class SceneServiceImpl implements SceneService {
             throw new AppException(ErrorCode.SCENE_IN_USE);
         }
         sceneRepository.delete(scene);
+        if (sceneExecutionService != null) sceneExecutionService.cancelRunLater(sceneId);
     }
 
     @Override
@@ -382,6 +386,7 @@ public class SceneServiceImpl implements SceneService {
                 .description(scene.getDescription())
                 .enabled(scene.isEnabled())
                 .actions(actions)
+                .pendingRunAt(sceneExecutionService == null ? null : sceneExecutionService.pendingRunAt(scene.getId()))
                 .createdAt(scene.getCreatedAt())
                 .updatedAt(scene.getUpdatedAt())
                 .build();

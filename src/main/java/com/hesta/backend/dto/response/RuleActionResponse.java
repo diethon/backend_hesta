@@ -14,6 +14,8 @@ public class RuleActionResponse {
     String deviceName;
     UUID sceneId;
     String sceneName;
+    UUID groupId;
+    String groupName;
     String action;
     Map<String, Object> parameters;
     int order;

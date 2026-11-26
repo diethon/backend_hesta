@@ -15,6 +15,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
+
+import java.time.Instant;
 
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
@@ -31,6 +34,7 @@ class ScheduleRunnerTest {
     @Mock SceneExecutionService sceneExecution;
     @Mock AutomationEngine automationEngine;
     @Mock JdbcTemplate jdbc;
+    @Mock TaskScheduler taskScheduler;
     @InjectMocks ScheduleRunner runner;
 
     @Test
@@ -43,11 +47,11 @@ class ScheduleRunnerTest {
         AutomationRule rule = AutomationRule.builder().id(UUID.randomUUID()).home(scene.getHome()).enabled(false).build();
         AutomationSchedule disabled = AutomationSchedule.builder().id(UUID.randomUUID()).rule(rule)
                 .scheduledTime(LocalTime.of(7, 30)).repeatDays(new Short[0]).active(true).build();
-        when(scenes.findAllByActiveTrueAndScheduledTime(LocalTime.of(7, 30))).thenReturn(List.of(sceneSchedule));
-        when(rules.findAllByActiveTrueAndScheduledTime(LocalTime.of(7, 30))).thenReturn(List.of(disabled));
+        when(scenes.findAllByActiveTrueAndScheduledTimeBetween(LocalTime.of(7, 30), LocalTime.of(7, 30, 59))).thenReturn(List.of(sceneSchedule));
+        when(rules.findAllByActiveTrueAndScheduledTimeBetween(LocalTime.of(7, 30), LocalTime.of(7, 30, 59))).thenReturn(List.of(disabled));
         when(jdbc.update(anyString(), eq("SCENE@07:30"), eq(sceneSchedule.getId()), eq(now.toLocalDate()))).thenReturn(1);
 
-        runner.runDueSchedules(now);
+        runner.runDueSchedules(now, now.plusSeconds(1));
 
         verify(sceneExecution).executeScheduled(homeId, scene.getId());
         verifyNoInteractions(automationEngine);
@@ -61,13 +65,31 @@ class ScheduleRunnerTest {
         SceneSchedule wrongDay = SceneSchedule.builder().id(UUID.randomUUID()).scene(scene)
                 .repeatDays(new Short[]{1}).build();
         SceneSchedule duplicate = SceneSchedule.builder().id(UUID.randomUUID()).scene(scene)
-                .repeatDays(new Short[]{2}).build();
-        when(scenes.findAllByActiveTrueAndScheduledTime(LocalTime.of(7, 30))).thenReturn(List.of(wrongDay, duplicate));
+                .scheduledTime(LocalTime.of(7, 30)).repeatDays(new Short[]{2}).build();
+        when(scenes.findAllByActiveTrueAndScheduledTimeBetween(LocalTime.of(7, 30), LocalTime.of(7, 30, 59))).thenReturn(List.of(wrongDay, duplicate));
         when(jdbc.update(anyString(), eq("SCENE@07:30"), eq(duplicate.getId()), eq(now.toLocalDate()))).thenReturn(0);
 
-        runner.runDueSchedules(now);
+        runner.runDueSchedules(now, now.plusSeconds(1));
 
         verifyNoInteractions(sceneExecution, automationEngine);
         verify(jdbc, times(1)).update(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void schedulesFutureSecondAndRunsPastSecondNow() {
+        ZonedDateTime minute = ZonedDateTime.parse("2026-09-22T07:30:00+07:00[Asia/Ho_Chi_Minh]");
+        Scene scene = Scene.builder().id(UUID.randomUUID()).home(Home.builder().id(UUID.randomUUID()).build()).enabled(true).build();
+        SceneSchedule later = SceneSchedule.builder().id(UUID.randomUUID()).scene(scene)
+                .scheduledTime(LocalTime.of(7, 30, 45)).repeatDays(new Short[0]).build();
+        SceneSchedule passed = SceneSchedule.builder().id(UUID.randomUUID()).scene(scene)
+                .scheduledTime(LocalTime.of(7, 30, 5)).repeatDays(new Short[0]).build();
+        when(scenes.findAllByActiveTrueAndScheduledTimeBetween(LocalTime.of(7, 30), LocalTime.of(7, 30, 59)))
+                .thenReturn(List.of(later, passed));
+        when(jdbc.update(anyString(), eq("SCENE@07:30:05"), eq(passed.getId()), eq(minute.toLocalDate()))).thenReturn(1);
+
+        runner.runDueSchedules(minute, minute.plusSeconds(10));
+
+        verify(taskScheduler).schedule(any(Runnable.class), eq(minute.plusSeconds(45).toInstant()));
+        verify(sceneExecution, times(1)).executeScheduled(scene.getHome().getId(), scene.getId());
     }
 }

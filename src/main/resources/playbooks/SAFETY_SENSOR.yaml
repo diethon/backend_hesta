@@ -1,0 +1,68 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho nhóm Cảm biến an toàn (SMOKE_SENSOR, FLAME_SENSOR, GAS_SENSOR)
+# QUY TẮC AN TOÀN:
+# - Ngay đầu hội thoại phải cảnh báo: trong lúc cảm biến này không hoạt động, nhà không có cảnh báo khói/lửa từ nó.
+# - Tuyệt đối KHÔNG bao giờ hướng dẫn tắt/vô hiệu hóa cảnh báo, tháo vỏ, chạm mạch hay thao tác điện 220V.
+# - Khi escalate, mức ưu tiên đề xuất tối thiểu là HIGH (người dùng xác nhận trên thẻ ticket).
+# ==============================================================================
+id: SAFETY_SENSOR
+label: Cảm biến an toàn (khói / lửa / gas)
+openingWarning: "Lưu ý an toàn quan trọng: Trong lúc cảm biến này không hoạt động, nhà bạn không có cảnh báo khói/lửa từ nó; hãy cẩn trọng và chủ động quan sát khu vực lắp đặt."
+minEscalationPriority: HIGH
+deviceTypes:
+  - SMOKE_SENSOR
+  - FLAME_SENSOR
+  - GAS_SENSOR
+imageHints:
+  - Đèn báo nguồn và đèn tín hiệu bên ngoài vỏ cảm biến
+  - Vị trí lắp đặt cảm biến trên trần/tường (chụp từ dưới lên, không cần trèo cao)
+  - Khe thoáng mặt ngoài cảm biến xem có bụi bẩn hoặc vật che chắn không
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Cảm biến an toàn vẫn mất kết nối, báo giả lặp lại hoặc không phản hồi sau khi kiểm tra ngoài vỏ — cần ưu tiên xử lý tối thiểu mức CAO (HIGH).
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có khói thật, lửa thật, mùi gas, mùi khét, tia lửa, nóng bất thường hoặc nước vào
+  advice: "DỪNG KIỂM TRA THIẾT BỊ NGAY LẬP TỨC! Nếu có khói, lửa, mùi gas hoặc mùi khét thực sự trong nhà, hãy mở cửa thông gió, di chuyển toàn bộ người ra khu vực an toàn và gọi lực lượng khẩn cấp (114) ngay. Tuyệt đối không tắt hay vô hiệu hóa hệ thống cảnh báo. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - bốc khói
+    - có khói thật
+    - có lửa thật
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - nước vào
+    - rò gas
+    - mùi gas
+    - phồng
+symptoms:
+  - id: SAFETY_SENSOR_OFFLINE
+    label: Mất kết nối / Không gửi dữ liệu giám sát khói, lửa
+    ticketDescription: Cảm biến an toàn (khói/lửa) ngừng gửi dữ liệu về hệ thống (mất kết nối), làm gián đoạn chức năng cảnh báo cháy nổ.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_INDICATOR_LED
+        title: Quan sát đèn báo nguồn bên ngoài cảm biến (từ vị trí an toàn)
+        instruction: Nhìn từ mặt sàn lên đèn báo nguồn/tín hiệu bên ngoài vỏ cảm biến (không tháo vỏ, không tự ý vô hiệu hóa cảnh báo) xem đèn có sáng hoặc nháy định kỳ không.
+      - id: CHECK_WIFI_GATEWAY_LED
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Quan sát đèn Wi-Fi/Internet trên router (sáng ổn định, không nháy đỏ) và đèn nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node). Chờ 1-2 phút rồi kiểm tra lại trạng thái trên ứng dụng.
+  - id: SAFETY_SENSOR_FALSE_ALARM
+    label: Báo động giả liên tục dù đã kiểm tra chắc chắn không có khói, lửa hay mùi gas
+    ticketDescription: Cảm biến an toàn phát cảnh báo giả lặp lại nhiều lần dù khu vực hoàn toàn bình thường.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_AIR_ENVIRONMENT
+        title: Kiểm tra chắc chắn khu vực không có khói bếp, hơi nước nóng hoặc bụi dày
+        instruction: Quan sát kỹ xung quanh cảm biến đảm bảo thực sự không có khói, lửa, hơi dầu mỡ nấu ăn, khói nhang hoặc hơi nước nóng bay thẳng vào khe cảm biến. Mở cửa thông thoáng khu vực (tuyệt đối không tắt hay vô hiệu hóa cảnh báo trên cảm biến).
+      - id: CHECK_EXTERNAL_OBSTRUCTION
+        title: Kiểm tra bề mặt ngoài khe thoáng cảm biến
+        instruction: Quan sát bên ngoài xem có mạng nhện, côn trùng hay bụi dày bám quanh khe thoáng không. Nếu ở vị trí tầm với an toàn, chỉ thổi bụi nhẹ bên ngoài (không xịt nước/hóa chất, không tháo vỏ cảm biến).
+  - id: SAFETY_SENSOR_HARDWARE_FAULT
+    label: Cảm biến rơi vỡ, vào nước, có tiếng bíp lỗi liên tục hoặc hỏng phần cứng
+    ticketDescription: Cảm biến an toàn có dấu hiệu hư hỏng vật lý hoặc lỗi phần cứng, cần kỹ thuật viên kiểm tra và thay thế ưu tiên.
+    hardwareOnly: true
+    steps: []

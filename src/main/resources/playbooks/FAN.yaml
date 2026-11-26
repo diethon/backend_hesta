@@ -1,0 +1,65 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Quạt thông minh (FAN)
+# QUY TẮC AN TOÀN: Thiết bị có cánh quay & có thể đấu nối cố định (quạt trần/quạt tường).
+# Tuyệt đối KHÔNG hướng dẫn rút phích, ngắt cầu dao, tháo lồng quạt hay chạm vào cánh đang quay.
+# ==============================================================================
+id: FAN
+label: Quạt thông minh
+deviceTypes:
+  - FAN
+imageHints:
+  - Đèn báo trạng thái và mức gió trên thân quạt hoặc công tắc tường
+  - Lồng quạt và khu vực cánh quạt nhìn từ ngoài (khi quạt đã dừng hẳn)
+  - Vị trí bộ phát hồng ngoại (IR Remote) nếu quạt điều khiển qua IR
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Quạt vẫn mất kết nối, không quay hoặc hoạt động bất thường sau khi kiểm tra an toàn bên ngoài.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, kẹt cánh, tiếng kêu to bất thường hoặc rò điện/nước vào
+  advice: "DỪNG SỬ DỤNG QUẠT NGAY LẬP TỨC! Không chạm vào lồng quạt hay cánh quạt nếu quạt bị kẹt, phát tiếng kêu to bất thường, có mùi khét, nóng bất thường hoặc rò nước gần điện. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - rò nước
+    - kẹt
+    - vật cản
+    - tiếng kêu to
+    - kêu to bất thường
+symptoms:
+  - id: FAN_OFFLINE
+    label: Mất kết nối / Không điều khiển được quạt trên ứng dụng
+    ticketDescription: Quạt thông minh mất kết nối mạng, không nhận lệnh bật/tắt hoặc chỉnh tốc độ từ ứng dụng.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_CLEAR_BLADES
+        title: Đảm bảo không có người hoặc vật cản trong vùng quay của quạt
+        instruction: Quan sát lồng quạt và không gian xung quanh đảm bảo không có vật cản, rèm cửa hay người đứng quá sát vùng cánh quạt trước khi thử điều khiển.
+      - id: TEST_PHYSICAL_OR_REMOTE
+        title: Thử điều khiển bằng công tắc tường hoặc remote gốc
+        instruction: Đứng ngoài vùng quay (tuyệt đối không chạm vào lồng hay cánh quạt), nhấn thử công tắc tường hoặc remote gốc đi kèm quạt để xác định lỗi nằm ở kết nối thông minh hay ở chính thiết bị quạt.
+      - id: CHECK_WIFI_GATEWAY_LED
+        title: Kiểm tra đèn báo trên router Wi-Fi và bộ điều khiển trung tâm
+        instruction: Quan sát đèn Wi-Fi/Internet trên router (sáng ổn định, không nháy đỏ) và đèn nguồn/mạng trên bộ điều khiển trung tâm Hesta (Edge Node). Chờ 1 phút rồi kiểm tra lại trên ứng dụng.
+  - id: FAN_NOT_SPINNING_OR_SLOW
+    label: Quạt có đèn báo nhưng quay yếu, không quay hoặc không đổi tốc độ
+    ticketDescription: Quạt lên đèn báo nhưng không quay, quay chậm bất thường hoặc không đổi được cấp tốc độ.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_CLEAR_AREA
+        title: Đảm bảo không có vật cản kẹt ở lồng/cánh quạt
+        instruction: Quan sát bên ngoài lồng quạt đảm bảo không có vật lạ vướng vào cánh quạt (không đưa tay hay vật nhọn vào bên trong lồng quạt).
+      - id: CHECK_SPEED_LEVEL
+        title: Kiểm tra mức tốc độ cài đặt trên ứng dụng
+        instruction: Trên ứng dụng Hesta, thử đặt lại mức tốc độ cao hơn (ví dụ 50% hoặc mức 2/3) và kiểm tra xem có hẹn giờ/tự động hóa nào đang hạ tốc độ quạt không.
+  - id: FAN_HARDWARE_FAULT
+    label: Quạt rung lắc mạnh, kẹt trục, kêu to bất thường hoặc nứt vỡ vỏ
+    ticketDescription: Quạt phát tiếng kêu to bất thường, rung lắc mạnh hoặc kẹt trục, cần kỹ thuật viên kiểm tra trực tiếp.
+    hardwareOnly: true
+    steps: []

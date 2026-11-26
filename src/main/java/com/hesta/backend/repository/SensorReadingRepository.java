@@ -49,5 +49,19 @@ public interface SensorReadingRepository extends JpaRepository<SensorReading, Lo
             """)
     List<SensorReading> findLatestByHomeId(@Param("homeId") UUID homeId);
 
+    @Query("""
+            select reading from SensorReading reading
+            join fetch reading.device device
+            where device.id in :deviceIds and device.isDeleted = false
+              and not exists (
+                select newer.id from SensorReading newer
+                where newer.device.id = device.id and newer.metricType = reading.metricType
+                  and (newer.recordedAt > reading.recordedAt
+                    or (newer.recordedAt = reading.recordedAt and newer.id > reading.id))
+              )
+            order by device.id, reading.metricType
+            """)
+    List<SensorReading> findLatestByDeviceIds(@Param("deviceIds") List<UUID> deviceIds);
+
     List<SensorReading> findByDeviceIdOrderByRecordedAtDesc(UUID deviceId);
 }

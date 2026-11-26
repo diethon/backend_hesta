@@ -62,7 +62,7 @@ public class ScheduleServiceImpl implements ScheduleService {
         SceneSchedule schedule = scheduleId == null ? SceneSchedule.builder().scene(scene).build()
                 : sceneSchedules.findById(scheduleId).filter(item -> item.getScene().getId().equals(sceneId))
                 .orElseThrow(() -> new AppException(ErrorCode.SCENE_SCHEDULE_NOT_FOUND));
-        schedule.setScheduledTime(request.getScheduledTime().withSecond(0).withNano(0));
+        schedule.setScheduledTime(request.getScheduledTime().withNano(0));
         schedule.setRepeatDays(days);
         schedule.setActive(request.getActive());
         return response(sceneSchedules.save(schedule));
@@ -107,7 +107,7 @@ public class ScheduleServiceImpl implements ScheduleService {
                 : ruleSchedules.findById(scheduleId).filter(item -> item.getRule().getId().equals(ruleId))
                 .orElseThrow(() -> new AppException(ErrorCode.SCENE_SCHEDULE_NOT_FOUND));
         if (!request.getActive()) requireAnotherActiveTime(schedule);
-        schedule.setScheduledTime(request.getScheduledTime().withSecond(0).withNano(0));
+        schedule.setScheduledTime(request.getScheduledTime().withNano(0));
         schedule.setRepeatDays(days);
         schedule.setActive(request.getActive());
         return response(ruleSchedules.save(schedule));
@@ -151,7 +151,7 @@ public class ScheduleServiceImpl implements ScheduleService {
                     : existing.stream().filter(item -> item.getId().equals(request.getId())).findFirst()
                     .orElseThrow(() -> new AppException(ErrorCode.SCENE_SCHEDULE_NOT_FOUND));
             if (schedule.getId() != null && !kept.add(schedule.getId())) throw new AppException(ErrorCode.SCENE_SCHEDULE_INVALID);
-            schedule.setScheduledTime(request.getScheduledTime().withSecond(0).withNano(0));
+            schedule.setScheduledTime(request.getScheduledTime().withNano(0));
             schedule.setRepeatDays(days);
             schedule.setActive(request.getActive());
             ruleSchedules.save(schedule);

@@ -1,0 +1,62 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Điều hòa / Quạt (AIR_CONDITIONER, AC, FAN)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: AIR_CONDITIONER
+label: Điều hòa thông minh
+deviceTypes:
+  - AIR_CONDITIONER
+  - AC
+  - AC_REMOTE
+imageHints:
+  - Màn hình hiển thị mã lỗi hoặc đèn báo trên mặt dàn lạnh / thân quạt
+  - Vị trí đặt bộ phát hồng ngoại (IR Remote) hướng về thiết bị
+  - Bề mặt ngoài vỏ (có đọng nước hay vật cản cửa gió không)
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Điều hòa/quạt vẫn không nhận lệnh hoặc không làm mát/chạy bình thường sau khi đã kiểm tra an toàn.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, rò nước nhiều hoặc rò điện
+  advice: "DỪNG SỬ DỤNG NGAY LẬP TỨC! Tắt thiết bị bằng remote hoặc ngắt aptomat riêng nếu an toàn. Không chạm vào khu vực có nước rò rỉ gần nguồn điện. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - phồng
+symptoms:
+  - id: AC_NO_RESPONSE_APP
+    label: Không nhận lệnh từ ứng dụng (mất kết nối hoặc lệch IR)
+    ticketDescription: Điều hòa/quạt không phản hồi khi điều khiển qua ứng dụng Hesta.
+    hardwareOnly: false
+    steps:
+      - id: TEST_ORIGINAL_REMOTE
+        title: Thử điều khiển bằng remote gốc của thiết bị
+        instruction: Dùng remote cầm tay đi kèm thiết bị thử bật/tắt. Điều này giúp xác định lỗi ở bộ điều khiển thông minh hay ở chính điều hòa/quạt.
+      - id: CHECK_IR_LINE_OF_SIGHT
+        title: Kiểm tra tầm nhìn giữa bộ phát IR và thiết bị
+        instruction: Đảm bảo cục phát hồng ngoại (IR Remote) không bị đồ vật che chắn và hướng thẳng về phía mặt nhận tín hiệu của điều hòa/quạt.
+      - id: POWER_CYCLE_IR
+        title: Khởi động lại bộ phát IR / bộ điều khiển sau 30 giây
+        instruction: Rút nguồn USB của bộ phát hồng ngoại (hoặc bộ điều khiển Wi-Fi), chờ 30 giây rồi cắm lại và thử gửi lệnh trên ứng dụng sau 1 phút.
+  - id: AC_NOT_COOLING
+    label: Máy chạy nhưng không mát / gió yếu / kêu to bất thường
+    ticketDescription: Điều hòa hoặc quạt vẫn lên nguồn nhưng làm mát kém, gió yếu hoặc phát tiếng ồn bất thường.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_MODE_TEMP
+        title: Kiểm tra chế độ hoạt động và nhiệt độ cài đặt
+        instruction: Kiểm tra trên ứng dụng hoặc màn hình máy xem chế độ đang ở COOL (làm lạnh) thay vì FAN (chỉ quạt gió) và nhiệt độ cài đặt thấp hơn nhiệt độ phòng.
+      - id: CHECK_DOORS_WINDOWS
+        title: Kiểm tra cửa phòng và hướng gió
+        instruction: Đảm bảo cửa phòng đã đóng kín và cửa gió điều hòa không bị vật cản che chắn.
+  - id: AC_HARDWARE_FAULT
+    label: Báo mã lỗi trên dàn lạnh, rò nước hoặc không lên nguồn
+    ticketDescription: Thiết bị báo mã lỗi màn hình, chảy nước hoặc mất nguồn hoàn toàn, cần kỹ thuật viên kiểm tra.
+    hardwareOnly: true
+    steps: []

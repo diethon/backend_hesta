@@ -109,6 +109,31 @@ class RTSPStreamManager:
                 except Exception as e:
                     print(f"[StreamManager] Error invoking health callback: {e}")
 
+    def _try_open_usb_index(self, device_index: int) -> Tuple[Optional[cv2.VideoCapture], Optional[np.ndarray]]:
+        """Open a V4L2/USB webcam index with low-latency MJPG settings and verify 1st frame."""
+        cap = cv2.VideoCapture(device_index)
+        try:
+            # Configure live USB webcam BEFORE BUFFERSIZE so V4L2 keeps buffer=1
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+
+        if cap is not None and cap.isOpened():
+            ret, test_frame = cap.read()
+            if ret and test_frame is not None:
+                return cap, test_frame
+
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass
+        return None, None
+
     def _open_capture(self) -> bool:
         with self.lock:
             self._cap_generation += 1
@@ -122,6 +147,7 @@ class RTSPStreamManager:
                 pass
 
         new_cap = None
+        test_frame = None
         if self.is_rtsp:
             # Low-latency RTSP flags for OpenCV FFMPEG backend with 2s socket timeout to prevent hang
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|buffer_size;1024000|max_delay;500000|stimeout;2000000"
@@ -133,44 +159,62 @@ class RTSPStreamManager:
                 new_cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 2000)
             except Exception:
                 pass
+            if new_cap is not None and new_cap.isOpened():
+                ret, candidate_frame = new_cap.read()
+                if ret and candidate_frame is not None:
+                    test_frame = candidate_frame
+                else:
+                    try:
+                        new_cap.release()
+                    except Exception:
+                        pass
+                    new_cap = None
+        elif isinstance(self.source, int):
+            candidates = [self.source] + [idx for idx in range(5) if idx != self.source]
+            for idx in candidates:
+                cand_cap, cand_frame = self._try_open_usb_index(idx)
+                if cand_cap is not None and cand_frame is not None:
+                    if idx != self.source:
+                        print(f"[StreamManager] USB camera re-enumerated: switched index {self.source} -> {idx}")
+                        self.source = idx
+                    new_cap = cand_cap
+                    test_frame = cand_frame
+                    break
         else:
             new_cap = cv2.VideoCapture(self.source)
             try:
-                if isinstance(self.source, int):
-                    # Configure live USB webcam BEFORE BUFFERSIZE so V4L2 keeps buffer=1
-                    new_cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-                    new_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    new_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    new_cap.set(cv2.CAP_PROP_FPS, 30)
                 new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
                 pass
+            if new_cap is not None and new_cap.isOpened():
+                ret, candidate_frame = new_cap.read()
+                if ret and candidate_frame is not None:
+                    test_frame = candidate_frame
+                else:
+                    try:
+                        new_cap.release()
+                    except Exception:
+                        pass
+                    new_cap = None
 
-        if new_cap is not None and new_cap.isOpened():
-            ret, test_frame = new_cap.read()
-            if ret and test_frame is not None:
-                with self.lock:
-                    if self._cap_generation != gen:
-                        # Watchdog intervened during connect; release and abort to prevent desync
-                        try:
-                            new_cap.release()
-                        except Exception:
-                            pass
-                        return False
-                    self.cap = new_cap
-                    self.frame = test_frame
-                    self.last_valid_frame = test_frame
-                    self.last_read_ts = time.time()
-                    self.frame_seq += 1
-                    self.frame_cond.notify_all()
-                self._set_status("ONLINE", "Capture connection opened successfully")
-                self.reconnect_count = 0
-                return True
-            else:
-                try:
-                    new_cap.release()
-                except Exception:
-                    pass
+        if new_cap is not None and test_frame is not None:
+            with self.lock:
+                if self._cap_generation != gen:
+                    # Watchdog intervened during connect; release and abort to prevent desync
+                    try:
+                        new_cap.release()
+                    except Exception:
+                        pass
+                    return False
+                self.cap = new_cap
+                self.frame = test_frame
+                self.last_valid_frame = test_frame
+                self.last_read_ts = time.time()
+                self.frame_seq += 1
+                self.frame_cond.notify_all()
+            self._set_status("ONLINE", "Capture connection opened successfully")
+            self.reconnect_count = 0
+            return True
 
         self._set_status("RECONNECTING", "Could not open camera stream")
         return False

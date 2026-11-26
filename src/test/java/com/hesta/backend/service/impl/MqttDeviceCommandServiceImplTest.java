@@ -49,6 +49,7 @@ class MqttDeviceCommandServiceImplTest {
     void setUp() {
         MqttDeviceCommandServiceImpl.pendingCommands.clear();
         MqttDeviceCommandServiceImpl.commandDeviceMap.clear();
+        MqttDeviceCommandServiceImpl.apertureTransitionStartTimes.clear();
         java.lang.reflect.Field f = org.springframework.util.ReflectionUtils.findField(MqttDeviceCommandServiceImpl.class, "activeDeviceCommands");
         if (f != null) {
             f.setAccessible(true);
@@ -572,6 +573,68 @@ class MqttDeviceCommandServiceImplTest {
         assertEquals(3, payload3.get("speed"));
         assertEquals("HIGH", payload3.get("fan"));
         assertEquals(3, fanDevice.getCurrentState().get("speed"));
+    }
+
+    @Test
+    @DisplayName("Aperture Interlock: blocks repeated OPEN/CLOSE at limit or mid-transit and allows immediate emergency STOP")
+    void testApertureInterlock_ProtectsMotorAndAllowsEmergencyStop() {
+        EdgeNode node = EdgeNode.builder()
+                .id(UUID.fromString("a15a1879-a2e2-4640-800a-6bd30a90892c"))
+                .nodeCode("HESTA-APARTMENT-00377b16-F1")
+                .build();
+
+        for (String type : new String[]{"DOOR", "ROLLING_DOOR", "GATE", "GATE_MOTOR", "CURTAIN"}) {
+            UUID id = UUID.randomUUID();
+            Device door = Device.builder()
+                    .id(id)
+                    .name("Test " + type)
+                    .deviceType(type)
+                    .status(DeviceStatus.ONLINE)
+                    .node(node)
+                    .currentState(new HashMap<>(Map.of("state", "OPEN")))
+                    .build();
+            when(deviceRepository.findByIdWithNode(id)).thenReturn(Optional.of(door));
+
+            CommandResult dupOpen = commandService.sendCommand(id, "OPEN", new HashMap<>(), StateChangeSource.MANUAL).join();
+            assertFalse(dupOpen.isSuccess(), "Expected duplicate OPEN blocked for " + type);
+            assertEquals("ALREADY_AT_OPEN_LIMIT", dupOpen.getErrorCode());
+
+            door.setCurrentState(new HashMap<>(Map.of("state", "CLOSED")));
+            CommandResult dupClose = commandService.sendCommand(id, "CLOSE", new HashMap<>(), StateChangeSource.MANUAL).join();
+            assertFalse(dupClose.isSuccess(), "Expected duplicate CLOSE blocked for " + type);
+            assertEquals("ALREADY_AT_CLOSE_LIMIT", dupClose.getErrorCode());
+
+            door.setCurrentState(new HashMap<>(Map.of("state", "OPENING")));
+            CommandResult midOpen = commandService.sendCommand(id, "OPEN", new HashMap<>(), StateChangeSource.MANUAL).join();
+            assertFalse(midOpen.isSuccess(), "Expected mid-transit OPEN blocked for " + type);
+            assertEquals("MOTOR_IN_TRANSIT", midOpen.getErrorCode());
+
+            CommandResult midReverse = commandService.sendCommand(id, "CLOSE", new HashMap<>(), StateChangeSource.MANUAL).join();
+            assertFalse(midReverse.isSuccess(), "Expected mid-transit CLOSE reverse blocked for " + type);
+            assertEquals("MOTOR_IN_TRANSIT", midReverse.getErrorCode());
+        }
+        verify(mqttGateway, never()).sendToMqtt(anyString(), anyInt(), anyString());
+
+        // Start a fresh CLOSED -> OPEN movement and immediately send emergency STOP (< 400ms)
+        Device rolling = Device.builder()
+                .id(deviceId)
+                .name("Rolling Door")
+                .deviceType("ROLLING_DOOR")
+                .status(DeviceStatus.ONLINE)
+                .node(node)
+                .currentState(new HashMap<>(Map.of("state", "CLOSED")))
+                .build();
+        when(deviceRepository.findByIdWithNode(deviceId)).thenReturn(Optional.of(rolling));
+        ReflectionTestUtils.setField(commandService, "commandTimeoutMs", 2000L);
+
+        commandService.sendCommand(deviceId, "OPEN", new HashMap<>(), StateChangeSource.MANUAL);
+        assertEquals("OPENING", rolling.getCurrentState().get("state"));
+
+        // Immediate STOP bypasses anti-spam 400ms and supersedes active OPEN command
+        var stopFuture = commandService.sendCommand(deviceId, "STOP", new HashMap<>(), StateChangeSource.MANUAL);
+        assertEquals("STOPPED", rolling.getCurrentState().get("state"));
+        verify(mqttGateway, atLeast(2)).sendToMqtt(anyString(), anyInt(), anyString());
+        stopFuture.cancel(true);
     }
 }
 

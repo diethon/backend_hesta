@@ -1,0 +1,63 @@
+# ==============================================================================
+# BẢN NHÁP - CẦN CON NGƯỜI RÀ SOÁT AN TOÀN TRƯỚC KHI RELEASE
+# Playbook chẩn đoán an toàn ngoài vỏ cho Camera AI (CAMERA_AI)
+# QUY TẮC AN TOÀN: Tuyệt đối không hướng dẫn tháo vỏ, chạm mạch hay thao tác điện 220V.
+# ==============================================================================
+id: CAMERA_AI
+label: Camera AI giám sát
+deviceTypes:
+  - CAMERA_AI
+imageHints:
+  - Đèn báo nguồn và mạng trên thân camera hoặc Orange Pi
+  - Bề mặt ống kính bên ngoài và chân đế
+  - Dây nguồn và dây mạng LAN cắm ở mặt ngoài
+escalateWhen:
+  offlineHoursAfterSteps: 1
+  note: Camera AI vẫn mất kết nối, đen hình hoặc không phát hiện sự kiện sau khi khởi động lại.
+safety:
+  triggerId: SAFETY_HAZARD
+  label: Có mùi khét, tia lửa, nóng bất thường, nước vào hoặc rò điện
+  advice: "DỪNG THAO TÁC NGAY LẬP TỨC! Không chạm vào camera hay adapter nếu thấy nóng bất thường, có mùi khét hoặc dính nước. Rút nguồn từ ổ cắm an toàn hoặc ngắt aptomat. Hệ thống sẽ tạo yêu cầu bảo trì KHẨN CẤP."
+  keywords:
+    - khét
+    - cháy
+    - tia lửa
+    - nóng bất thường
+    - rò điện
+    - giật
+    - nước vào
+    - phồng
+symptoms:
+  - id: CAM_OFFLINE
+    label: Camera mất kết nối / Không xem được hình ảnh
+    ticketDescription: Camera AI mất kết nối, không hiển thị hình ảnh giám sát.
+    hardwareOnly: false
+    steps:
+      - id: CHECK_CAM_POWER
+        title: Kiểm tra dây nguồn và đèn báo trên camera / Orange Pi
+        instruction: Kiểm tra dây nguồn của camera và thiết bị xử lý biên (Orange Pi) xem đã cắm chắc chắn chưa và đèn nguồn có sáng không.
+      - id: REBOOT_CAM_30S
+        title: Khởi động lại nguồn sau 30 giây
+        instruction: Rút nguồn adapter của camera/bộ xử lý biên, chờ 30 giây rồi cắm lại. Đợi khoảng 2 phút để hệ thống khởi động và kết nối lại.
+      - id: CHECK_NETWORK
+        title: Kiểm tra kết nối mạng Wi-Fi / dây mạng LAN
+        instruction: Kiểm tra dây mạng LAN (nếu dùng) đã cắm khít chưa và Wi-Fi trong nhà vẫn truy cập Internet bình thường.
+  - id: CAM_BLURRY_OR_AI_ISSUE
+    label: Hình ảnh mờ / góc nhìn lệch / cảnh báo AI không chính xác
+    ticketDescription: Hình ảnh camera bị mờ, lệch góc hoặc tính năng nhận diện AI hoạt động không ổn định.
+    hardwareOnly: false
+    steps:
+      - id: CLEAN_LENS
+        title: Lau sạch bề mặt ống kính bên ngoài
+        instruction: Dùng khăn mềm khô lau nhẹ bề mặt kính bên ngoài ống kính camera (không dùng hóa chất mạnh, không tháo ống kính).
+      - id: CHECK_LIGHTING_ANGLE
+        title: Kiểm tra ánh sáng và vật cản trong khung hình
+        instruction: Đảm bảo không có rèm cửa, cây cảnh che ống kính và khu vực giám sát có đủ ánh sáng để AI nhận diện ổn định.
+      - id: RESTART_AI_NODE
+        title: Khởi động lại nguồn bộ xử lý sau 30 giây
+        instruction: Tắt và bật lại nguồn bộ xử lý biên sau 30 giây để làm mới tiến trình nhận diện AI.
+  - id: CAM_PHYSICAL_DAMAGE
+    label: Camera vỡ kính, gãy chân đế hoặc hỏng cổng nguồn ngoài
+    ticketDescription: Camera AI bị hư hỏng vật lý bên ngoài, cần kỹ thuật viên kiểm tra và thay thế.
+    hardwareOnly: true
+    steps: []

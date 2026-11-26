@@ -34,6 +34,11 @@ public class RuleAction {
     @JoinColumn(name = "scene_id")
     private Scene scene;
 
+    /** Targets every device of the group (expanded when the rule runs). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id")
+    private DeviceGroup group;
+
         @Column(name = "action_command", nullable = false, length = 100)
     private String action;
 
