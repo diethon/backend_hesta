@@ -142,19 +142,24 @@ class SceneDirectory:
     def get_scene_names(self, home_id: str = "") -> list[str]:
         return [s.name for s in self.list_scenes(home_id)]
 
-    def resolve_scene(self, query: str, home_id: str = "") -> SceneInfo | None:
-        """Tìm kịch bản theo số thứ tự (1, 2, ...) hoặc tên tiếng Việt (chính xác / mờ).
+    def resolve_scene(
+        self,
+        query: str,
+        home_id: str = "",
+        aliases: list[str] | None = None,
+    ) -> SceneInfo | None:
+        """Tìm kịch bản theo số thứ tự (1, 2, ...) hoặc tên tiếng Việt (chính xác / mờ / aliases).
 
-        Quy tắc ưu tiên:
+        Quy tắc ưu tiên thông minh:
         1. Nếu query là số nguyên dương N (VD: "1", "2"):
            - Ưu tiên tìm scene có tên chứa đúng số N (VD: "Kịch bản 1", "Scene 1").
            - Nếu không có, chọn scene ở vị trí thứ N (1-based index) trong danh sách scene của nhà.
-        2. Nếu query là tên:
-           - Khớp chính xác không dấu (bỏ tiền tố "kịch bản" / "chế độ").
-           - Khớp chuỗi con hoặc fuzzy match chặt (>= 72% bằng token_set_ratio / ratio).
+        2. Nếu query là tên hoặc có danh sách aliases (VD: ['đi ngủ', 'chúc ngủ ngon']):
+           - Khi có nhiều ứng viên khớp cùng mức, LUÔN ưu tiên kịch bản đang `enabled=True`!
+           - Khớp chính xác không dấu -> Khớp chứa chuỗi con -> Fuzzy match chặt (>= 72%).
         """
         q_raw = (query or "").strip()
-        if not q_raw:
+        if not q_raw and not aliases:
             return None
 
         scenes = self.list_scenes(home_id)
@@ -165,58 +170,84 @@ class SceneDirectory:
         if not scenes:
             return None
 
+        # Sắp xếp ưu tiên scene đang enabled=True trước khi cùng độ khớp
+        prioritized = sorted(scenes, key=lambda s: (not s.enabled, s.index))
+
         q_norm = strip_vietnamese_tones(q_raw.lower()).strip()
-        q_clean = re.sub(r"^(?:kich\s+ban|ngu\s+canh|che\s+do)\s+", "", q_norm).strip() or q_norm
+        q_clean = re.sub(r"^(?:kich\s+ban|ket\s+ban|kich\s+bang|ngu\s+canh|che\s+do)\s+", "", q_norm).strip() or q_norm
 
         # 1. Trường hợp gọi theo số thứ tự ("1", "2", "so 1")
         m_num = re.match(r"^(?:so\s+)?(\d+)$", q_clean)
         if m_num:
             num = int(m_num.group(1))
-            # 1a. Ưu tiên scene có tên chứa chính xác số đó (VD: "Kịch bản 1", "Kịch bản số 1")
-            num_pat = re.compile(rf"(?:^|\D){num}(?:\D|$)")
-            for s in scenes:
-                s_norm = strip_vietnamese_tones(s.name.lower())
-                if num_pat.search(s_norm):
+            # Chỉ khớp theo tên nếu tên kịch bản đích danh là số đó (VD: "Kịch bản 1", "Scene 1", "1"),
+            # KHÔNG khớp nhầm sang "Chào buổi sáng 1" khi nhà có kịch bản số 1 khác!
+            exact_num_pat = re.compile(rf"^(?:kich\s+ban|scene|so)?\s*{num}$")
+            for s in prioritized:
+                s_norm = strip_vietnamese_tones(s.name.lower()).strip()
+                if exact_num_pat.match(s_norm):
                     return s
-            # 1b. Fallback theo thứ tự 1-based index trong nhà
             if 1 <= num <= len(scenes):
                 return scenes[num - 1]
             return None
 
-        # 2. Khớp chính xác không dấu
-        for s in scenes:
-            s_norm = strip_vietnamese_tones(s.name.lower()).strip()
-            s_clean = re.sub(r"^(?:kich\s+ban|ngu\s+canh|che\s+do)\s+", "", s_norm).strip() or s_norm
-            if q_clean == s_norm or q_clean == s_clean:
-                return s
+        search_queries = [q_clean]
+        if aliases:
+            for a in aliases:
+                a_norm = strip_vietnamese_tones(a.lower()).strip()
+                if a_norm and a_norm not in search_queries:
+                    search_queries.append(a_norm)
 
-        # 3. Khớp chứa chuỗi con (VD: "buổi sáng" -> "Chào buổi sáng")
-        contains_matches = []
-        for s in scenes:
-            s_norm = strip_vietnamese_tones(s.name.lower()).strip()
-            if q_clean in s_norm or s_norm in q_clean:
-                contains_matches.append((len(s_norm), s))
+        # 2. Khớp chính xác không dấu (ưu tiên enabled=True trước)
+        for sq in search_queries:
+            for s in prioritized:
+                s_norm = strip_vietnamese_tones(s.name.lower()).strip()
+                s_clean = re.sub(r"^(?:kich\s+ban|ngu\s+canh|che\s+do)\s+", "", s_norm).strip() or s_norm
+                if sq == s_norm or sq == s_clean:
+                    return s
+
+        # 3. Khớp chứa chuỗi con (có ranh giới từ & chống scene tên ngắn < 4 ký tự như "nhà"/"bep" cướp lệnh!)
+        contains_matches: list[tuple[bool, int, SceneInfo]] = []
+        for sq in search_queries:
+            for s in scenes:
+                s_norm = strip_vietnamese_tones(s.name.lower()).strip()
+                if not s_norm:
+                    continue
+                sq_in_s = len(sq) >= 4 and bool(re.search(rf"\b{re.escape(sq)}\b", s_norm))
+                s_in_sq = (
+                    len(s_norm) >= 4
+                    and bool(re.search(rf"\b{re.escape(s_norm)}\b", sq))
+                    and (len(s_norm) / max(len(sq), 1) >= 0.55)
+                )
+                if sq_in_s or s_in_sq:
+                    contains_matches.append((not s.enabled, abs(len(s_norm) - len(sq)), s))
         if contains_matches:
-            contains_matches.sort(key=lambda pair: abs(pair[0] - len(q_clean)))
-            return contains_matches[0][1]
+            contains_matches.sort(key=lambda item: (item[0], item[1]))
+            return contains_matches[0][2]
 
         # 4. Fuzzy match chặt (>= 72%) để không chọn bừa kịch bản không liên quan
+        # Bỏ qua các kịch bản tên quá ngắn (< 4 ký tự như "nhà", "bep") khỏi fuzzy match để tránh token_set_ratio cướp lệnh!
         best_scene: SceneInfo | None = None
-        best_score = 0.0
-        for s in scenes:
-            s_norm = strip_vietnamese_tones(s.name.lower()).strip()
-            s_clean = re.sub(r"^(?:kich\s+ban|ngu\s+canh|che\s+do)\s+", "", s_norm).strip() or s_norm
-            score = max(
-                fuzz.ratio(q_clean, s_clean),
-                fuzz.token_sort_ratio(q_clean, s_clean),
-                fuzz.token_set_ratio(q_clean, s_clean) * 0.92,
-            )
-            if score > best_score:
-                best_score = score
-                best_scene = s
+        best_rank = (-1, 0.0)
+        for sq in search_queries:
+            for s in scenes:
+                s_norm = strip_vietnamese_tones(s.name.lower()).strip()
+                s_clean = re.sub(r"^(?:kich\s+ban|ngu\s+canh|che\s+do)\s+", "", s_norm).strip() or s_norm
+                if len(s_clean) < 4:
+                    continue
+                score = max(
+                    fuzz.ratio(sq, s_clean),
+                    fuzz.token_sort_ratio(sq, s_clean),
+                    fuzz.token_set_ratio(sq, s_clean) * 0.92,
+                )
+                if score >= 72.0:
+                    rank = (1 if s.enabled else 0, score)
+                    if rank > best_rank:
+                        best_rank = rank
+                        best_scene = s
 
-        if best_scene is not None and best_score >= 72.0:
-            logger.info("Scene fuzzy matched: '%s' → '%s' (score=%.1f%%)", query, best_scene.name, best_score)
+        if best_scene is not None:
+            logger.info("Scene fuzzy matched: '%s' → '%s' (score=%.1f%%)", query, best_scene.name, best_rank[1])
             return best_scene
 
         return None

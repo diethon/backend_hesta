@@ -198,21 +198,77 @@ class TTSManager:
             return b""
 
     # ------------------------------------------------------------------
-    # gTTS Fallback (Nhanh ~250–600ms, thuần Python cho cả Windows & ARM64)
+    # Google TTS Fallback (Nhanh ~250–500ms, dùng httpx có sẵn — 0 dependency ngoài!)
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _synthesize_gtts_sync(text: str) -> bytes:
-        """Tổng hợp nhanh tiếng Việt bằng gTTS → MP3 bytes."""
-        from gtts import gTTS  # type: ignore
+    def _split_tts_chunks(text: str, max_len: int = 180) -> list[str]:
+        """Chia câu dài thành các đoạn <= 180 ký tự theo dấu câu để gọi Google TTS không bị cắt chữ."""
+        clean = text.strip()
+        if len(clean) <= max_len:
+            return [clean] if clean else []
+        parts = re.split(r"(?<=[.,;!?])\s+", clean)
+        chunks: list[str] = []
+        buf = ""
+        for part in parts:
+            if not part:
+                continue
+            if len(buf) + len(part) + 1 <= max_len:
+                buf = f"{buf} {part}".strip() if buf else part
+            else:
+                if buf:
+                    chunks.append(buf)
+                while len(part) > max_len:
+                    cut = part.rfind(" ", 0, max_len)
+                    if cut <= 0:
+                        cut = max_len
+                    chunks.append(part[:cut].strip())
+                    part = part[cut:].strip()
+                buf = part
+        if buf:
+            chunks.append(buf)
+        return chunks
 
-        buf = io.BytesIO()
-        tts = gTTS(text=text, lang="vi", slow=False)
-        tts.write_to_fp(buf)
-        return buf.getvalue()
+    @staticmethod
+    def _synthesize_gtts_sync(text: str) -> bytes:
+        """Tổng hợp nhanh tiếng Việt bằng thư viện gTTS (nếu đã cài) hoặc HTTP trực tiếp qua httpx."""
+        try:
+            from gtts import gTTS  # type: ignore
+
+            buf = io.BytesIO()
+            tts = gTTS(text=text, lang="vi", slow=False)
+            tts.write_to_fp(buf)
+            return buf.getvalue()
+        except ImportError:
+            pass
+
+        import httpx
+
+        chunks = TTSManager._split_tts_chunks(text)
+        if not chunks:
+            return b""
+
+        audio_parts: list[bytes] = []
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://translate.google.com/",
+        }
+        with httpx.Client(timeout=3.5, follow_redirects=True) as client:
+            for chunk in chunks:
+                resp = client.get(
+                    "https://translate.google.com/translate_tts",
+                    params={"ie": "UTF-8", "client": "tw-ob", "tl": "vi", "q": chunk},
+                    headers=headers,
+                )
+                if resp.status_code == 200 and resp.content and len(resp.content) > 256:
+                    audio_parts.append(strip_mp3_id3v2(resp.content))
+                else:
+                    return b""
+
+        return b"".join(audio_parts)
 
     async def synthesize_gtts(self, text: str, timeout_sec: float = 3.5) -> bytes:
-        """Async wrapper cho gTTS với timeout an toàn."""
+        """Async wrapper cho Google TTS fallback (không cần cài thêm package ngoài)."""
         try:
             t0 = time.perf_counter()
             data = await asyncio.wait_for(
@@ -223,8 +279,6 @@ class TTSManager:
                 dt_ms = (time.perf_counter() - t0) * 1000
                 logger.info("⚡ gTTS fallback generated '%s' in %.0fms (%d bytes)", text[:40], dt_ms, len(data))
             return data
-        except ImportError:
-            return b""
         except asyncio.TimeoutError:
             logger.debug("gTTS fallback timeout for: %s", text[:40])
             return b""
@@ -414,18 +468,11 @@ class TTSManager:
 
     def get_engine_status(self) -> dict[str, Any]:
         """Trả về trạng thái các tầng TTS để kiểm tra nhanh trên /health."""
-        gtts_installed = False
-        try:
-            import gtts  # noqa: F401
-            gtts_installed = True
-        except ImportError:
-            pass
-
         return {
             "primaryEngine": self.primary_engine,
             "ramCachedPhrases": len(self._memory_cache),
             "piperOfflineReady": self.is_piper_ready,
-            "gttsFallbackReady": gtts_installed,
+            "gttsFallbackReady": True,
             "primaryVoice": self.default_voice,
         }
 

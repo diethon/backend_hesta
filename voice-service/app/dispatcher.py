@@ -88,6 +88,11 @@ class DispatchBatchResult:
                 action_vi = "tắt"
             elif "dừng" in pattern_lower or "dung" in pattern_lower:
                 action_vi = "dừng"
+        elif device_type == "door_lock":
+            if action == "TURN_ON":
+                action_vi = "mở"
+            elif action == "TURN_OFF":
+                action_vi = "khóa" if ("khóa" in pattern_lower or "khoa" in pattern_lower) else "đóng"
 
         if device_type == "led_rgb":
             if "rgb" in pattern_lower or "rgb" in hint_lower:
@@ -110,6 +115,15 @@ class DispatchBatchResult:
                 type_vi = "màn"
             else:
                 type_vi = "rèm"
+        elif device_type == "door_lock":
+            if "cửa chính" in pattern_lower or "cua chinh" in pattern_lower:
+                type_vi = "cửa chính"
+            elif action_vi == "khóa":
+                type_vi = "cửa"
+            elif "khóa" in pattern_lower or "khoa" in pattern_lower:
+                type_vi = "khóa cửa"
+            else:
+                type_vi = "cửa"
         elif device_type == "light" and (hint_lower == "ngủ" or "den ngu" in pattern_lower or "đèn ngủ" in pattern_lower):
             type_vi = "đèn ngủ"
             if room == "phòng ngủ":

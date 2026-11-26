@@ -382,7 +382,7 @@ class DeviceDirectory:
         r_norm = strip_vietnamese_tones(r_name) if r_name else ""
         r_alias_norm = self._room_aliases.get(r_norm, "") if r_norm else ""
 
-        def _room_matches(cached_room: str) -> bool:
+        def _room_matches(cached_room: str, allow_prefix: bool = False) -> bool:
             if not r_name:
                 return True
             if cached_room == r_name:
@@ -391,6 +391,8 @@ class DeviceDirectory:
             if c_norm == r_norm:
                 return True
             if r_alias_norm and c_norm == r_alias_norm:
+                return True
+            if allow_prefix and r_norm and (c_norm.startswith(r_norm + " ") or r_norm.startswith(c_norm + " ")):
                 return True
             return False
 
@@ -426,13 +428,13 @@ class DeviceDirectory:
             # KHÔNG ĐƯỢC trả về thiết bị khác để tránh bật nhầm đèn khác trong phòng!
             return []
 
-        def _lookup() -> list[DeviceInfo]:
+        def _lookup(allow_prefix: bool = False) -> list[DeviceInfo]:
             # Trường hợp tìm kiếm all thiết bị (tắt/bật tất cả thiết bị, cả nhà, cả phòng)
             if d_type in {"all", "all_devices", "device", "devices"}:
                 CONTROLLABLE_TYPES = {"light", "led_rgb", "fan", "air_conditioner", "water_heater", "socket", "tv"}
                 all_devs: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and _room_matches(r) and t in CONTROLLABLE_TYPES:
+                    if (not home_id or h == home_id) and _room_matches(r, allow_prefix) and t in CONTROLLABLE_TYPES:
                         for d in ds:
                             all_devs[d.device_id] = d
                 return list(all_devs.values())
@@ -441,7 +443,7 @@ class DeviceDirectory:
             if is_all and d_type == "light":
                 all_devs: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and _room_matches(r) and t in {"light", "led_rgb"}:
+                    if (not home_id or h == home_id) and _room_matches(r, allow_prefix) and t in {"light", "led_rgb"}:
                         for d in ds:
                             all_devs[d.device_id] = d
                 return list(all_devs.values())
@@ -450,7 +452,7 @@ class DeviceDirectory:
             if d_type == "led_rgb":
                 matched: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and _room_matches(r) and t == "led_rgb":
+                    if (not home_id or h == home_id) and _room_matches(r, allow_prefix) and t == "led_rgb":
                         for d in ds:
                             matched[d.device_id] = d
                 res = list(matched.values())
@@ -460,7 +462,7 @@ class DeviceDirectory:
             if d_type == "light":
                 matched: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and _room_matches(r) and t == "light":
+                    if (not home_id or h == home_id) and _room_matches(r, allow_prefix) and t == "light":
                         for d in ds:
                             matched[d.device_id] = d
                 res = list(matched.values())
@@ -469,7 +471,7 @@ class DeviceDirectory:
                 # Fallback: nếu phòng hoặc nhà KHÔNG CÓ đèn thường nào, fallback sang led_rgb
                 fallback_led: dict[str, DeviceInfo] = {}
                 for (h, r, t), ds in self._cache.items():
-                    if (not home_id or h == home_id) and _room_matches(r) and t == "led_rgb":
+                    if (not home_id or h == home_id) and _room_matches(r, allow_prefix) and t == "led_rgb":
                         for d in ds:
                             fallback_led[d.device_id] = d
                 if fallback_led:
@@ -478,13 +480,13 @@ class DeviceDirectory:
                 return []
 
             # Các loại thiết bị khác (fan, air_conditioner, gate, v.v.)
-            if r_name and not home_id:
+            if r_name and not home_id and not allow_prefix:
                 devs = self._cache.get(key, [])
                 if devs:
                     return _filter_hint(list(devs))
             matched: dict[str, DeviceInfo] = {}
             for (h, r, t), ds in self._cache.items():
-                if (not home_id or h == home_id) and _room_matches(r) and t == d_type:
+                if (not home_id or h == home_id) and _room_matches(r, allow_prefix) and t == d_type:
                     for d in ds:
                         matched[d.device_id] = d
             if matched:
@@ -492,7 +494,10 @@ class DeviceDirectory:
             return []
 
         with self._lock:
-            devices = _lookup()
+            devices = _lookup(allow_prefix=False)
+            if not devices and r_name:
+                # Fallback phòng cha -> phòng con (VD: "phòng ngủ" -> "phòng ngủ master" / "phòng ngủ của con")
+                devices = _lookup(allow_prefix=True)
 
         if devices:
             logger.debug("Cache HIT: %s → %d thiết bị", key, len(devices))
@@ -502,7 +507,9 @@ class DeviceDirectory:
         logger.info("Cache MISS: %s — refreshing ngay...", key)
         if self.refresh(home_id=home_id):
             with self._lock:
-                devices = _lookup()
+                devices = _lookup(allow_prefix=False)
+                if not devices and r_name:
+                    devices = _lookup(allow_prefix=True)
             if devices:
                 logger.info("Sau refresh: tìm thấy %d thiết bị", len(devices))
                 return devices
@@ -652,7 +659,24 @@ class DeviceDirectory:
                             "is_custom": True,
                         }
 
-        # 2. Tìm trong BUILTIN_MOOD_PRESETS
+        # 2. Kiểm tra tên màu cơ bản khớp chính xác TRƯỚC khi so khớp chuỗi con mood presets
+        # Tránh bẫy: "đỏ" -> "do" bị khớp nhầm thành chuỗi con của "doc sach" ("Đọc sách")!
+        for c_name, rgb in BUILTIN_COLOR_NAMES.items():
+            c_norm = strip_vietnamese_tones(c_name.lower())
+            if q_norm == c_norm:
+                return {
+                    "name": c_name,
+                    "hex": "",
+                    "rgb": rgb,
+                    "r": rgb[0],
+                    "g": rgb[1],
+                    "b": rgb[2],
+                    "brightness": 100,
+                    "is_custom": False,
+                    "is_color": True,
+                }
+
+        # 3. Tìm trong BUILTIN_MOOD_PRESETS (dùng ranh giới từ \b để không khớp nhầm chuỗi con giữa chữ!)
         for preset in BUILTIN_MOOD_PRESETS:
             preset_name_norm = strip_vietnamese_tones(preset["name"].lower())
             if q_norm == preset_name_norm:
@@ -668,7 +692,11 @@ class DeviceDirectory:
                 }
             for alias in preset.get("aliases", []):
                 alias_norm = strip_vietnamese_tones(alias.lower())
-                if q_norm == alias_norm or alias_norm in q_norm or q_norm in alias_norm:
+                if (
+                    q_norm == alias_norm
+                    or (len(alias_norm) >= 4 and re.search(rf"\b{re.escape(alias_norm)}\b", q_norm))
+                    or (len(q_norm) >= 4 and re.search(rf"\b{re.escape(q_norm)}\b", alias_norm))
+                ):
                     return {
                         "name": preset["name"],
                         "hex": preset["hex"],
@@ -679,21 +707,6 @@ class DeviceDirectory:
                         "brightness": preset["brightness"],
                         "is_custom": False,
                     }
-
-        # 3. Tìm trong BUILTIN_COLOR_NAMES
-        for c_name, rgb in BUILTIN_COLOR_NAMES.items():
-            c_norm = strip_vietnamese_tones(c_name.lower())
-            if q_norm == c_norm:
-                return {
-                    "name": c_name,
-                    "hex": "",
-                    "rgb": rgb,
-                    "r": rgb[0],
-                    "g": rgb[1],
-                    "b": rgb[2],
-                    "brightness": 100,
-                    "is_custom": False,
-                }
 
         return None
 

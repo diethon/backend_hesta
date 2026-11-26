@@ -75,7 +75,7 @@ ACTION_PHRASES = [
 
 # Từ khóa thiết bị (sắp xếp dài trước ngắn sau)
 DEVICE_KEYWORDS = [
-    "kịch bản", "ngữ cảnh",
+    "kịch bản", "kết bạn", "kích bản", "kịch bảng", "kết bảng", "ngữ cảnh",
     "bình nóng lạnh", "bình nước nóng", "máy nước nóng",
     "quạt thông gió", "quạt treo tường", "quạt trần", "quạt cây", "quạt",
     "đèn led rgb", "đèn led", "đèn rgb", "đèn chiếu tivi", "đèn chiếu tv", "đèn ngủ", "đèn trần", "đèn bàn", "đèn chùm", "đèn",

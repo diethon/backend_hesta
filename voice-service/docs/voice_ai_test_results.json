@@ -1,0 +1,2401 @@
+{
+  "generated_at": "2026-11-27 00:40:49",
+  "environment": {
+    "backend_url": "http://localhost:8080",
+    "voice_service_url": "http://localhost:8001",
+    "total_db_devices": 20,
+    "total_db_scenes": 8,
+    "devices": [
+      {
+        "name": "test",
+        "type": "LED_RGB",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Cảm biến ánh sáng",
+        "type": "LUX_SENSOR",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Cảm biến chuyển động cửa chính",
+        "type": "MOTION_SENSOR",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Cảm biến khói",
+        "type": "SMOKE_SENSOR",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Quạt phòng khách",
+        "type": "FAN",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Cửa cuốn",
+        "type": "ROLLING_DOOR",
+        "room": "Garage"
+      },
+      {
+        "name": "Cửa chính phòng khách",
+        "type": "DOOR",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Rèm phòng ngủ",
+        "type": "CURTAIN",
+        "room": "Phòng ngủ master"
+      },
+      {
+        "name": "Cảm biến lửa",
+        "type": "FLAME_SENSOR",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Cảm biến nhiệt ẩm phòng khách",
+        "type": "TEMP_HUMID_SENSOR",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Đèn chiếu TV",
+        "type": "LIGHT",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "TV TCL",
+        "type": "TV",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Đèn phòng ngủ của con",
+        "type": "LIGHT",
+        "room": "Phòng ngủ của con"
+      },
+      {
+        "name": "Đèn phòng khách",
+        "type": "LIGHT",
+        "room": "Phòng khách"
+      },
+      {
+        "name": "Đèn phòng bếp",
+        "type": "LIGHT",
+        "room": "Phòng bếp"
+      },
+      {
+        "name": "Máy bơm nước",
+        "type": "WATER_PUMP",
+        "room": "Garden"
+      },
+      {
+        "name": "Đèn ngủ master",
+        "type": "LIGHT",
+        "room": "Phòng ngủ master"
+      },
+      {
+        "name": "Đèn led RGB phòng con",
+        "type": "LED_RGB",
+        "room": "Phòng ngủ của con"
+      },
+      {
+        "name": "Điều hòa DAIKIN",
+        "type": "AIR_CONDITIONER",
+        "room": "Phòng ngủ của con"
+      },
+      {
+        "name": "Đèn garage",
+        "type": "LIGHT",
+        "room": "Garage"
+      }
+    ],
+    "scenes": [
+      {
+        "index": 1,
+        "name": "Buổi tối xem phim",
+        "enabled": true,
+        "actions": 0
+      },
+      {
+        "index": 2,
+        "name": "nhà",
+        "enabled": false,
+        "actions": 0
+      },
+      {
+        "index": 3,
+        "name": "bep",
+        "enabled": false,
+        "actions": 0
+      },
+      {
+        "index": 4,
+        "name": "Chúc ngủ ngon",
+        "enabled": false,
+        "actions": 0
+      },
+      {
+        "index": 5,
+        "name": "Chào buổi sáng",
+        "enabled": true,
+        "actions": 1
+      },
+      {
+        "index": 6,
+        "name": "Chào buổi sáng 1",
+        "enabled": true,
+        "actions": 2
+      },
+      {
+        "index": 7,
+        "name": "Đi ngủ",
+        "enabled": true,
+        "actions": 4
+      },
+      {
+        "index": 8,
+        "name": "Chào buổi sáng 4",
+        "enabled": false,
+        "actions": 1
+      }
+    ]
+  },
+  "pipeline_tests": [
+    {
+      "id": "TC-001",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "bật đèn phòng khách",
+      "expected": "Bật 2 đèn Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã bật 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 13.54,
+      "passed": true
+    },
+    {
+      "id": "TC-002",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "tắt đèn phòng khách",
+      "expected": "Tắt 2 đèn Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã tắt 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_OFF]",
+        "Đèn phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.72,
+      "passed": true
+    },
+    {
+      "id": "TC-003",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "bật đèn phòng bếp",
+      "expected": "Bật Đèn phòng bếp",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn Phòng bếp",
+      "actual_targets": [
+        "Đèn phòng bếp [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.69,
+      "passed": true
+    },
+    {
+      "id": "TC-004",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "tắt đèn bếp",
+      "expected": "Tắt Đèn phòng bếp (alias 'bếp')",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Phòng bếp",
+      "actual_targets": [
+        "Đèn phòng bếp [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.53,
+      "passed": true
+    },
+    {
+      "id": "TC-005",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "bật đèn ngủ master",
+      "expected": "Bật Đèn ngủ master",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn ngủ Phòng ngủ master",
+      "actual_targets": [
+        "Đèn ngủ master [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.71,
+      "passed": true
+    },
+    {
+      "id": "TC-006",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "tắt đèn phòng ngủ mắt tơ",
+      "expected": "Sửa âm học 'mắt tơ' -> Đèn ngủ master",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Phòng ngủ master",
+      "actual_targets": [
+        "Đèn ngủ master [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.96,
+      "passed": true
+    },
+    {
+      "id": "TC-007",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "bật đèn phòng ngủ của con",
+      "expected": "Bật Đèn phòng ngủ của con",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn phòng ngủ của con [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.13,
+      "passed": true
+    },
+    {
+      "id": "TC-008",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "tắt đèn phòng con",
+      "expected": "Alias 'phòng con' -> Đèn phòng ngủ của con",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn phòng ngủ của con [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.68,
+      "passed": true
+    },
+    {
+      "id": "TC-009",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "bật đèn chiếu TV",
+      "expected": "Chỉ bật Đèn chiếu TV (không nhầm TV)",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn chiếu TV",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.8,
+      "passed": true
+    },
+    {
+      "id": "TC-010",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "tắt đèn chiếu tivi",
+      "expected": "Chỉ tắt Đèn chiếu TV",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn chiếu TV",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.83,
+      "passed": true
+    },
+    {
+      "id": "TC-011",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Cơ bản",
+      "input": "bật đèn garage",
+      "expected": "Bật Đèn garage",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn Garage",
+      "actual_targets": [
+        "Đèn garage [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.53,
+      "passed": true
+    },
+    {
+      "id": "TC-012",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "tắt đèn gara",
+      "expected": "Alias 'gara' -> Đèn garage",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Garage",
+      "actual_targets": [
+        "Đèn garage [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.61,
+      "passed": true
+    },
+    {
+      "id": "TC-013",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "bật đèn nhà xe",
+      "expected": "Alias song ngữ 'nhà xe' -> Đèn garage",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn Garage",
+      "actual_targets": [
+        "Đèn garage [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.66,
+      "passed": true
+    },
+    {
+      "id": "TC-014",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Trung bình",
+      "input": "tắc đèn phòng ngủ master",
+      "expected": "Sửa lỗi phát âm 'tắc' -> Tắt Đèn ngủ master",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Phòng ngủ master",
+      "actual_targets": [
+        "Đèn ngủ master [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.97,
+      "passed": true
+    },
+    {
+      "id": "TC-015",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "bật dùm tôi cái đèn phòng khách đi",
+      "expected": "Lọc từ đệm lịch sự -> Bật đèn Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã bật 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 3.5,
+      "passed": true
+    },
+    {
+      "id": "TC-016",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "Hesta ơi tắt đèn phòng bếp giúp mình",
+      "expected": "Gọt lời dẫn 'Hesta ơi' -> Tắt Đèn phòng bếp",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Phòng bếp",
+      "actual_targets": [
+        "Đèn phòng bếp [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 3.25,
+      "passed": true
+    },
+    {
+      "id": "TC-017",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "chỉnh độ sáng đèn phòng khách 70 phần trăm",
+      "expected": "SET_BRIGHTNESS=70 Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã đặt độ sáng 2 đèn Phòng khách về mức 70",
+      "actual_targets": [
+        "Đèn chiếu TV [SET_BRIGHTNESS] {'brightness': 70}",
+        "Đèn phòng khách [SET_BRIGHTNESS] {'brightness': 70}"
+      ],
+      "error_code": null,
+      "latency_ms": 4.8,
+      "passed": true
+    },
+    {
+      "id": "TC-018",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "tăng độ sáng đèn phòng khách",
+      "expected": "INCREASE_BRIGHTNESS Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã tăng sáng 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [INCREASE_BRIGHTNESS]",
+        "Đèn phòng khách [INCREASE_BRIGHTNESS]"
+      ],
+      "error_code": null,
+      "latency_ms": 3.45,
+      "passed": true
+    },
+    {
+      "id": "TC-019",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "giảm độ sáng đèn phòng khách",
+      "expected": "DECREASE_BRIGHTNESS Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã giảm sáng 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [DECREASE_BRIGHTNESS]",
+        "Đèn phòng khách [DECREASE_BRIGHTNESS]"
+      ],
+      "error_code": null,
+      "latency_ms": 3.54,
+      "passed": true
+    },
+    {
+      "id": "TC-020",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "tắt tất cả đèn",
+      "expected": "Tắt toàn bộ 8 đèn (LIGHT + LED_RGB)",
+      "actual_success": true,
+      "actual_message": "Đã tắt tất cả 8 đèn trong nhà",
+      "actual_targets": [
+        "test [TURN_OFF]",
+        "Đèn chiếu TV [TURN_OFF]",
+        "Đèn phòng khách [TURN_OFF]",
+        "Đèn phòng ngủ của con [TURN_OFF]",
+        "Đèn ngủ master [TURN_OFF]",
+        "Đèn phòng bếp [TURN_OFF]",
+        "Đèn garage [TURN_OFF]",
+        "Đèn led RGB phòng con [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 4.29,
+      "passed": true
+    },
+    {
+      "id": "TC-021",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "Nâng cao",
+      "input": "bật toàn bộ đèn trong nhà",
+      "expected": "Bật toàn bộ 8 đèn (không chạm quạt/AC)",
+      "actual_success": true,
+      "actual_message": "Đã bật tất cả 8 đèn trong nhà",
+      "actual_targets": [
+        "test [TURN_ON]",
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]",
+        "Đèn phòng ngủ của con [TURN_ON]",
+        "Đèn ngủ master [TURN_ON]",
+        "Đèn phòng bếp [TURN_ON]",
+        "Đèn led RGB phòng con [TURN_ON]",
+        "Đèn garage [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 5.19,
+      "passed": true
+    },
+    {
+      "id": "TC-022",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "An toàn/Mơ hồ",
+      "input": "bật đèn",
+      "expected": "Hỏi lại phòng vì có nhiều đèn ở nhiều phòng",
+      "actual_success": false,
+      "actual_message": "Nhà có 6 đèn ở nhiều phòng khác nhau. Vui lòng nói rõ tên phòng.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.97,
+      "passed": true
+    },
+    {
+      "id": "TC-023",
+      "category": "1. Đèn chiếu sáng (LIGHT)",
+      "level": "An toàn/Mơ hồ",
+      "input": "bật đèn ngủ",
+      "expected": "Hỏi lại phòng ngủ (master vs của con)",
+      "actual_success": false,
+      "actual_message": "Nhà có 2 đèn ngủ ở nhiều phòng khác nhau. Vui lòng nói rõ tên phòng.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 1.19,
+      "passed": true
+    },
+    {
+      "id": "TC-024",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Cơ bản",
+      "input": "bật đèn led phòng con",
+      "expected": "Bật Đèn led RGB phòng con",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn LED Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn led RGB phòng con [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.54,
+      "passed": true
+    },
+    {
+      "id": "TC-025",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Cơ bản",
+      "input": "tắt đèn rgb phòng ngủ của con",
+      "expected": "Tắt Đèn led RGB phòng con",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn RGB Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn led RGB phòng con [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.83,
+      "passed": true
+    },
+    {
+      "id": "TC-026",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Trung bình",
+      "input": "bật đèn lét phòng khách",
+      "expected": "Sửa lỗi 'lét' -> LED RGB phòng khách (test)",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn LED Phòng khách",
+      "actual_targets": [
+        "test [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.07,
+      "passed": true
+    },
+    {
+      "id": "TC-027",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Trung bình",
+      "input": "đổi màu đèn led phòng con sang màu đỏ",
+      "expected": "SET_COLOR r=255,g=0,b=0 (đỏ)",
+      "actual_success": true,
+      "actual_message": "Đã đổi màu đèn LED Phòng ngủ của con sang màu đỏ",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_COLOR] {'r': 255, 'g': 0, 'b': 0, 'hex': '', 'brightness': 100, 'color': 'đỏ'}"
+      ],
+      "error_code": null,
+      "latency_ms": 3.49,
+      "passed": true
+    },
+    {
+      "id": "TC-028",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Trung bình",
+      "input": "bật đèn led màu đỏ phòng con",
+      "expected": "SET_COLOR màu đỏ (KHÔNG nhầm mood Đọc sách)",
+      "actual_success": true,
+      "actual_message": "Đã đổi màu đèn LED Phòng ngủ của con sang màu đỏ",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_COLOR] {'r': 255, 'g': 0, 'b': 0, 'hex': '', 'brightness': 100, 'color': 'đỏ'}"
+      ],
+      "error_code": null,
+      "latency_ms": 2.57,
+      "passed": true
+    },
+    {
+      "id": "TC-029",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Trung bình",
+      "input": "chuyển đèn rgb phòng con màu xanh dương",
+      "expected": "SET_COLOR xanh dương (b=255)",
+      "actual_success": true,
+      "actual_message": "Đã đổi màu đèn RGB Phòng ngủ của con sang màu xanh dương",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_COLOR] {'r': 0, 'g': 100, 'b': 255, 'hex': '', 'brightness': 100, 'color': 'xanh dương'}"
+      ],
+      "error_code": null,
+      "latency_ms": 3.25,
+      "passed": true
+    },
+    {
+      "id": "TC-030",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Nâng cao",
+      "input": "đặt độ sáng đèn led phòng con 50 phần trăm",
+      "expected": "SET_BRIGHTNESS=50",
+      "actual_success": true,
+      "actual_message": "Đã đặt độ sáng đèn LED Phòng ngủ của con về mức 50",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_BRIGHTNESS] {'brightness': 50}"
+      ],
+      "error_code": null,
+      "latency_ms": 3.82,
+      "passed": true
+    },
+    {
+      "id": "TC-031",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Nâng cao",
+      "input": "tăng sáng đèn rgb phòng con",
+      "expected": "INCREASE_BRIGHTNESS",
+      "actual_success": true,
+      "actual_message": "Đã tăng sáng đèn RGB Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn led RGB phòng con [INCREASE_BRIGHTNESS]"
+      ],
+      "error_code": null,
+      "latency_ms": 3.02,
+      "passed": true
+    },
+    {
+      "id": "TC-032",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Nâng cao",
+      "input": "giảm sáng đèn led phòng con",
+      "expected": "DECREASE_BRIGHTNESS",
+      "actual_success": true,
+      "actual_message": "Đã giảm sáng đèn LED Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn led RGB phòng con [DECREASE_BRIGHTNESS]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.8,
+      "passed": true
+    },
+    {
+      "id": "TC-033",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Nâng cao",
+      "input": "bật đèn led chế độ thư giãn phòng con",
+      "expected": "Mood preset Thư giãn (#ff9d5c, 40%)",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn LED Phòng ngủ của con chế độ Thư giãn",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_COLOR] {'r': 255, 'g': 157, 'b': 92, 'hex': '#ff9d5c', 'brightness': 40, 'mode': 'Thư giãn'}"
+      ],
+      "error_code": null,
+      "latency_ms": 3.26,
+      "passed": true
+    },
+    {
+      "id": "TC-034",
+      "category": "2. Đèn LED RGB (LED_RGB)",
+      "level": "Nâng cao",
+      "input": "đổi đèn rgb phòng con sang chế độ đọc sách",
+      "expected": "Mood preset Đọc sách (#fff1d6, 80%)",
+      "actual_success": true,
+      "actual_message": "Đã chuyển đèn RGB Phòng ngủ của con chế độ Đọc sách",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_COLOR] {'r': 255, 'g': 241, 'b': 214, 'hex': '#fff1d6', 'brightness': 80, 'mode': 'Đọc sách'}"
+      ],
+      "error_code": null,
+      "latency_ms": 3.95,
+      "passed": true
+    },
+    {
+      "id": "TC-035",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Cơ bản",
+      "input": "bật điều hòa",
+      "expected": "Bật Điều hòa DAIKIN",
+      "actual_success": true,
+      "actual_message": "Đã bật điều hòa",
+      "actual_targets": [
+        "Điều hòa DAIKIN [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.38,
+      "passed": true
+    },
+    {
+      "id": "TC-036",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Cơ bản",
+      "input": "tắt máy lạnh",
+      "expected": "Tắt Điều hòa DAIKIN",
+      "actual_success": true,
+      "actual_message": "Đã tắt điều hòa",
+      "actual_targets": [
+        "Điều hòa DAIKIN [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.37,
+      "passed": true
+    },
+    {
+      "id": "TC-037",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Trung bình",
+      "input": "bật máy lạnh phòng ngủ",
+      "expected": "Parent-room fallback -> Điều hòa DAIKIN",
+      "actual_success": true,
+      "actual_message": "Đã bật điều hòa phòng ngủ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.96,
+      "passed": true
+    },
+    {
+      "id": "TC-038",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Trung bình",
+      "input": "đặt nhiệt độ điều hòa 25 độ",
+      "expected": "SET_TEMPERATURE=25",
+      "actual_success": true,
+      "actual_message": "Đã đặt nhiệt độ điều hòa về 25 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [SET_TEMPERATURE] {'temperature': 25}"
+      ],
+      "error_code": null,
+      "latency_ms": 2.66,
+      "passed": true
+    },
+    {
+      "id": "TC-039",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Trung bình",
+      "input": "chỉnh máy lạnh xuống 24 độ",
+      "expected": "SET_TEMPERATURE=24",
+      "actual_success": true,
+      "actual_message": "Đã đặt nhiệt độ điều hòa về 24 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [SET_TEMPERATURE] {'temperature': 24}"
+      ],
+      "error_code": null,
+      "latency_ms": 2.36,
+      "passed": true
+    },
+    {
+      "id": "TC-040",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Nâng cao",
+      "input": "mở điều hòa hai mươi sáu độ",
+      "expected": "Số đọc bằng chữ -> SET_TEMPERATURE=26",
+      "actual_success": true,
+      "actual_message": "Đã đặt nhiệt độ điều hòa về 26 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [SET_TEMPERATURE] {'temperature': 26}"
+      ],
+      "error_code": null,
+      "latency_ms": 2.24,
+      "passed": true
+    },
+    {
+      "id": "TC-041",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Nâng cao",
+      "input": "tăng nhiệt độ điều hòa lên 2 độ",
+      "expected": "INCREASE_TEMPERATURE amount=2 (KHÔNG đặt 2°C)",
+      "actual_success": true,
+      "actual_message": "Đã tăng nhiệt độ điều hòa thêm 2 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [INCREASE_TEMPERATURE] {'amount': 2}"
+      ],
+      "error_code": null,
+      "latency_ms": 2.8,
+      "passed": true
+    },
+    {
+      "id": "TC-042",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Trung bình",
+      "input": "giảm nhiệt độ điều hòa",
+      "expected": "DECREASE_TEMPERATURE",
+      "actual_success": true,
+      "actual_message": "Đã giảm nhiệt độ điều hòa",
+      "actual_targets": [
+        "Điều hòa DAIKIN [DECREASE_TEMPERATURE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.94,
+      "passed": true
+    },
+    {
+      "id": "TC-043",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Nâng cao",
+      "input": "nóng quá",
+      "expected": "Cảm giác nóng -> DECREASE_TEMPERATURE (-2°C)",
+      "actual_success": true,
+      "actual_message": "Đã giảm nhiệt độ điều hòa thêm 2 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [DECREASE_TEMPERATURE] {'amount': 2}"
+      ],
+      "error_code": null,
+      "latency_ms": 1.17,
+      "passed": true
+    },
+    {
+      "id": "TC-044",
+      "category": "3. Điều hòa (AIR_CONDITIONER)",
+      "level": "Nâng cao",
+      "input": "lạnh quá",
+      "expected": "Cảm giác lạnh -> INCREASE_TEMPERATURE (+2°C)",
+      "actual_success": true,
+      "actual_message": "Đã tăng nhiệt độ điều hòa thêm 2 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [INCREASE_TEMPERATURE] {'amount': 2}"
+      ],
+      "error_code": null,
+      "latency_ms": 0.66,
+      "passed": true
+    },
+    {
+      "id": "TC-045",
+      "category": "4. Quạt (FAN)",
+      "level": "Cơ bản",
+      "input": "bật quạt",
+      "expected": "Bật Quạt phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã bật quạt",
+      "actual_targets": [
+        "Quạt phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.13,
+      "passed": true
+    },
+    {
+      "id": "TC-046",
+      "category": "4. Quạt (FAN)",
+      "level": "Cơ bản",
+      "input": "tắt quạt phòng khách",
+      "expected": "Tắt Quạt phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã tắt quạt Phòng khách",
+      "actual_targets": [
+        "Quạt phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.72,
+      "passed": true
+    },
+    {
+      "id": "TC-047",
+      "category": "4. Quạt (FAN)",
+      "level": "Trung bình",
+      "input": "mở quạt lên giùm tôi",
+      "expected": "Lọc từ đệm -> Bật Quạt phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã bật quạt",
+      "actual_targets": [
+        "Quạt phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.93,
+      "passed": true
+    },
+    {
+      "id": "TC-048",
+      "category": "4. Quạt (FAN)",
+      "level": "Nâng cao",
+      "input": "quạt mạnh quá",
+      "expected": "Cảm giác gió mạnh -> Tắt Quạt",
+      "actual_success": true,
+      "actual_message": "Đã tắt quạt",
+      "actual_targets": [
+        "Quạt phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.75,
+      "passed": true
+    },
+    {
+      "id": "TC-049",
+      "category": "5. Tivi (TV)",
+      "level": "Cơ bản",
+      "input": "bật tivi",
+      "expected": "Bật TV TCL",
+      "actual_success": true,
+      "actual_message": "Đã bật tivi",
+      "actual_targets": [
+        "TV TCL [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.13,
+      "passed": true
+    },
+    {
+      "id": "TC-050",
+      "category": "5. Tivi (TV)",
+      "level": "Cơ bản",
+      "input": "tắt TV phòng khách",
+      "expected": "Tắt TV TCL",
+      "actual_success": true,
+      "actual_message": "Đã tắt tivi Phòng khách",
+      "actual_targets": [
+        "TV TCL [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.59,
+      "passed": true
+    },
+    {
+      "id": "TC-051",
+      "category": "5. Tivi (TV)",
+      "level": "Trung bình",
+      "input": "mở ti vi lên đi",
+      "expected": "Biến thể 'ti vi' -> Bật TV TCL",
+      "actual_success": true,
+      "actual_message": "Đã bật tivi",
+      "actual_targets": [
+        "TV TCL [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.16,
+      "passed": true
+    },
+    {
+      "id": "TC-052",
+      "category": "5. Tivi (TV)",
+      "level": "Trung bình",
+      "input": "tắt dùm cái tivi",
+      "expected": "Lọc từ đệm -> Tắt TV TCL",
+      "actual_success": true,
+      "actual_message": "Đã tắt tivi",
+      "actual_targets": [
+        "TV TCL [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.37,
+      "passed": true
+    },
+    {
+      "id": "TC-053",
+      "category": "6. Rèm cửa (CURTAIN)",
+      "level": "Cơ bản",
+      "input": "mở rèm",
+      "expected": "OPEN Rèm phòng ngủ",
+      "actual_success": true,
+      "actual_message": "Đã mở rèm",
+      "actual_targets": [
+        "Rèm phòng ngủ [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.12,
+      "passed": true
+    },
+    {
+      "id": "TC-054",
+      "category": "6. Rèm cửa (CURTAIN)",
+      "level": "Cơ bản",
+      "input": "đóng rèm phòng ngủ master",
+      "expected": "CLOSE Rèm phòng ngủ",
+      "actual_success": true,
+      "actual_message": "Đã đóng rèm Phòng ngủ master",
+      "actual_targets": [
+        "Rèm phòng ngủ [CLOSE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.94,
+      "passed": true
+    },
+    {
+      "id": "TC-055",
+      "category": "6. Rèm cửa (CURTAIN)",
+      "level": "Cơ bản",
+      "input": "dừng rèm lại",
+      "expected": "STOP Rèm phòng ngủ",
+      "actual_success": true,
+      "actual_message": "Đã dừng rèm",
+      "actual_targets": [
+        "Rèm phòng ngủ [STOP]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.46,
+      "passed": true
+    },
+    {
+      "id": "TC-056",
+      "category": "6. Rèm cửa (CURTAIN)",
+      "level": "Trung bình",
+      "input": "kéo rèm ra",
+      "expected": "OPEN Rèm phòng ngủ",
+      "actual_success": true,
+      "actual_message": "Đã mở rèm",
+      "actual_targets": [
+        "Rèm phòng ngủ [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.46,
+      "passed": true
+    },
+    {
+      "id": "TC-057",
+      "category": "6. Rèm cửa (CURTAIN)",
+      "level": "Trung bình",
+      "input": "kéo rèm lại",
+      "expected": "CLOSE Rèm phòng ngủ",
+      "actual_success": true,
+      "actual_message": "Đã đóng rèm",
+      "actual_targets": [
+        "Rèm phòng ngủ [CLOSE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.66,
+      "passed": true
+    },
+    {
+      "id": "TC-058",
+      "category": "6. Rèm cửa (CURTAIN)",
+      "level": "Nâng cao",
+      "input": "mở màn phòng ngủ",
+      "expected": "Alias 'màn' + parent room 'phòng ngủ' -> OPEN",
+      "actual_success": true,
+      "actual_message": "Đã mở màn phòng ngủ",
+      "actual_targets": [
+        "Rèm phòng ngủ [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.84,
+      "passed": true
+    },
+    {
+      "id": "TC-059",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Cơ bản",
+      "input": "mở cửa cuốn",
+      "expected": "OPEN Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã mở cửa cuốn",
+      "actual_targets": [
+        "Cửa cuốn [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.11,
+      "passed": true
+    },
+    {
+      "id": "TC-060",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Cơ bản",
+      "input": "đóng cửa cuốn",
+      "expected": "CLOSE Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã đóng cửa cuốn",
+      "actual_targets": [
+        "Cửa cuốn [CLOSE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.16,
+      "passed": true
+    },
+    {
+      "id": "TC-061",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Cơ bản",
+      "input": "dừng cửa cuốn",
+      "expected": "STOP Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã dừng cửa cuốn",
+      "actual_targets": [
+        "Cửa cuốn [STOP]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.17,
+      "passed": true
+    },
+    {
+      "id": "TC-062",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Trung bình",
+      "input": "mở cửa cuống",
+      "expected": "Sửa lỗi STT 'cửa cuống' -> OPEN Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã mở cửa cuốn",
+      "actual_targets": [
+        "Cửa cuốn [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.06,
+      "passed": true
+    },
+    {
+      "id": "TC-063",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Trung bình",
+      "input": "mở cửa gara",
+      "expected": "Cửa gara -> OPEN Cửa cuốn (không nhầm door_lock)",
+      "actual_success": true,
+      "actual_message": "Đã mở cửa cuốn Garage",
+      "actual_targets": [
+        "Cửa cuốn [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.24,
+      "passed": true
+    },
+    {
+      "id": "TC-064",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Trung bình",
+      "input": "đóng cửa garage",
+      "expected": "Cửa garage -> CLOSE Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã đóng cửa cuốn Garage",
+      "actual_targets": [
+        "Cửa cuốn [CLOSE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.31,
+      "passed": true
+    },
+    {
+      "id": "TC-065",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Cơ bản",
+      "input": "mở cổng",
+      "expected": "OPEN Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã mở cổng",
+      "actual_targets": [
+        "Cửa cuốn [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.1,
+      "passed": true
+    },
+    {
+      "id": "TC-066",
+      "category": "7. Cửa cuốn / Cổng (ROLLING_DOOR)",
+      "level": "Cơ bản",
+      "input": "đóng cổng lại",
+      "expected": "CLOSE Cửa cuốn",
+      "actual_success": true,
+      "actual_message": "Đã đóng cổng",
+      "actual_targets": [
+        "Cửa cuốn [CLOSE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.39,
+      "passed": true
+    },
+    {
+      "id": "TC-067",
+      "category": "8. Cửa chính (DOOR)",
+      "level": "Cơ bản",
+      "input": "mở cửa chính",
+      "expected": "TURN_ON Cửa chính phòng khách, msg 'Đã mở cửa'",
+      "actual_success": true,
+      "actual_message": "Đã mở cửa",
+      "actual_targets": [
+        "Cửa chính phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.28,
+      "passed": true
+    },
+    {
+      "id": "TC-068",
+      "category": "8. Cửa chính (DOOR)",
+      "level": "Cơ bản",
+      "input": "đóng cửa chính",
+      "expected": "TURN_OFF Cửa chính phòng khách, msg 'Đã đóng cửa'",
+      "actual_success": true,
+      "actual_message": "Đã đóng cửa",
+      "actual_targets": [
+        "Cửa chính phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.38,
+      "passed": true
+    },
+    {
+      "id": "TC-069",
+      "category": "8. Cửa chính (DOOR)",
+      "level": "Cơ bản",
+      "input": "mở khóa cửa",
+      "expected": "TURN_ON Cửa chính phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã mở khóa cửa",
+      "actual_targets": [
+        "Cửa chính phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.38,
+      "passed": true
+    },
+    {
+      "id": "TC-070",
+      "category": "8. Cửa chính (DOOR)",
+      "level": "Cơ bản",
+      "input": "khóa cửa chính",
+      "expected": "TURN_OFF Cửa chính phòng khách (không lặp 'khóa khóa')",
+      "actual_success": true,
+      "actual_message": "Đã khóa cửa",
+      "actual_targets": [
+        "Cửa chính phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.3,
+      "passed": true
+    },
+    {
+      "id": "TC-071",
+      "category": "8. Cửa chính (DOOR)",
+      "level": "Trung bình",
+      "input": "mở cửa phòng khách",
+      "expected": "TURN_ON Cửa chính phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã mở cửa Phòng khách",
+      "actual_targets": [
+        "Cửa chính phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.23,
+      "passed": true
+    },
+    {
+      "id": "TC-072",
+      "category": "8. Cửa chính (DOOR)",
+      "level": "Trung bình",
+      "input": "đóng cửa phòng khách",
+      "expected": "TURN_OFF Cửa chính phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã đóng cửa Phòng khách",
+      "actual_targets": [
+        "Cửa chính phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.29,
+      "passed": true
+    },
+    {
+      "id": "TC-073",
+      "category": "9. Máy bơm nước (WATER_PUMP)",
+      "level": "Cơ bản",
+      "input": "bật máy bơm",
+      "expected": "TURN_ON Máy bơm nước",
+      "actual_success": true,
+      "actual_message": "Đã bật máy bơm nước",
+      "actual_targets": [
+        "Máy bơm nước [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.29,
+      "passed": true
+    },
+    {
+      "id": "TC-074",
+      "category": "9. Máy bơm nước (WATER_PUMP)",
+      "level": "Cơ bản",
+      "input": "tắt máy bơm nước",
+      "expected": "TURN_OFF Máy bơm nước",
+      "actual_success": true,
+      "actual_message": "Đã tắt máy bơm nước",
+      "actual_targets": [
+        "Máy bơm nước [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.52,
+      "passed": true
+    },
+    {
+      "id": "TC-075",
+      "category": "9. Máy bơm nước (WATER_PUMP)",
+      "level": "Trung bình",
+      "input": "bật bơm nước sân vườn",
+      "expected": "Alias song ngữ 'sân vườn' -> Garden / Máy bơm nước",
+      "actual_success": true,
+      "actual_message": "Đã bật máy bơm nước Garden",
+      "actual_targets": [
+        "Máy bơm nước [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.89,
+      "passed": true
+    },
+    {
+      "id": "TC-076",
+      "category": "9. Máy bơm nước (WATER_PUMP)",
+      "level": "Trung bình",
+      "input": "tắt máy bơm garden",
+      "expected": "Phòng Garden -> TURN_OFF Máy bơm nước",
+      "actual_success": true,
+      "actual_message": "Đã tắt máy bơm nước Garden",
+      "actual_targets": [
+        "Máy bơm nước [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.66,
+      "passed": true
+    },
+    {
+      "id": "TC-077",
+      "category": "10. Điều khiển hàng loạt (ALL)",
+      "level": "Cơ bản",
+      "input": "tắt tất cả thiết bị phòng khách",
+      "expected": "Tắt 5 thiết bị điều khiển được ở Phòng khách (bỏ qua 5 cảm biến)",
+      "actual_success": true,
+      "actual_message": "Đã tắt tất cả 5 thiết bị Phòng khách",
+      "actual_targets": [
+        "test [TURN_OFF]",
+        "Quạt phòng khách [TURN_OFF]",
+        "Đèn chiếu TV [TURN_OFF]",
+        "Đèn phòng khách [TURN_OFF]",
+        "TV TCL [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 5.71,
+      "passed": true
+    },
+    {
+      "id": "TC-078",
+      "category": "10. Điều khiển hàng loạt (ALL)",
+      "level": "Trung bình",
+      "input": "bật tất cả thiết bị phòng bếp",
+      "expected": "Bật Đèn phòng bếp (KHÔNG bị scene 'bep' cướp lệnh)",
+      "actual_success": true,
+      "actual_message": "Đã bật thiết bị Phòng bếp",
+      "actual_targets": [
+        "Đèn phòng bếp [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 3.75,
+      "passed": true
+    },
+    {
+      "id": "TC-079",
+      "category": "10. Điều khiển hàng loạt (ALL)",
+      "level": "Nâng cao",
+      "input": "tắt hết thiết bị trong nhà",
+      "expected": "Tắt 11 thiết bị điều khiển được cả nhà (bỏ qua cảm biến/cửa)",
+      "actual_success": true,
+      "actual_message": "Đã tắt tất cả 11 thiết bị trong nhà",
+      "actual_targets": [
+        "test [TURN_OFF]",
+        "Quạt phòng khách [TURN_OFF]",
+        "Đèn chiếu TV [TURN_OFF]",
+        "Đèn phòng khách [TURN_OFF]",
+        "Đèn phòng ngủ của con [TURN_OFF]",
+        "TV TCL [TURN_OFF]",
+        "Đèn phòng bếp [TURN_OFF]",
+        "Điều hòa DAIKIN [TURN_OFF]",
+        "Đèn ngủ master [TURN_OFF]",
+        "Đèn led RGB phòng con [TURN_OFF]",
+        "Đèn garage [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 7.51,
+      "passed": true
+    },
+    {
+      "id": "TC-080",
+      "category": "10. Điều khiển hàng loạt (ALL)",
+      "level": "Nâng cao",
+      "input": "tắt toàn bộ thiết bị",
+      "expected": "Tắt toàn bộ thiết bị điều khiển được cả nhà",
+      "actual_success": true,
+      "actual_message": "Đã tắt tất cả 11 thiết bị trong nhà",
+      "actual_targets": [
+        "test [TURN_OFF]",
+        "Quạt phòng khách [TURN_OFF]",
+        "Đèn chiếu TV [TURN_OFF]",
+        "Đèn phòng khách [TURN_OFF]",
+        "Đèn phòng ngủ của con [TURN_OFF]",
+        "TV TCL [TURN_OFF]",
+        "Đèn phòng bếp [TURN_OFF]",
+        "Điều hòa DAIKIN [TURN_OFF]",
+        "Đèn led RGB phòng con [TURN_OFF]",
+        "Đèn ngủ master [TURN_OFF]",
+        "Đèn garage [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 6.94,
+      "passed": true
+    },
+    {
+      "id": "TC-081",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Cơ bản",
+      "input": "bật kịch bản 1",
+      "expected": "Kích hoạt kịch bản số 1 (Buổi tối xem phim)",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Buổi tối xem phim.",
+      "actual_targets": [
+        "Scene:Buổi tối xem phim(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.89,
+      "passed": true
+    },
+    {
+      "id": "TC-082",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Cơ bản",
+      "input": "bật kịch bản chào buổi sáng",
+      "expected": "Kích hoạt Chào buổi sáng",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Chào buổi sáng.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.54,
+      "passed": true
+    },
+    {
+      "id": "TC-083",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Cơ bản",
+      "input": "bật kịch bản chào buổi sáng 1",
+      "expected": "Kích hoạt Chào buổi sáng 1",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Chào buổi sáng 1.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng 1(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.34,
+      "passed": true
+    },
+    {
+      "id": "TC-084",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Cơ bản",
+      "input": "tắt kịch bản đi ngủ",
+      "expected": "Tắt (DEACTIVATE) kịch bản Đi ngủ",
+      "actual_success": true,
+      "actual_message": "Đã tắt kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(DEACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.33,
+      "passed": true
+    },
+    {
+      "id": "TC-085",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Cơ bản",
+      "input": "dừng kịch bản chào buổi sáng",
+      "expected": "Tắt (DEACTIVATE) Chào buổi sáng",
+      "actual_success": true,
+      "actual_message": "Đã tắt kịch bản Chào buổi sáng.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng(DEACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.32,
+      "passed": true
+    },
+    {
+      "id": "TC-086",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Lỗi STT",
+      "input": "bật kết bạn chào buổi sáng",
+      "expected": "Sửa lỗi STT 'kết bạn' -> kịch bản Chào buổi sáng",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Chào buổi sáng.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.3,
+      "passed": true
+    },
+    {
+      "id": "TC-087",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Lỗi STT",
+      "input": "bật kịch bảng 1",
+      "expected": "Sửa lỗi STT 'kịch bảng' -> kịch bản số 1",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Buổi tối xem phim.",
+      "actual_targets": [
+        "Scene:Buổi tối xem phim(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.32,
+      "passed": true
+    },
+    {
+      "id": "TC-088",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Lỗi STT",
+      "input": "bật chế độ cho buổi sáng",
+      "expected": "Lỗi STT 'cho' thay 'chào' -> Chào buổi sáng",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Chào buổi sáng.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.46,
+      "passed": true
+    },
+    {
+      "id": "TC-089",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Nâng cao",
+      "input": "Trời sáng rồi bật cho tôi kịch bản buổi sáng đi",
+      "expected": "Gọt lời dẫn + từ đệm -> Chào buổi sáng",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Chào buổi sáng.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 4.31,
+      "passed": true
+    },
+    {
+      "id": "TC-090",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Nâng cao",
+      "input": "bật dùm cái kịch bản đi ngủ",
+      "expected": "Từ đệm lịch sự -> Đi ngủ",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.36,
+      "passed": true
+    },
+    {
+      "id": "TC-091",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Nâng cao",
+      "input": "bật cho tôi cái đi ngủ đi",
+      "expected": "Không nói chữ 'kịch bản' vẫn khớp Đi ngủ",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.42,
+      "passed": true
+    },
+    {
+      "id": "TC-092",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Đời thường",
+      "input": "tôi muốn đi ngủ",
+      "expected": "Ngôn ngữ tự nhiên -> Đi ngủ (ưu tiên enabled=True)",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.36,
+      "passed": true
+    },
+    {
+      "id": "TC-093",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Đời thường",
+      "input": "chúc ngủ ngon",
+      "expected": "Ưu tiên Đi ngủ (enabled) thay vì Chúc ngủ ngon (disabled)",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.33,
+      "passed": true
+    },
+    {
+      "id": "TC-094",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Đời thường",
+      "input": "chào buổi sáng",
+      "expected": "Ngôn ngữ tự nhiên -> Chào buổi sáng",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Chào buổi sáng.",
+      "actual_targets": [
+        "Scene:Chào buổi sáng(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.32,
+      "passed": true
+    },
+    {
+      "id": "TC-095",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "Đời thường",
+      "input": "tôi muốn xem phim",
+      "expected": "Ngôn ngữ tự nhiên -> Buổi tối xem phim",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Buổi tối xem phim.",
+      "actual_targets": [
+        "Scene:Buổi tối xem phim(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.49,
+      "passed": true
+    },
+    {
+      "id": "TC-096",
+      "category": "11. Kịch bản (SCENE)",
+      "level": "An toàn/Mơ hồ",
+      "input": "tôi về nhà rồi",
+      "expected": "Báo rõ nhà chưa có kịch bản Về nhà (không đoán bừa)",
+      "actual_success": false,
+      "actual_message": "Nhà chưa có kịch bản Về nhà. Bạn có thể tạo kịch bản này trong mục Tự động hóa.",
+      "actual_targets": [],
+      "error_code": "SCENE_NOT_FOUND",
+      "latency_ms": 0.57,
+      "passed": true
+    },
+    {
+      "id": "TC-097",
+      "category": "12. Lệnh kép & Xung đột (COMPOUND)",
+      "level": "Nâng cao",
+      "input": "bật đèn phòng khách và bật quạt",
+      "expected": "Thực thi song song 2 đèn Phòng khách + Quạt",
+      "actual_success": true,
+      "actual_message": "Đã bật 2 đèn Phòng khách và bật quạt.",
+      "actual_targets": [
+        "Quạt phòng khách [TURN_ON]",
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 8.54,
+      "passed": true
+    },
+    {
+      "id": "TC-098",
+      "category": "12. Lệnh kép & Xung đột (COMPOUND)",
+      "level": "Nâng cao",
+      "input": "tắt đèn bếp rồi mở rèm phòng ngủ master",
+      "expected": "Đèn phòng bếp (KHÔNG nhảy sang phòng ngủ) + Rèm",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn Phòng bếp và mở rèm Phòng ngủ master.",
+      "actual_targets": [
+        "Đèn phòng bếp [TURN_OFF]",
+        "Rèm phòng ngủ [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 8.2,
+      "passed": true
+    },
+    {
+      "id": "TC-099",
+      "category": "12. Lệnh kép & Xung đột (COMPOUND)",
+      "level": "Nâng cao",
+      "input": "mở điều hòa 25 độ và tắt đèn chiếu TV",
+      "expected": "AC 25°C + Tắt Đèn chiếu TV",
+      "actual_success": true,
+      "actual_message": "Đã đặt nhiệt độ điều hòa về 25 độ và tắt đèn chiếu TV.",
+      "actual_targets": [
+        "Điều hòa DAIKIN [SET_TEMPERATURE] {'temperature': 25}",
+        "Đèn chiếu TV [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 9.05,
+      "passed": true
+    },
+    {
+      "id": "TC-100",
+      "category": "12. Lệnh kép & Xung đột (COMPOUND)",
+      "level": "Xung đột",
+      "input": "bật đèn phòng khách và bật kịch bản đi ngủ",
+      "expected": "Specific Overrides General: chạy Kịch bản Đi ngủ TRƯỚC, Đèn phòng khách SAU",
+      "actual_success": true,
+      "actual_message": "Đã bật 2 đèn Phòng khách và bật kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(ACTIVATE) [EXEC]",
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 5.51,
+      "passed": true
+    },
+    {
+      "id": "TC-101",
+      "category": "13. Truy vấn hệ thống (SYSTEM)",
+      "level": "Cơ bản",
+      "input": "nhà hiện tại có mấy kịch bản",
+      "expected": "Đếm & liệt kê kịch bản đang bật/tắt",
+      "actual_success": true,
+      "actual_message": "Nhà hiện có 4 kịch bản đang bật: Buổi tối xem phim, Chào buổi sáng, Chào buổi sáng 1, Đi ngủ và 4 kịch bản đang tắt. Bạn muốn bật kịch bản nào?",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.19,
+      "passed": true
+    },
+    {
+      "id": "TC-102",
+      "category": "13. Truy vấn hệ thống (SYSTEM)",
+      "level": "Cơ bản",
+      "input": "ở nhà mình có những kịch bản nào nhỉ",
+      "expected": "Liệt kê kịch bản nhà",
+      "actual_success": true,
+      "actual_message": "Nhà hiện có 4 kịch bản đang bật: Buổi tối xem phim, Chào buổi sáng, Chào buổi sáng 1, Đi ngủ và 4 kịch bản đang tắt. Bạn muốn bật kịch bản nào?",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.15,
+      "passed": true
+    },
+    {
+      "id": "TC-103",
+      "category": "13. Truy vấn hệ thống (SYSTEM)",
+      "level": "Cơ bản",
+      "input": "nhà có bao nhiêu phòng",
+      "expected": "Liệt kê 6 phòng từ DB",
+      "actual_success": true,
+      "actual_message": "Nhà hiện có 6 phòng: Garage, Garden, Phòng bếp, Phòng khách, Phòng ngủ của con, Phòng ngủ master.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.12,
+      "passed": true
+    },
+    {
+      "id": "TC-104",
+      "category": "13. Truy vấn hệ thống (SYSTEM)",
+      "level": "Trung bình",
+      "input": "phòng khách có mấy thiết bị",
+      "expected": "Liệt kê 5 thiết bị điều khiển được ở Phòng khách",
+      "actual_success": true,
+      "actual_message": "Hiện có 5 thiết bị ở Phòng khách: test, Quạt phòng khách, Đèn chiếu TV, Đèn phòng khách, TV TCL.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.97,
+      "passed": true
+    },
+    {
+      "id": "TC-105",
+      "category": "13. Truy vấn hệ thống (SYSTEM)",
+      "level": "Trung bình",
+      "input": "nhà có những thiết bị nào",
+      "expected": "Liệt kê thiết bị trong nhà",
+      "actual_success": true,
+      "actual_message": "Hiện có 11 thiết bị trong nhà: test, Quạt phòng khách, Đèn chiếu TV, Đèn phòng khách, TV TCL, Đèn phòng ngủ của con và 5 thiết bị khác.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.91,
+      "passed": true
+    },
+    {
+      "id": "TC-106",
+      "category": "13. Truy vấn hệ thống (SYSTEM)",
+      "level": "Cơ bản",
+      "input": "hủy lệnh",
+      "expected": "Xóa ngữ cảnh hội thoại",
+      "actual_success": true,
+      "actual_message": "Đã hủy bỏ yêu cầu.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.22,
+      "passed": true
+    },
+    {
+      "id": "TC-107",
+      "category": "14. Cảm giác môi trường (COMFORT)",
+      "level": "Nâng cao",
+      "input": "phòng khách tối quá",
+      "expected": "Bật đèn Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã bật 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.68,
+      "passed": true
+    },
+    {
+      "id": "TC-108",
+      "category": "14. Cảm giác môi trường (COMFORT)",
+      "level": "Nâng cao",
+      "input": "tối quá",
+      "expected": "Nhận diện TURN_ON light, hỏi rõ phòng do nhiều phòng có đèn",
+      "actual_success": false,
+      "actual_message": "Nhà có 6 đèn ở nhiều phòng khác nhau. Vui lòng nói rõ tên phòng.",
+      "actual_targets": [],
+      "error_code": null,
+      "latency_ms": 0.58,
+      "passed": true
+    },
+    {
+      "id": "TC-109",
+      "category": "14. Cảm giác môi trường (COMFORT)",
+      "level": "Nâng cao",
+      "input": "đèn phòng khách sáng quá",
+      "expected": "DECREASE_BRIGHTNESS Phòng khách (không bật đèn)",
+      "actual_success": true,
+      "actual_message": "Đã giảm sáng 2 đèn Phòng khách thêm 20 mức",
+      "actual_targets": [
+        "Đèn chiếu TV [DECREASE_BRIGHTNESS] {'amount': 20}",
+        "Đèn phòng khách [DECREASE_BRIGHTNESS] {'amount': 20}"
+      ],
+      "error_code": null,
+      "latency_ms": 2.1,
+      "passed": true
+    },
+    {
+      "id": "TC-110",
+      "category": "14. Cảm giác môi trường (COMFORT)",
+      "level": "Nâng cao",
+      "input": "phòng ngủ lạnh quá",
+      "expected": "INCREASE_TEMPERATURE (+2°C) Điều hòa DAIKIN",
+      "actual_success": true,
+      "actual_message": "Đã tăng nhiệt độ điều hòa phòng ngủ thêm 2 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [INCREASE_TEMPERATURE] {'amount': 2}"
+      ],
+      "error_code": null,
+      "latency_ms": 1.07,
+      "passed": true
+    },
+    {
+      "id": "TC-111",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Phủ định",
+      "input": "đừng bật đèn",
+      "expected": "Chặn lệnh phủ định (INTENT_NOT_FOUND, 0 dispatch)",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.07,
+      "passed": true
+    },
+    {
+      "id": "TC-112",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Phủ định",
+      "input": "đừng có mở cổng",
+      "expected": "Chặn lệnh phủ định mở cổng",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.06,
+      "passed": true
+    },
+    {
+      "id": "TC-113",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Phủ định",
+      "input": "không được tắt điều hòa",
+      "expected": "Chặn lệnh cấm tắt điều hòa",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.06,
+      "passed": true
+    },
+    {
+      "id": "TC-114",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Phủ định",
+      "input": "khoan hãy mở cửa",
+      "expected": "Chặn lệnh trì hoãn mở cửa",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.05,
+      "passed": true
+    },
+    {
+      "id": "TC-115",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Ngoài phạm vi",
+      "input": "bật tủ lạnh",
+      "expected": "Từ chối thiết bị không hỗ trợ",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.5,
+      "passed": true
+    },
+    {
+      "id": "TC-116",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Ngoài phạm vi",
+      "input": "tắt máy giặt",
+      "expected": "Từ chối thiết bị không hỗ trợ",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.53,
+      "passed": true
+    },
+    {
+      "id": "TC-117",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Ngoài phạm vi",
+      "input": "mở nhạc lên đi",
+      "expected": "Từ chối mở nhạc (KHÔNG nhầm sang scene 'nhà')",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.61,
+      "passed": true
+    },
+    {
+      "id": "TC-118",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Ngoài phạm vi",
+      "input": "đóng cuốn sách",
+      "expected": "Từ chối (KHÔNG nhầm sang 'đóng cổng')",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 2.29,
+      "passed": true
+    },
+    {
+      "id": "TC-119",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Chế độ lạ",
+      "input": "bật chế độ linh tinh không tồn tại",
+      "expected": "Trả INTENT_NOT_FOUND (KHÔNG báo lỗi loại thiết bị)",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 2.6,
+      "passed": true
+    },
+    {
+      "id": "TC-120",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Xã giao",
+      "input": "kết bạn với tôi đi",
+      "expected": "Giữ nguyên xã giao, KHÔNG chuyển thành kịch bản",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 2.51,
+      "passed": true
+    },
+    {
+      "id": "TC-121",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Xã giao",
+      "input": "tôi đi ăn cơm",
+      "expected": "Chữ 'tôi' KHÔNG nhầm thành 'tối quá'",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 1.23,
+      "passed": true
+    },
+    {
+      "id": "TC-122",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Xã giao",
+      "input": "hôm nay trời đẹp quá",
+      "expected": "Từ chối câu cảm thán xã giao",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 1.53,
+      "passed": true
+    },
+    {
+      "id": "TC-123",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Nhiễu",
+      "input": "alo alo 1 2 3",
+      "expected": "Từ chối nhiễu mic",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 1.57,
+      "passed": true
+    },
+    {
+      "id": "TC-124",
+      "category": "15. An toàn & Chống đoán bừa (SAFETY)",
+      "level": "Ngoài phạm vi",
+      "input": "mấy giờ rồi",
+      "expected": "Từ chối câu hỏi ngoài Smart Home",
+      "actual_success": false,
+      "actual_message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "actual_targets": [],
+      "error_code": "INTENT_NOT_FOUND",
+      "latency_ms": 0.54,
+      "passed": true
+    },
+    {
+      "id": "TC-125",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Đèn Phòng khách #1",
+      "input": "bật đèn phòng khách",
+      "expected": "Bật 2 đèn Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã bật 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_ON]",
+        "Đèn phòng khách [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.67,
+      "passed": true
+    },
+    {
+      "id": "TC-126",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Đèn Phòng khách #2",
+      "input": "tắt đi",
+      "expected": "Kế thừa ngữ cảnh -> Tắt 2 đèn Phòng khách",
+      "actual_success": true,
+      "actual_message": "Đã tắt 2 đèn Phòng khách",
+      "actual_targets": [
+        "Đèn chiếu TV [TURN_OFF]",
+        "Đèn phòng khách [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.9,
+      "passed": true
+    },
+    {
+      "id": "TC-127",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Điều hòa đa tham số #1",
+      "input": "bật điều hòa",
+      "expected": "Bật Điều hòa DAIKIN",
+      "actual_success": true,
+      "actual_message": "Đã bật điều hòa",
+      "actual_targets": [
+        "Điều hòa DAIKIN [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.72,
+      "passed": true
+    },
+    {
+      "id": "TC-128",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Điều hòa đa tham số #2",
+      "input": "đặt 24 độ",
+      "expected": "Kế thừa AC -> SET_TEMPERATURE=24",
+      "actual_success": true,
+      "actual_message": "Đã đặt nhiệt độ điều hòa phòng ngủ của con về 24 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [SET_TEMPERATURE] {'temperature': 24}"
+      ],
+      "error_code": null,
+      "latency_ms": 1.24,
+      "passed": true
+    },
+    {
+      "id": "TC-129",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Điều hòa đa tham số #3",
+      "input": "tăng thêm 2 độ",
+      "expected": "Kế thừa AC -> INCREASE_TEMPERATURE=2",
+      "actual_success": true,
+      "actual_message": "Đã tăng nhiệt độ điều hòa phòng ngủ của con thêm 2 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [INCREASE_TEMPERATURE] {'amount': 2}"
+      ],
+      "error_code": null,
+      "latency_ms": 1.43,
+      "passed": true
+    },
+    {
+      "id": "TC-130",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Điều hòa đa tham số #4",
+      "input": "giảm đi 1 độ",
+      "expected": "Kế thừa AC -> DECREASE_TEMPERATURE=1",
+      "actual_success": true,
+      "actual_message": "Đã giảm nhiệt độ điều hòa phòng ngủ của con thêm 1 độ",
+      "actual_targets": [
+        "Điều hòa DAIKIN [DECREASE_TEMPERATURE] {'amount': 1}"
+      ],
+      "error_code": null,
+      "latency_ms": 1.41,
+      "passed": true
+    },
+    {
+      "id": "TC-131",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Điều hòa đa tham số #5",
+      "input": "tắt đi",
+      "expected": "Kế thừa AC -> TURN_OFF",
+      "actual_success": true,
+      "actual_message": "Đã tắt điều hòa phòng ngủ của con",
+      "actual_targets": [
+        "Điều hòa DAIKIN [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.03,
+      "passed": true
+    },
+    {
+      "id": "TC-132",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng LED RGB giữ loại thiết bị #1",
+      "input": "bật đèn led phòng con",
+      "expected": "Bật Đèn led RGB phòng con",
+      "actual_success": true,
+      "actual_message": "Đã bật đèn LED Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn led RGB phòng con [TURN_ON]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.35,
+      "passed": true
+    },
+    {
+      "id": "TC-133",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng LED RGB giữ loại thiết bị #2",
+      "input": "đổi sang màu xanh dương",
+      "expected": "Kế thừa LED RGB -> SET_COLOR xanh dương",
+      "actual_success": true,
+      "actual_message": "Đã đổi màu đèn LED RGB Phòng ngủ của con sang màu xanh dương",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_COLOR] {'r': 0, 'g': 100, 'b': 255, 'color': 'xanh dương'}"
+      ],
+      "error_code": null,
+      "latency_ms": 1.95,
+      "passed": true
+    },
+    {
+      "id": "TC-134",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng LED RGB giữ loại thiết bị #3",
+      "input": "giảm độ sáng xuống 40 phần trăm",
+      "expected": "Giữ nguyên LED RGB (không nhảy sang đèn thường) -> SET_BRIGHTNESS=40",
+      "actual_success": true,
+      "actual_message": "Đã đặt độ sáng đèn LED RGB Phòng ngủ của con về mức 40",
+      "actual_targets": [
+        "Đèn led RGB phòng con [SET_BRIGHTNESS] {'brightness': 40}"
+      ],
+      "error_code": null,
+      "latency_ms": 4.03,
+      "passed": true
+    },
+    {
+      "id": "TC-135",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng LED RGB giữ loại thiết bị #4",
+      "input": "tắt đi",
+      "expected": "Kế thừa LED RGB -> TURN_OFF",
+      "actual_success": true,
+      "actual_message": "Đã tắt đèn LED RGB Phòng ngủ của con",
+      "actual_targets": [
+        "Đèn led RGB phòng con [TURN_OFF]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.17,
+      "passed": true
+    },
+    {
+      "id": "TC-136",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Kịch bản (Bật -> Tắt) #1",
+      "input": "bật kịch bản đi ngủ",
+      "expected": "ACTIVATE Đi ngủ",
+      "actual_success": true,
+      "actual_message": "Đã bật kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(ACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 0.68,
+      "passed": true
+    },
+    {
+      "id": "TC-137",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Kịch bản (Bật -> Tắt) #2",
+      "input": "tắt đi",
+      "expected": "Kế thừa Scene -> DEACTIVATE Đi ngủ",
+      "actual_success": true,
+      "actual_message": "Đã tắt kịch bản Đi ngủ.",
+      "actual_targets": [
+        "Scene:Đi ngủ(DEACTIVATE) [EXEC]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.07,
+      "passed": true
+    },
+    {
+      "id": "TC-138",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Rèm (Mở -> Dừng -> Đóng) #1",
+      "input": "mở rèm phòng ngủ master",
+      "expected": "OPEN Rèm phòng ngủ",
+      "actual_success": true,
+      "actual_message": "Đã mở rèm Phòng ngủ master",
+      "actual_targets": [
+        "Rèm phòng ngủ [OPEN]"
+      ],
+      "error_code": null,
+      "latency_ms": 2.03,
+      "passed": true
+    },
+    {
+      "id": "TC-139",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Rèm (Mở -> Dừng -> Đóng) #2",
+      "input": "dừng lại",
+      "expected": "Kế thừa Rèm -> STOP",
+      "actual_success": true,
+      "actual_message": "Đã dừng rèm Phòng ngủ master",
+      "actual_targets": [
+        "Rèm phòng ngủ [STOP]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.14,
+      "passed": true
+    },
+    {
+      "id": "TC-140",
+      "category": "16. Ngữ cảnh hội thoại 45s (CONTEXT)",
+      "level": "Luồng Rèm (Mở -> Dừng -> Đóng) #3",
+      "input": "đóng lại",
+      "expected": "Kế thừa Rèm -> CLOSE",
+      "actual_success": true,
+      "actual_message": "Đã đóng rèm Phòng ngủ master",
+      "actual_targets": [
+        "Rèm phòng ngủ [CLOSE]"
+      ],
+      "error_code": null,
+      "latency_ms": 1.13,
+      "passed": true
+    }
+  ],
+  "live_tts_tests": [
+    {
+      "id": "LIVE-01",
+      "input": "nhà hiện tại có mấy kịch bản",
+      "purpose": "Truy vấn kịch bản + giọng đọc",
+      "http_status": 200,
+      "success": true,
+      "error_code": null,
+      "message": "Nhà hiện có 4 kịch bản đang bật: Buổi tối xem phim, Chào buổi sáng, Chào buổi sáng 1, Đi ngủ và 4 kịch bản đang tắt. Bạn muốn bật kịch bản nào?",
+      "audio_ok": true,
+      "audio_bytes_b64": 123671,
+      "server_duration_ms": null,
+      "wall_ms": 5159.7
+    },
+    {
+      "id": "LIVE-02",
+      "input": "phòng khách có mấy thiết bị",
+      "purpose": "Truy vấn thiết bị + giọng đọc",
+      "http_status": 200,
+      "success": true,
+      "error_code": null,
+      "message": "Hiện có 5 thiết bị ở Phòng khách: test, Quạt phòng khách, Đèn chiếu TV, Đèn phòng khách, TV TCL.",
+      "audio_ok": true,
+      "audio_bytes_b64": 93975,
+      "server_duration_ms": null,
+      "wall_ms": 2656.4
+    },
+    {
+      "id": "LIVE-03",
+      "input": "bật chế độ cho buổi sáng",
+      "purpose": "Khớp kịch bản khi STT sai 'chào'->'cho' + báo ngoại tuyến có audio",
+      "http_status": 200,
+      "success": false,
+      "error_code": "DEVICE_OFFLINE",
+      "message": "Không thể bật kịch bản Chào buổi sáng, các thiết bị hiện đang ngoại tuyến.",
+      "audio_ok": true,
+      "audio_bytes_b64": 60183,
+      "server_duration_ms": null,
+      "wall_ms": 3420.1
+    },
+    {
+      "id": "LIVE-04",
+      "input": "Trời sáng rồi bật cho tôi kịch bản buổi sáng đi",
+      "purpose": "Gọt lời dẫn + khớp kịch bản + có audio",
+      "http_status": 200,
+      "success": false,
+      "error_code": "DEVICE_OFFLINE",
+      "message": "Không thể bật kịch bản Chào buổi sáng, các thiết bị hiện đang ngoại tuyến.",
+      "audio_ok": true,
+      "audio_bytes_b64": 60183,
+      "server_duration_ms": null,
+      "wall_ms": 3005.5
+    },
+    {
+      "id": "LIVE-05",
+      "input": "tăng nhiệt độ điều hòa lên 2 độ",
+      "purpose": "Điều hòa ngoại tuyến + phản hồi giọng đọc",
+      "http_status": 200,
+      "success": false,
+      "error_code": "FAILED",
+      "message": "Không thể tăng nhiệt độ điều hòa — thiết bị không phản hồi.",
+      "audio_ok": true,
+      "audio_bytes_b64": 49431,
+      "server_duration_ms": null,
+      "wall_ms": 3098.9
+    },
+    {
+      "id": "LIVE-06",
+      "input": "mở cửa chính",
+      "purpose": "Cửa chính ngoại tuyến + phản hồi giọng đọc",
+      "http_status": 200,
+      "success": false,
+      "error_code": "FAILED",
+      "message": "Không thể mở cửa — thiết bị không phản hồi.",
+      "audio_ok": true,
+      "audio_bytes_b64": 36119,
+      "server_duration_ms": null,
+      "wall_ms": 2798.4
+    },
+    {
+      "id": "LIVE-07",
+      "input": "bật đèn led màu đỏ phòng con",
+      "purpose": "LED RGB ngoại tuyến + phản hồi giọng đọc",
+      "http_status": 200,
+      "success": false,
+      "error_code": "FAILED",
+      "message": "Không thể đổi màu đèn LED Phòng ngủ của con — thiết bị không phản hồi.",
+      "audio_ok": true,
+      "audio_bytes_b64": 57879,
+      "server_duration_ms": null,
+      "wall_ms": 2864.4
+    },
+    {
+      "id": "LIVE-08",
+      "input": "bật chế độ linh tinh không tồn tại",
+      "purpose": "Từ chối INTENT_NOT_FOUND + giọng đọc Hoài My từ RAM",
+      "http_status": 200,
+      "success": false,
+      "error_code": "INTENT_NOT_FOUND",
+      "message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "audio_ok": true,
+      "audio_bytes_b64": 38807,
+      "server_duration_ms": null,
+      "wall_ms": 2239.0
+    },
+    {
+      "id": "LIVE-09",
+      "input": "đừng có bật đèn",
+      "purpose": "Chặn phủ định + giọng đọc Hoài My từ RAM",
+      "http_status": 200,
+      "success": false,
+      "error_code": "INTENT_NOT_FOUND",
+      "message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "audio_ok": true,
+      "audio_bytes_b64": 38807,
+      "server_duration_ms": null,
+      "wall_ms": 2241.1
+    },
+    {
+      "id": "LIVE-10",
+      "input": "mở nhạc lên đi",
+      "purpose": "Chặn ngoài phạm vi + giọng đọc Hoài My từ RAM",
+      "http_status": 200,
+      "success": false,
+      "error_code": "INTENT_NOT_FOUND",
+      "message": "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+      "audio_ok": true,
+      "audio_bytes_b64": 38807,
+      "server_duration_ms": null,
+      "wall_ms": 2240.9
+    }
+  ]
+}
