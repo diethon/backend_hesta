@@ -18,6 +18,8 @@ public interface OtaCampaignService {
 
     FirmwarePackageDto getPackage(UUID packageId);
 
+    void deletePackage(UUID packageId);
+
     FirmwareDownloadPayload loadFirmwareForDownload(UUID packageId);
 
     OtaCampaignDto createAndStartCampaign(CreateOtaCampaignRequest request);
@@ -31,4 +33,6 @@ public interface OtaCampaignService {
     void handleNodeOtaResult(String nodeId, String version, boolean success, String error);
 
     void handleNodeOtaResult(String nodeCode, String campaignId, String version, String status, Integer progressPct, String error);
+
+    void onNodeVersionReported(UUID nodeId, String nodeCode, String reportedVersion);
 }

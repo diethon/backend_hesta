@@ -83,8 +83,10 @@ public class AdminDiagnosticsController {
     }
 
     @GetMapping("/mqtt-sniffer")
-    public ResponseEntity<ApiResponse<List<MqttPacketDto>>> getMqttSniffer() {
-        List<MqttPacketDto> packets = diagnosticsService.getSnifferPackets();
+    public ResponseEntity<ApiResponse<List<MqttPacketDto>>> getMqttSniffer(
+            @RequestParam(required = false) String nodeCode,
+            @RequestParam(required = false) UUID homeId) {
+        List<MqttPacketDto> packets = diagnosticsService.getSnifferPackets(nodeCode, homeId);
         return ResponseEntity.ok(ApiResponse.<List<MqttPacketDto>>builder()
                 .code(1000)
                 .result(packets)

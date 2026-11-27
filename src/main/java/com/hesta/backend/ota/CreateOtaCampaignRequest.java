@@ -16,4 +16,5 @@ public class CreateOtaCampaignRequest {
     private UUID firmwarePackageId;
     private Double failureThresholdPercent;
     private String rolloutStrategy; // CANARY, IMMEDIATE
+    private java.util.List<UUID> targetNodeIds;
 }

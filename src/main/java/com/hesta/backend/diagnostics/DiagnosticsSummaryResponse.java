@@ -13,6 +13,7 @@ public class DiagnosticsSummaryResponse {
 
     private boolean brokerConnected;
     private String brokerUrl;
+    private int totalHomes;
     private int totalNodes;
     private int onlineNodes;
     private int offlineNodes;

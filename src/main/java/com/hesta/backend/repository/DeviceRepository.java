@@ -121,6 +121,9 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     @Query("SELECT d.deviceType, COUNT(d) FROM Device d GROUP BY d.deviceType")
     List<Object[]> countGroupedByDeviceType();
 
+    @Query("SELECT d.node.id, d.deviceType, COUNT(d) FROM Device d WHERE d.isDeleted = false AND d.node IS NOT NULL GROUP BY d.node.id, d.deviceType")
+    List<Object[]> countAttachedDevicesByNodeAndType();
+
     @Query("""
         SELECT d FROM Device d
         LEFT JOIN FETCH d.room r

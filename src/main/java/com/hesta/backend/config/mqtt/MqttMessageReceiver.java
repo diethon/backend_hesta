@@ -1094,6 +1094,9 @@ public class MqttMessageReceiver {
                     edgeNodeRepository.save(node);
                     log.info("EdgeNode [{}] registered and set to ONLINE", finalNodeCode);
                     cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
+                    if (finalFw != null && otaCampaignService != null) {
+                        otaCampaignService.onNodeVersionReported(node.getId(), node.getNodeCode(), finalFw);
+                    }
                 });
             }
         } catch (Exception e) {
@@ -1201,17 +1204,30 @@ public class MqttMessageReceiver {
         try {
             String nodeCode = extractNodeCodeFromTopic(topic);
             Map<String, Object> data = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            if (nodeCode == null || nodeCode.isBlank() || "unknown".equalsIgnoreCase(nodeCode)) {
+                Object rawNode = data.getOrDefault("nodeId", data.get("nodeCode"));
+                if (rawNode != null && !rawNode.toString().isBlank()) {
+                    nodeCode = rawNode.toString().trim();
+                }
+            }
             String campaignId = data.get("campaignId") != null ? data.get("campaignId").toString() : null;
             String version = data.getOrDefault("version", "").toString();
+            String reportedVersion = data.get("reportedVersion") != null
+                    ? data.get("reportedVersion").toString().trim()
+                    : "";
+            String effectiveVersion = (!reportedVersion.isBlank()
+                    && ((campaignId != null && !campaignId.isBlank()) || version == null || version.isBlank()))
+                    ? reportedVersion
+                    : version;
             String status = data.getOrDefault("status", "").toString();
             Integer progress = null;
             if (data.get("progress") instanceof Number num) {
                 progress = num.intValue();
             }
             String error = data.get("error") != null ? data.get("error").toString() : "";
-            otaCampaignService.handleNodeOtaResult(nodeCode, campaignId, version, status, progress, error);
+            otaCampaignService.handleNodeOtaResult(nodeCode, campaignId, effectiveVersion, status, progress, error);
             log.info("Processed OTA status for node [{}]: campaignId={}, status={}, version={}",
-                    nodeCode, campaignId, status, version);
+                    nodeCode, campaignId, status, effectiveVersion);
         } catch (Exception e) {
             log.error("Failed to parse OTA message from topic [{}]: {}", topic, e.getMessage());
         }

@@ -263,15 +263,19 @@ class MqttDiagnosticsServiceImplTest {
         doAnswer(inv -> {
             String topic = inv.getArgument(0);
             String rawPayload = inv.getArgument(2);
-            assertEquals("hesta/nodes/" + nodeCode + "/ping", topic);
-            Map<?, ?> sent = new ObjectMapper().readValue(rawPayload, Map.class);
-            String pingId = sent.get("pingId").toString();
-            new Thread(() -> {
-                try {
-                    Thread.sleep(25);
-                    diagnosticsService.handlePong(nodeCode, "{\"pingId\":\"" + pingId + "\"}");
-                } catch (Exception ignored) {}
-            }).start();
+            String codeTopic = "hesta/nodes/" + nodeCode + "/ping";
+            String idTopic = "hesta/nodes/" + node.getId() + "/ping";
+            assertTrue(topic.equals(codeTopic) || topic.equals(idTopic));
+            if (topic.equals(codeTopic)) {
+                Map<?, ?> sent = new ObjectMapper().readValue(rawPayload, Map.class);
+                String pingId = sent.get("pingId").toString();
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(25);
+                        diagnosticsService.handlePong(nodeCode, "{\"pingId\":\"" + pingId + "\"}");
+                    } catch (Exception ignored) {}
+                }).start();
+            }
             return null;
         }).when(mqttGateway).sendToMqtt(anyString(), anyInt(), anyString());
 
@@ -282,6 +286,38 @@ class MqttDiagnosticsServiceImplTest {
         assertNotNull(response.getLastPingAt());
         assertEquals(1, response.getSuccessfulCommands());
         assertEquals(CircuitState.CLOSED, response.getCircuitState());
+    }
+
+    @Test
+    @DisplayName("Dual-ID MQTT Ping: publishes /ping to both nodeCode and UUID and resolves /pong arriving on UUID topic")
+    void testPingNode_DualTopicAndUuidPong() throws Exception {
+        when(edgeNodeRepository.findByIdWithHome(node.getId())).thenReturn(Optional.of(node));
+        when(edgeNodeRepository.findById(node.getId())).thenReturn(Optional.of(node));
+
+        String uuidTopic = "hesta/nodes/" + node.getId() + "/ping";
+        doAnswer(inv -> {
+            String topic = inv.getArgument(0);
+            String rawPayload = inv.getArgument(2);
+            if (uuidTopic.equals(topic)) {
+                Map<?, ?> sent = new ObjectMapper().readValue(rawPayload, Map.class);
+                String pingId = sent.get("pingId").toString();
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(15);
+                        diagnosticsService.handlePong(node.getId().toString(), "{\"pingId\":\"" + pingId + "\"}");
+                    } catch (Exception ignored) {}
+                }).start();
+            }
+            return null;
+        }).when(mqttGateway).sendToMqtt(anyString(), anyInt(), anyString());
+
+        NodeDiagnosticsResponse response = diagnosticsService.pingNode(node.getId());
+
+        assertNotNull(response);
+        assertEquals(nodeCode, response.getNodeCode());
+        assertTrue(response.getAverageLatencyMs() >= 1L);
+        verify(mqttGateway).sendToMqtt(eq("hesta/nodes/" + nodeCode + "/ping"), eq(1), anyString());
+        verify(mqttGateway).sendToMqtt(eq(uuidTopic), eq(1), anyString());
     }
 
     @Test
@@ -304,5 +340,28 @@ class MqttDiagnosticsServiceImplTest {
 
         AppException ex = assertThrows(AppException.class, () -> diagnosticsService.pingNode(node.getId()));
         assertEquals(ErrorCode.GATEWAY_DISCONNECTED, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Targeted Packet Sniffer: isolates packets per node even when global buffer overflows")
+    void testTargetedPacketSnifferByNode() {
+        when(edgeNodeRepository.findByNodeCode(nodeCode)).thenReturn(Optional.of(node));
+
+        // First send 2 packets for NODE-TEST-01
+        diagnosticsService.recordPacket("hesta/nodes/" + nodeCode + "/devices/d1/state", "IN", 1, "{\"power\":true}");
+        diagnosticsService.recordPacket("hesta/nodes/" + nodeCode + "/ping", "OUT", 1, "{\"pingId\":\"p1\"}");
+
+        // Flood global 50-packet buffer with packets from another node
+        for (int i = 0; i < 60; i++) {
+            diagnosticsService.recordPacket("hesta/nodes/OTHER-NODE-99/devices/d2/telemetry", "IN", 1, "{\"seq\":" + i + "}");
+        }
+
+        // Global unfiltered buffer drops older packets from NODE-TEST-01
+        assertEquals(50, diagnosticsService.getSnifferPackets().size());
+
+        // Targeted sniffer for NODE-TEST-01 still has both isolated packets intact
+        List<MqttPacketDto> targeted = diagnosticsService.getSnifferPackets(nodeCode, null);
+        assertEquals(2, targeted.size());
+        assertTrue(targeted.stream().allMatch(p -> p.getTopic().contains("/" + nodeCode + "/")));
     }
 }
