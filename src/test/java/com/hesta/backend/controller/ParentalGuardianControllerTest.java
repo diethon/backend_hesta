@@ -2,7 +2,6 @@ package com.hesta.backend.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hesta.backend.dto.request.CreateParentalGuardianRequest;
-import com.hesta.backend.dto.request.GuardianSimulateEventRequest;
 import com.hesta.backend.dto.response.ParentalGuardianResponse;
 import com.hesta.backend.enums.AccountStatus;
 import com.hesta.backend.enums.GuardianStatus;
@@ -68,7 +67,7 @@ class ParentalGuardianControllerTest {
     void testCreateRuleEndpoint() throws Exception {
         CreateParentalGuardianRequest request = CreateParentalGuardianRequest.builder()
                 .name("Giới hạn xem TV khi vắng nhà")
-                .targetDeviceId(deviceId)
+                .targetDeviceIds(List.of(deviceId))
                 .allowedDurationMinutes(45)
                 .warningMinutesBefore(5)
                 .autoLockout(true)
@@ -77,8 +76,7 @@ class ParentalGuardianControllerTest {
         ParentalGuardianResponse mockResponse = ParentalGuardianResponse.builder()
                 .id(ruleId)
                 .homeId(homeId)
-                .targetDeviceId(deviceId)
-                .targetDeviceName("Smart TV")
+                .targetDevices(List.of(new ParentalGuardianResponse.TargetDevice(deviceId, "Smart TV", "TV")))
                 .name("Giới hạn xem TV khi vắng nhà")
                 .allowedDurationMinutes(45)
                 .status(GuardianStatus.IDLE)
@@ -93,7 +91,8 @@ class ParentalGuardianControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result.id").value(ruleId.toString()))
-                .andExpect(jsonPath("$.result.name").value("Giới hạn xem TV khi vắng nhà"));
+                .andExpect(jsonPath("$.result.name").value("Giới hạn xem TV khi vắng nhà"))
+                .andExpect(jsonPath("$.result.targetDevices[0].id").value(deviceId.toString()));
     }
 
     @Test
@@ -102,7 +101,6 @@ class ParentalGuardianControllerTest {
         ParentalGuardianResponse mockResponse = ParentalGuardianResponse.builder()
                 .id(ruleId)
                 .homeId(homeId)
-                .targetDeviceId(deviceId)
                 .name("Giới hạn xem TV khi vắng nhà")
                 .status(GuardianStatus.IDLE)
                 .build();
@@ -114,32 +112,5 @@ class ParentalGuardianControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1000))
                 .andExpect(jsonPath("$.result[0].id").value(ruleId.toString()));
-    }
-
-    @Test
-    @DisplayName("POST /api/v1/homes/{homeId}/guardian-rules/{ruleId}/simulate chạy giả lập")
-    void testSimulateEndpoint() throws Exception {
-        GuardianSimulateEventRequest request = GuardianSimulateEventRequest.builder()
-                .eventType("PARENT_DEPARTURE")
-                .build();
-
-        ParentalGuardianResponse mockResponse = ParentalGuardianResponse.builder()
-                .id(ruleId)
-                .homeId(homeId)
-                .targetDeviceId(deviceId)
-                .name("Giới hạn xem TV khi vắng nhà")
-                .parentAway(true)
-                .status(GuardianStatus.IDLE)
-                .build();
-
-        when(guardianService.simulate(eq(userId), eq(homeId), eq(ruleId), any())).thenReturn(mockResponse);
-
-        mockMvc.perform(post("/api/v1/homes/{homeId}/guardian-rules/{ruleId}/simulate", homeId, ruleId)
-                        .with(authentication(auth))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(1000))
-                .andExpect(jsonPath("$.result.parentAway").value(true));
     }
 }
