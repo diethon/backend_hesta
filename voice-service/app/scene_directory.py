@@ -107,7 +107,14 @@ class SceneDirectory:
             logger.info("Scene cache refreshed: %d kịch bản", len(parsed))
             return True
         except Exception as e:
-            logger.debug("Could not refresh scene directory: %s", e)
+            logger.warning("Could not refresh scene directory: %s", e)
+            # Reset HTTP client nếu kết nối keep-alive bị hỏng để lần sau kết nối mới
+            if self._owns_client and self._client is not None:
+                try:
+                    self._client.close()
+                except Exception:
+                    pass
+                self._client = None
             return False
 
     def start(self, home_id: str = "") -> None:
@@ -119,10 +126,14 @@ class SceneDirectory:
 
         def _loop():
             while not self._stop_event.wait(self.config.refresh_interval_seconds):
-                self.refresh(home_id=home_id)
+                try:
+                    self.refresh(home_id=home_id)
+                except Exception as e:
+                    logger.warning("Scene refresh loop error: %s", e)
 
         self._refresh_thread = threading.Thread(target=_loop, daemon=True, name="scene-dir-refresh")
         self._refresh_thread.start()
+        logger.info("Scene directory refresh thread started (interval=%ds)", self.config.refresh_interval_seconds)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -170,6 +181,25 @@ class SceneDirectory:
         if not scenes:
             return None
 
+        matched = self._match_in_list(q_raw, scenes, aliases=aliases)
+        if matched is not None:
+            return matched
+
+        # Cache miss (VD người dùng vừa tạo kịch bản mới trong khi cache vẫn chứa kịch bản cũ):
+        # Refresh on-demand 1 lần (chống spam trong vòng 2s) rồi tìm lại!
+        if time.time() - self._last_refresh_time >= 2.0:
+            if self.refresh(home_id=home_id):
+                fresh_scenes = self.list_scenes(home_id)
+                if fresh_scenes:
+                    return self._match_in_list(q_raw, fresh_scenes, aliases=aliases)
+        return None
+
+    def _match_in_list(
+        self,
+        q_raw: str,
+        scenes: list[SceneInfo],
+        aliases: list[str] | None = None,
+    ) -> SceneInfo | None:
         # Sắp xếp ưu tiên scene đang enabled=True trước khi cùng độ khớp
         prioritized = sorted(scenes, key=lambda s: (not s.enabled, s.index))
 
@@ -247,7 +277,7 @@ class SceneDirectory:
                         best_scene = s
 
         if best_scene is not None:
-            logger.info("Scene fuzzy matched: '%s' → '%s' (score=%.1f%%)", query, best_scene.name, best_rank[1])
+            logger.info("Scene fuzzy matched: '%s' → '%s' (score=%.1f%%)", q_raw, best_scene.name, best_rank[1])
             return best_scene
 
         return None

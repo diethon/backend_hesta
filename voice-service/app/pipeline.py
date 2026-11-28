@@ -338,6 +338,26 @@ class VoicePipeline:
             home_id=home_id or scene.home_id,
             user_id=user_id,
         )
+
+        # Nếu Backend trả 404 (scene ID trong cache đã cũ do người dùng vừa xóa & tạo lại kịch bản cùng tên),
+        # tự động làm mới cache kịch bản từ Backend và thử thực thi lại 1 lần với scene_id mới!
+        if scene_result.status_code == 404 or scene_result.error_code == "SCENE_NOT_FOUND":
+            logger.info("Scene %s (%s) returned 404, refreshing scene directory and retrying...", scene.name, scene.scene_id)
+            if self.scene_directory.refresh(home_id=home_id):
+                fresh_scene = self.scene_directory.resolve_scene(
+                    scene_query, home_id=home_id, aliases=scene_aliases
+                )
+                if fresh_scene is not None and fresh_scene.scene_id != scene.scene_id:
+                    scene = fresh_scene
+                    intent.scene_query = scene.name
+                    scene_result = self.dispatcher.dispatch_scene(
+                        scene_id=scene.scene_id,
+                        scene_name=scene.name,
+                        mode=mode,
+                        home_id=home_id or scene.home_id,
+                        user_id=user_id,
+                    )
+
         step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
 
         message = scene_result.summary_message()
@@ -394,6 +414,8 @@ class VoicePipeline:
         # Nhánh truy vấn hệ thống (liệt kê kịch bản / danh sách phòng / hủy lệnh)
         if intent.device_type == "system":
             if intent.action == "LIST_SCENES":
+                if self.scene_directory and (time.time() - getattr(self.scene_directory, "_last_refresh_time", 0.0) >= 5.0):
+                    self.scene_directory.refresh(home_id=self.home_id)
                 scenes = self.scene_directory.list_scenes(self.home_id) if self.scene_directory else []
                 enabled_scenes = [s.name for s in scenes if s.enabled]
                 disabled_count = len(scenes) - len(enabled_scenes)
