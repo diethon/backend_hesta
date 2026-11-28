@@ -541,6 +541,94 @@ class TestNaturalConversationalAndAntiHallucinationAudit:
         r_25 = real_mapper.map("đặt máy lạnh hai lăm độ")
         assert r_25 is not None and r_25.action == "SET_TEMPERATURE" and r_25.parameters.get("temperature") == 25
 
+    def test_scene_cache_miss_triggers_on_demand_refresh(self):
+        """Khi người dùng vừa tạo kịch bản mới trong khi cache vẫn chứa kịch bản cũ, tự động refresh on-demand."""
+        from app.scene_directory import SceneDirectory, SceneDirectoryConfig
+
+        call_count = {"get": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            call_count["get"] += 1
+            if call_count["get"] == 1:
+                return httpx.Response(200, json=[
+                    {"id": "old-morning-id", "name": "Chào buổi sáng", "homeId": "h1", "enabled": True, "index": 1}
+                ])
+            return httpx.Response(200, json=[
+                {"id": "new-morning-id", "name": "Chào buổi sáng", "homeId": "h1", "enabled": True, "index": 1},
+                {"id": "new-sleep-id", "name": "Chúc ngủ ngon", "homeId": "h1", "enabled": True, "index": 2},
+            ])
+
+        client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://mock")
+        sdir = SceneDirectory(SceneDirectoryConfig(base_url="http://mock"), http_client=client)
+        assert sdir.refresh(home_id="h1") is True
+        # Giả lập đã qua > 2s kể từ lần refresh trước
+        sdir._last_refresh_time -= 5.0
+
+        found = sdir.resolve_scene("Chúc ngủ ngon", home_id="h1")
+        assert found is not None
+        assert found.scene_id == "new-sleep-id"
+        assert call_count["get"] == 2
+
+    def test_scene_404_stale_id_auto_refreshes_and_retries(self, real_mapper):
+        """Khi kịch bản bị xóa & tạo lại (scene_id cũ trả 404), pipeline tự refresh cache và gọi lại với scene_id mới."""
+        from app.audio_gate import AudioGate
+        from app.device_directory import DeviceDirectory
+        from app.dialogue_state import DialogueState
+        from app.dispatcher import DispatchConfig, Dispatcher
+        from app.pipeline import VoicePipeline
+        from app.scene_directory import SceneDirectory, SceneDirectoryConfig
+        from app.stt import SpeechToText
+
+        state = {"scenes_get": 0, "exec_ids": []}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/internal/scenes" and request.method == "GET":
+                state["scenes_get"] += 1
+                if state["scenes_get"] == 1:
+                    return httpx.Response(200, json=[
+                        {"id": "stale-id-1", "name": "Chào buổi sáng", "homeId": "h1", "enabled": True, "index": 1}
+                    ])
+                return httpx.Response(200, json=[
+                    {"id": "fresh-id-2", "name": "Chào buổi sáng", "homeId": "h1", "enabled": True, "index": 1}
+                ])
+            if request.url.path == "/internal/scenes/stale-id-1/execute":
+                state["exec_ids"].append("stale-id-1")
+                return httpx.Response(404, json={"message": "Scene not found"})
+            if request.url.path == "/internal/scenes/fresh-id-2/execute":
+                state["exec_ids"].append("fresh-id-2")
+                return httpx.Response(200, json={
+                    "code": 1000,
+                    "result": {
+                        "sceneId": "fresh-id-2",
+                        "sceneName": "Chào buổi sáng",
+                        "status": "SUCCESS",
+                        "totalDevices": 2,
+                        "executedCount": 2,
+                    },
+                })
+            return httpx.Response(200, json=[])
+
+        client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://mock")
+        sdir = SceneDirectory(SceneDirectoryConfig(base_url="http://mock"), http_client=client)
+        sdir.refresh(home_id="h1")
+
+        pipeline = VoicePipeline(
+            audio_gate=AudioGate(),
+            stt=SpeechToText(),
+            device_directory=DeviceDirectory(http_client=client),
+            scene_directory=sdir,
+            intent_mapper=real_mapper,
+            dispatcher=Dispatcher(DispatchConfig(base_url="http://mock"), http_client=client),
+            dialogue_state=DialogueState(),
+            home_id="h1",
+        )
+
+        res = pipeline.process_text("bật kịch bản chào buổi sáng")
+        assert res.success is True
+        assert state["exec_ids"] == ["stale-id-1", "fresh-id-2"]
+        assert "Chào buổi sáng" in res.message
+
+
 
 
 
