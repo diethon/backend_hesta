@@ -1,7 +1,6 @@
 package com.hesta.backend.service;
 
 import com.hesta.backend.dto.request.CreateParentalGuardianRequest;
-import com.hesta.backend.dto.request.GuardianSimulateEventRequest;
 import com.hesta.backend.dto.request.UpdateParentalGuardianRequest;
 import com.hesta.backend.dto.response.ParentalGuardianLogResponse;
 import com.hesta.backend.dto.response.ParentalGuardianResponse;
@@ -28,8 +27,6 @@ public interface ParentalGuardianService {
     ParentalGuardianResponse grantExtension(UUID userId, UUID homeId, UUID ruleId, int extraMinutes);
 
     ParentalGuardianResponse unlock(UUID userId, UUID homeId, UUID ruleId);
-
-    ParentalGuardianResponse simulate(UUID userId, UUID homeId, UUID ruleId, GuardianSimulateEventRequest request);
 
     List<ParentalGuardianLogResponse> getLogs(UUID userId, UUID homeId, UUID ruleId);
 

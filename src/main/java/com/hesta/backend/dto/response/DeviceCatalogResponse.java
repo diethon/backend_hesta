@@ -3,6 +3,7 @@ package com.hesta.backend.dto.response;
 import com.hesta.backend.entity.DeviceCatalog;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +25,8 @@ public class DeviceCatalogResponse {
     private String imageUrl;
     private String icon;
     private Map<String, List<String>> defaultCapabilities;
+    private BigDecimal unitPrice;
+    private Integer warrantyMonths;
     private boolean isActive;
     private long totalDeviceCount;
     private long unclaimedCount;
@@ -43,6 +46,8 @@ public class DeviceCatalogResponse {
                 .imageUrl(catalog.getImageUrl())
                 .icon(catalog.getIcon())
                 .defaultCapabilities(catalog.getDefaultCapabilities())
+                .unitPrice(catalog.getUnitPrice() != null ? catalog.getUnitPrice() : BigDecimal.ZERO)
+                .warrantyMonths(catalog.getWarrantyMonths() != null ? catalog.getWarrantyMonths() : 12)
                 .isActive(catalog.isActive())
                 .totalDeviceCount(total)
                 .unclaimedCount(unclaimed)

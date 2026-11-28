@@ -25,10 +25,12 @@ from dotenv import load_dotenv
 from app.audio_gate import AudioGate, AudioGateConfig
 from app.stt import SpeechToText, STTConfig, STTResult
 from app.device_directory import DeviceDirectory, DeviceDirectoryConfig
+from app.scene_directory import SceneDirectory, SceneDirectoryConfig
 from app.intent import IntentMapper, IntentConfig, IntentResult
-from app.dispatcher import Dispatcher, DispatchConfig, DispatchBatchResult
+from app.dispatcher import Dispatcher, DispatchConfig, DispatchBatchResult, SceneDispatchResult
 from app.dialogue_state import DialogueState
 from app.splitter import split_compound_command, combine_command_messages
+from app.text_normalize import polish_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ DEVICE_TYPE_VI = {
     "led_rgb": "đèn RGB",
     "socket": "ổ cắm",
     "tv": "tivi",
+    "scene": "kịch bản",
     "all": "thiết bị",
 }
 
@@ -94,10 +97,12 @@ class VoicePipeline:
         dispatcher: Dispatcher,
         dialogue_state: DialogueState,
         home_id: str = "",
+        scene_directory: SceneDirectory | None = None,
     ):
         self.audio_gate = audio_gate
         self.stt = stt
         self.device_directory = device_directory
+        self.scene_directory = scene_directory
         self.intent_mapper = intent_mapper
         self.dispatcher = dispatcher
         self.dialogue_state = dialogue_state
@@ -158,6 +163,13 @@ class VoicePipeline:
             refresh_interval_seconds=device_dir_cfg.get("refresh_interval_seconds", 60),
         ))
 
+        scene_directory = SceneDirectory(SceneDirectoryConfig(
+            base_url=base_url,
+            scenes_endpoint=backend_cfg.get("scenes_endpoint", "/internal/scenes"),
+            api_key_env=backend_cfg.get("internal_api_key_env", "INTERNAL_API_KEY"),
+            refresh_interval_seconds=device_dir_cfg.get("refresh_interval_seconds", 60),
+        ))
+
         intent_mapper = IntentMapper(IntentConfig(
             mapping_file=intent_cfg.get("mapping_file", "intents_vi.json"),
             min_confidence=intent_cfg.get("min_confidence", 50.0),
@@ -191,18 +203,23 @@ class VoicePipeline:
             dispatcher=dispatcher,
             dialogue_state=dialogue_state,
             home_id=home_id,
+            scene_directory=scene_directory,
         )
 
     def start(self) -> None:
-        """Khởi động pipeline: load model STT, bắt đầu refresh device cache."""
+        """Khởi động pipeline: load model STT, bắt đầu refresh device & scene cache."""
         logger.info("Starting voice pipeline...")
         self.stt.load_model()
         self.device_directory.start(home_id=self.home_id)
+        if self.scene_directory is not None:
+            self.scene_directory.start(home_id=self.home_id)
         logger.info("Voice pipeline started.")
 
     def stop(self) -> None:
         """Dừng pipeline."""
         self.device_directory.stop()
+        if self.scene_directory is not None:
+            self.scene_directory.stop()
         self.dispatcher.close()
         logger.info("Voice pipeline stopped.")
 
@@ -257,12 +274,122 @@ class VoicePipeline:
         )
         return res
 
+    def _execute_scene_command(
+        self,
+        text: str,
+        intent: IntentResult,
+        home_id: str,
+        user_id: str,
+        t_start: float,
+        step_durations: dict[str, float],
+        is_compound_sub: bool = False,
+    ) -> PipelineResult:
+        """Xử lý lệnh kích hoạt hoặc tắt Kịch bản (Scene) với cơ chế chống xung đột."""
+        t0 = time.perf_counter()
+        scene_query = getattr(intent, "scene_query", "") or (intent.parameters or {}).get("scene_query", "")
+        if not scene_query and hasattr(self.dialogue_state, "get_hint_for"):
+            scene_query = self.dialogue_state.get_hint_for(None, "scene")
+
+        if self.scene_directory is None:
+            return PipelineResult(
+                success=False,
+                message="Tính năng điều khiển kịch bản chưa được kích hoạt.",
+                transcript=text,
+                intent=intent,
+                error_code="SCENE_UNAVAILABLE",
+                status="FAILED",
+                total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+                step_durations=step_durations,
+            )
+
+        scene_aliases = (intent.parameters or {}).get("scene_aliases")
+        is_natural_trigger = bool((intent.parameters or {}).get("is_natural_trigger"))
+        scene = self.scene_directory.resolve_scene(scene_query, home_id=home_id, aliases=scene_aliases)
+        step_durations["device_resolve_ms"] = (time.perf_counter() - t0) * 1000
+
+        if scene is None:
+            if is_natural_trigger and scene_query:
+                msg = f"Nhà chưa có kịch bản {scene_query}. Bạn có thể tạo kịch bản này trong mục Tự động hóa."
+            elif scene_query:
+                msg = f"Không tìm thấy kịch bản {scene_query}."
+            else:
+                msg = "Không tìm thấy kịch bản nào phù hợp."
+            return PipelineResult(
+                success=False,
+                message=msg,
+                transcript=text,
+                intent=intent,
+                error_code="SCENE_NOT_FOUND",
+                status="FAILED",
+                total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+                step_durations=step_durations,
+            )
+
+        mode = "DEACTIVATE" if intent.action in ("DEACTIVATE_SCENE", "TURN_OFF", "STOP", "CLOSE") else "ACTIVATE"
+        intent.action = "DEACTIVATE_SCENE" if mode == "DEACTIVATE" else "ACTIVATE_SCENE"
+        intent.device_type = "scene"
+        intent.scene_query = scene.name
+
+        t0 = time.perf_counter()
+        scene_result = self.dispatcher.dispatch_scene(
+            scene_id=scene.scene_id,
+            scene_name=scene.name,
+            mode=mode,
+            home_id=home_id or scene.home_id,
+            user_id=user_id,
+        )
+
+        # Nếu Backend trả 404 (scene ID trong cache đã cũ do người dùng vừa xóa & tạo lại kịch bản cùng tên),
+        # tự động làm mới cache kịch bản từ Backend và thử thực thi lại 1 lần với scene_id mới!
+        if scene_result.status_code == 404 or scene_result.error_code == "SCENE_NOT_FOUND":
+            logger.info("Scene %s (%s) returned 404, refreshing scene directory and retrying...", scene.name, scene.scene_id)
+            if self.scene_directory.refresh(home_id=home_id):
+                fresh_scene = self.scene_directory.resolve_scene(
+                    scene_query, home_id=home_id, aliases=scene_aliases
+                )
+                if fresh_scene is not None and fresh_scene.scene_id != scene.scene_id:
+                    scene = fresh_scene
+                    intent.scene_query = scene.name
+                    scene_result = self.dispatcher.dispatch_scene(
+                        scene_id=scene.scene_id,
+                        scene_name=scene.name,
+                        mode=mode,
+                        home_id=home_id or scene.home_id,
+                        user_id=user_id,
+                    )
+
+        step_durations["dispatch_ms"] = (time.perf_counter() - t0) * 1000
+
+        message = scene_result.summary_message()
+
+        if scene_result.success and not is_compound_sub:
+            self.dialogue_state.update(
+                room=None,
+                device_type="scene",
+                device_ids=[scene.scene_id],
+                action=intent.action,
+                home_id=home_id or scene.home_id,
+                device_name_hint=scene.name,
+            )
+
+        return PipelineResult(
+            success=scene_result.success,
+            message=message,
+            transcript=text,
+            intent=intent,
+            total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+            step_durations=step_durations,
+            error_code=scene_result.error_code,
+            status=scene_result.status,
+        )
+
     def _execute_single_command(
         self,
         text: str,
         custom_rooms: list[str],
         user_id: str = "",
         is_compound_sub: bool = False,
+        custom_scenes: list[str] | None = None,
     ) -> PipelineResult:
         """Thực thi một câu lệnh đơn lẻ (Mapping -> Dialogue State -> Resolve -> Dispatch)."""
         t_start = time.perf_counter()
@@ -270,18 +397,98 @@ class VoicePipeline:
 
         # 1. Intent Mapping
         t0 = time.perf_counter()
-        intent = self.intent_mapper.map(text, custom_rooms=custom_rooms)
+        intent = self.intent_mapper.map(text, custom_rooms=custom_rooms, custom_scenes=custom_scenes)
         step_durations["intent_ms"] = (time.perf_counter() - t0) * 1000
 
         if intent is None:
             return PipelineResult(
                 success=False,
-                message=f"Không hiểu lệnh: \"{text}\".",
+                message="Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
                 transcript=text,
                 error_code="INTENT_NOT_FOUND",
                 status="FAILED",
                 total_duration_ms=(time.perf_counter() - t_start) * 1000,
                 step_durations=step_durations,
+            )
+
+        # Nhánh truy vấn hệ thống (liệt kê kịch bản / danh sách phòng / hủy lệnh)
+        if intent.device_type == "system":
+            if intent.action == "LIST_SCENES":
+                if self.scene_directory and (time.time() - getattr(self.scene_directory, "_last_refresh_time", 0.0) >= 5.0):
+                    self.scene_directory.refresh(home_id=self.home_id)
+                scenes = self.scene_directory.list_scenes(self.home_id) if self.scene_directory else []
+                enabled_scenes = [s.name for s in scenes if s.enabled]
+                disabled_count = len(scenes) - len(enabled_scenes)
+                if enabled_scenes:
+                    names_str = ", ".join(enabled_scenes[:6])
+                    extra = f" và {disabled_count} kịch bản đang tắt" if disabled_count > 0 else ""
+                    msg = f"Nhà hiện có {len(enabled_scenes)} kịch bản đang bật: {names_str}{extra}. Bạn muốn bật kịch bản nào?"
+                elif scenes:
+                    msg = f"Nhà có {len(scenes)} kịch bản nhưng hiện đều đang tắt. Bạn hãy bật chúng trong mục Tự động hóa nhé."
+                else:
+                    msg = "Nhà hiện chưa có kịch bản nào. Bạn có thể tạo mới trong mục Tự động hóa."
+                return PipelineResult(
+                    success=True,
+                    message=msg,
+                    transcript=text,
+                    intent=intent,
+                    status="SUCCESS",
+                    total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+                    step_durations=step_durations,
+                )
+            if intent.action == "LIST_DEVICES":
+                target_room = intent.room or ""
+                devs = self.device_directory.resolve(target_room, "all", home_id=self.home_id, is_all=True)
+                if devs:
+                    names_str = ", ".join(d.device_name for d in devs[:6])
+                    more = f" và {len(devs) - 6} thiết bị khác" if len(devs) > 6 else ""
+                    scope_str = f"ở {target_room}" if target_room else "trong nhà"
+                    msg = f"Hiện có {len(devs)} thiết bị {scope_str}: {names_str}{more}."
+                else:
+                    msg = f"Không tìm thấy thiết bị nào ở {target_room}." if target_room else "Chưa tìm thấy thiết bị nào trong nhà."
+                return PipelineResult(
+                    success=True,
+                    message=msg,
+                    transcript=text,
+                    intent=intent,
+                    status="SUCCESS",
+                    total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+                    step_durations=step_durations,
+                )
+            if intent.action == "LIST_ROOMS":
+                rooms = self.device_directory.get_known_rooms(self.home_id)
+                msg = f"Nhà hiện có {len(rooms)} phòng: {', '.join(rooms)}." if rooms else "Chưa tìm thấy danh sách phòng nào trong nhà."
+                return PipelineResult(
+                    success=True,
+                    message=msg,
+                    transcript=text,
+                    intent=intent,
+                    status="SUCCESS",
+                    total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+                    step_durations=step_durations,
+                )
+            if intent.action == "CANCEL_CONTEXT":
+                self.dialogue_state.clear()
+                return PipelineResult(
+                    success=True,
+                    message="Đã hủy bỏ yêu cầu.",
+                    transcript=text,
+                    intent=intent,
+                    status="SUCCESS",
+                    total_duration_ms=round((time.perf_counter() - t_start) * 1000, 1),
+                    step_durations=step_durations,
+                )
+
+        # Nhánh chuyên biệt cho Kịch bản (Scene) khi người dùng gọi đích danh
+        if intent.device_type == "scene":
+            return self._execute_scene_command(
+                text=text,
+                intent=intent,
+                home_id=self.home_id,
+                user_id=user_id,
+                t_start=t_start,
+                step_durations=step_durations,
+                is_compound_sub=is_compound_sub,
             )
 
         # 2. Nhận diện lệnh điều khiển toàn bộ ("tất cả", "toàn bộ", "hết", "cả nhà"...)
@@ -309,10 +516,22 @@ class VoicePipeline:
                 device_name_hint=getattr(intent, "device_name_hint", ""),
             )
 
+        # Nếu ngữ cảnh 45s vừa khôi phục device_type == "scene" (VD: "bật kịch bản nghỉ trưa" -> "tắt đi")
+        if device_type == "scene":
+            return self._execute_scene_command(
+                text=text,
+                intent=intent,
+                home_id=home_id,
+                user_id=user_id,
+                t_start=t_start,
+                step_durations=step_durations,
+                is_compound_sub=is_compound_sub,
+            )
+
         if not device_type:
             return PipelineResult(
                 success=False,
-                message="Không xác định được loại thiết bị.",
+                message="Bạn muốn điều khiển thiết bị hay kịch bản nào? Vui lòng nói rõ tên nhé.",
                 transcript=text,
                 intent=intent,
                 error_code="DEVICE_TYPE_UNKNOWN",
@@ -327,6 +546,18 @@ class VoicePipeline:
         if not hint and hasattr(self.dialogue_state, "get_hint_for"):
             hint = self.dialogue_state.get_hint_for(room, device_type)
         mode_query = (intent.parameters or {}).get("mode")
+
+        # Nếu vừa thao tác đèn LED RGB trong ngữ cảnh 45s và người dùng nói rút gọn "giảm độ sáng xuống 40%" (không nhắc chữ "đèn"),
+        # ưu tiên giữ nguyên loại led_rgb của ngữ cảnh gần nhất thay vì nhảy sang đèn thường!
+        if (
+            intent.action in {"SET_BRIGHTNESS", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS"}
+            and device_type == "light"
+            and "đèn" not in text.lower()
+            and "den" not in text.lower()
+        ):
+            ctx_now = self.dialogue_state.get_context()
+            if ctx_now.is_valid and ctx_now.last_device_type == "led_rgb":
+                device_type = "led_rgb"
 
         if mode_query and device_type == "light":
             rgb_test = self.device_directory.resolve(room or "", "led_rgb", home_id=home_id)
@@ -392,8 +623,11 @@ class VoicePipeline:
                     "b": mode_info["b"],
                     "hex": mode_info.get("hex", ""),
                     "brightness": mode_info.get("brightness", 100),
-                    "mode": mode_info["name"],
                 }
+                if mode_info.get("is_color"):
+                    intent.parameters["color"] = mode_info["name"]
+                else:
+                    intent.parameters["mode"] = mode_info["name"]
             elif device_type == "light":
                 intent.action = "SET_BRIGHTNESS"
                 intent.parameters = {
@@ -401,7 +635,7 @@ class VoicePipeline:
                     "mode": mode_info["name"],
                 }
 
-        if len(devices) > 1 and not room and not is_all and "hết" not in (intent.matched_pattern or ""):
+        if len(devices) > 1 and not is_all and "hết" not in (intent.matched_pattern or ""):
             distinct_rooms = {d.room_name for d in devices if d.room_name}
             if len(distinct_rooms) > 1:
                 return PipelineResult(
@@ -498,45 +732,93 @@ class VoicePipeline:
             PipelineResult
         """
         t_start = time.perf_counter()
+        polished_text = polish_transcript(text)
         known_rooms = self.device_directory.get_known_rooms(self.home_id)
-        sub_commands = split_compound_command(text, custom_rooms=known_rooms)
+        known_scenes = self.scene_directory.get_scene_names(self.home_id) if self.scene_directory else []
+        sub_commands = split_compound_command(polished_text, custom_rooms=known_rooms)
 
         if len(sub_commands) <= 1:
-            res = self._execute_single_command(text, custom_rooms=known_rooms, user_id=user_id)
-            res.transcript = text
+            res = self._execute_single_command(
+                polished_text,
+                custom_rooms=known_rooms,
+                user_id=user_id,
+                custom_scenes=known_scenes,
+            )
+            res.transcript = polished_text
             res.total_duration_ms = round((time.perf_counter() - t_start) * 1000, 1)
             return res
 
-        # Xử lý chuỗi câu lệnh kép (compound commands) chạy song song qua ThreadPoolExecutor
+        # Xử lý chuỗi câu lệnh kép (compound commands)
+        # QUY TẮC ƯU TIÊN CHỐNG XUNG ĐỘT KỊCH BẢN (Specific Overrides General):
+        # Nếu lệnh kép kết hợp Kịch bản + Thiết bị cụ thể (VD: "Bật kịch bản đi ngủ và bật đèn phòng khách"
+        # hoặc "Bật đèn phòng khách và bật kịch bản đi ngủ") → chạy TUẦN TỰ: Kịch bản trước, Thiết bị cụ thể sau
+        # để thiết bị người dùng nêu đích danh luôn giữ đúng trạng thái mong muốn, tránh race condition!
         import concurrent.futures
 
-        sub_results: list[PipelineResult] = []
+        def _is_scene_clause(cmd: str) -> bool:
+            c_low = cmd.lower()
+            if any(k in c_low for k in ("kịch bản", "kich ban", "kết bạn", "ket ban", "kích bản", "kịch bảng", "ngữ cảnh", "ngu canh")):
+                return True
+            preview = self.intent_mapper.map(cmd, custom_rooms=known_rooms, custom_scenes=known_scenes)
+            return preview is not None and preview.device_type == "scene"
+
+        scene_flags = [_is_scene_clause(cmd) for cmd in sub_commands]
+        has_scene_and_device = any(scene_flags) and not all(scene_flags)
+
+        sub_results: list[PipelineResult] = [None] * len(sub_commands)  # type: ignore
         combined_durations: dict[str, float] = {
             "intent_ms": 0.0,
             "device_resolve_ms": 0.0,
             "dispatch_ms": 0.0,
         }
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(sub_commands))) as executor:
-            future_to_idx = {
-                executor.submit(
-                    self._execute_single_command,
-                    sub_cmd,
+        if has_scene_and_device:
+            # Chạy tuần tự: tất cả lệnh kịch bản trước, rồi mới tới lệnh thiết bị cụ thể (Specific wins!)
+            exec_order = [i for i, is_sc in enumerate(scene_flags) if is_sc] + [
+                i for i, is_sc in enumerate(scene_flags) if not is_sc
+            ]
+            for idx in exec_order:
+                r = self._execute_single_command(
+                    sub_commands[idx],
                     custom_rooms=known_rooms,
                     user_id=user_id,
                     is_compound_sub=True,
-                ): idx
-                for idx, sub_cmd in enumerate(sub_commands)
-            }
-            ordered_futures = sorted(future_to_idx.keys(), key=lambda f: future_to_idx[f])
-            for fut in ordered_futures:
-                r = fut.result()
-                sub_results.append(r)
+                    custom_scenes=known_scenes,
+                )
+                sub_results[idx] = r
                 for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
-                    combined_durations[k] = max(combined_durations[k], r.step_durations.get(k, 0.0))
+                    combined_durations[k] += r.step_durations.get(k, 0.0)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(sub_commands))) as executor:
+                future_to_idx = {
+                    executor.submit(
+                        self._execute_single_command,
+                        sub_cmd,
+                        custom_rooms=known_rooms,
+                        user_id=user_id,
+                        is_compound_sub=True,
+                        custom_scenes=known_scenes,
+                    ): idx
+                    for idx, sub_cmd in enumerate(sub_commands)
+                }
+                for fut, idx in future_to_idx.items():
+                    r = fut.result()
+                    sub_results[idx] = r
+                    for k in ("intent_ms", "device_resolve_ms", "dispatch_ms"):
+                        combined_durations[k] = max(combined_durations[k], r.step_durations.get(k, 0.0))
 
         # Cập nhật dialogue_state tuần tự cho TẤT CẢ các lệnh con thành công trong lệnh kép
         for r in sub_results:
+            if r.success and r.intent and r.intent.device_type == "scene":
+                self.dialogue_state.update(
+                    room=None,
+                    device_type="scene",
+                    device_ids=[],
+                    action=r.intent.action,
+                    home_id=self.home_id,
+                    device_name_hint=getattr(r.intent, "scene_query", ""),
+                )
+                continue
             if r.success and r.intent and r.dispatch_result and r.dispatch_result.successful_count > 0:
                 hint_sub = getattr(r.intent, "device_name_hint", "")
                 if not hint_sub and hasattr(self.dialogue_state, "get_hint_for"):

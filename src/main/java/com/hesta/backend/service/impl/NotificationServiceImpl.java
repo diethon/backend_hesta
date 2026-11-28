@@ -10,6 +10,7 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.HomeMember;
 import com.hesta.backend.entity.Notification;
 import com.hesta.backend.entity.User;
+import com.hesta.backend.entity.NotificationPreference;
 import com.hesta.backend.entity.UserPreference;
 import com.hesta.backend.enums.AccessScope;
 import com.hesta.backend.enums.HomeRole;
@@ -32,6 +33,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,6 +44,7 @@ import java.util.UUID;
 public class NotificationServiceImpl implements NotificationService {
 
     private static final int MAX_PAGE_SIZE = 100;
+    private static final ZoneId QUIET_HOURS_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
@@ -124,7 +128,11 @@ public class NotificationServiceImpl implements NotificationService {
     /** Returns {@code null} when the recipient muted this notification category. */
     private NotificationResponse createNotification(NotificationEvent event) {
         validate(event);
-        if (isMutedByRecipient(event)) {
+        NotificationPreference preference = userPreferenceRepository.findById(event.userId())
+                .map(UserPreference::getNotificationPreference)
+                .orElseGet(NotificationPreference::defaults);
+        boolean urgent = event.priority() == NotificationPriority.HIGH;
+        if (!urgent && isMuted(preference, event.type())) {
             return null;
         }
 
@@ -149,24 +157,19 @@ public class NotificationServiceImpl implements NotificationService {
         }
         NotificationResponse response = NotificationResponse.fromEntity(notificationRepository.saveAndFlush(notification));
         applicationEventPublisher.publishEvent(
-                new NotificationCreatedEvent(NotificationRealtimePayload.from(response))
+                new NotificationCreatedEvent(NotificationRealtimePayload.from(
+                        response, !urgent && preference.isQuietAt(LocalTime.now(QUIET_HOURS_ZONE))))
         );
         return response;
     }
 
-    private boolean isMutedByRecipient(NotificationEvent event) {
-        // HIGH priority (intrusion, gas, smoke) must always reach the user.
-        if (event.priority() == NotificationPriority.HIGH) {
-            return false;
-        }
-        return userPreferenceRepository.findById(event.userId())
-                .map(UserPreference::getNotificationPreference)
-                .map(preference -> switch (event.type()) {
-                    case SECURITY, ANOMALY -> !preference.isSecurityEnabled();
-                    case AUTOMATION -> !preference.isAutomationEnabled();
-                    case SYSTEM, DEVICE -> !preference.isSystemEnabled();
-                })
-                .orElse(false);
+    // HIGH priority (intrusion, gas, smoke) bypasses both muting and quiet hours.
+    private static boolean isMuted(NotificationPreference preference, NotificationType type) {
+        return switch (type) {
+            case SECURITY, ANOMALY -> !preference.isSecurityEnabled();
+            case AUTOMATION -> !preference.isAutomationEnabled();
+            case SYSTEM, DEVICE -> !preference.isSystemEnabled();
+        };
     }
 
     private Notification findOwnedNotification(UUID currentUserId, UUID notificationId) {

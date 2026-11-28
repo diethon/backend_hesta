@@ -33,6 +33,8 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -130,8 +133,27 @@ class NotificationServiceTest {
         NotificationResponse result = notificationService.create(validEvent());
 
         assertThat(result).isNotNull();
-        verify(userPreferenceRepository, never()).findById(any());
         verify(notificationRepository).saveAndFlush(any(Notification.class));
+    }
+
+    @Test
+    void create_duringQuietHours_deliversSilentlyUnlessHighPriority() {
+        LocalTime now = LocalTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+        UserPreference quiet = UserPreference.builder().userId(userId)
+                .notificationPreference(NotificationPreference.builder().quietHoursEnabled(true)
+                        .quietHoursStart(now.minusHours(1)).quietHoursEnd(now.plusHours(1)).build())
+                .build();
+        when(userPreferenceRepository.findById(userId)).thenReturn(Optional.of(quiet));
+        arrangeCreation();
+
+        notificationService.create(new NotificationEvent(
+                userId, homeId, NotificationType.AUTOMATION, "Rule ran", "Lights on", NotificationPriority.LOW));
+        notificationService.create(validEvent());
+
+        ArgumentCaptor<NotificationCreatedEvent> raised = ArgumentCaptor.forClass(NotificationCreatedEvent.class);
+        verify(applicationEventPublisher, times(2)).publishEvent(raised.capture());
+        assertThat(raised.getAllValues().get(0).payload().silent()).isTrue();
+        assertThat(raised.getAllValues().get(1).payload().silent()).isFalse();
     }
 
     @Test

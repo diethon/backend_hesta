@@ -62,13 +62,16 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     pipeline = _get_pipeline()
 
-    # 1. Nạp danh sách phòng & thiết bị thực tế từ Backend đồng bộ ngay khi khởi động
+    # 1. Nạp danh sách phòng, thiết bị và kịch bản thực tế từ Backend đồng bộ ngay khi khởi động
     try:
         if pipeline and pipeline.device_directory:
             pipeline.device_directory.refresh(home_id=pipeline.home_id)
             logger.info("✅ Initial device directory refreshed on startup")
+        if pipeline and getattr(pipeline, "scene_directory", None):
+            pipeline.scene_directory.refresh(home_id=pipeline.home_id)
+            logger.info("✅ Initial scene directory refreshed on startup")
     except Exception as e:
-        logger.warning("Could not do initial device directory refresh: %s", e)
+        logger.warning("Could not do initial directory refresh: %s", e)
 
     # 2. Nạp toàn bộ file giọng nói có sẵn từ disk cache và assets vào RAM (0ms latency, 0 network calls)
     try:
@@ -277,11 +280,13 @@ async def get_voice_tts(
         audio_bytes = await tts_manager.synthesize(
             clean_text,
             voice,
-            timeout_sec=3.5,
+            timeout_sec=2.2,
             fast_mode=True,
         )
         if not audio_bytes:
-            raise HTTPException(status_code=500, detail="Failed to synthesize speech")
+            audio_bytes = tts_manager.get_fallback_cached_audio(message=clean_text, voice=voice) or b""
+        if not audio_bytes:
+            raise HTTPException(status_code=503, detail="TTS tạm thời không khả dụng")
         mime = detect_audio_mime(audio_bytes)
         return Response(
             content=audio_bytes,
@@ -334,16 +339,17 @@ async def process_voice_command(
     audio_data = None
     if result.message:
         clean_msg = clean_tts_text(result.message)
-        audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
 
         # 1. Kiểm tra nhanh trong cache (RAM/Disk/Bundled) -> < 2ms
         cached_bytes = tts_manager.get_cached_audio(clean_msg)
         if cached_bytes:
             mime = detect_audio_mime(cached_bytes)
             audio_data = f"data:{mime};base64,{base64.b64encode(cached_bytes).decode('ascii')}"
+            audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
         else:
             # 2. Nếu là lệnh kép (>= 2 lệnh con), ghép trực tiếp các file MP3 giọng Hoài My từ RAM cache (< 1ms)
-            #    Ngược lại gọi Edge-TTS Hoài My 1 lần gọn (<= 3.5s), chỉ fallback khi mất mạng/lỗi.
+            #    Ngược lại gọi Edge-TTS Hoài My gọn (<= 1.8s), fallback Piper/gTTS, cuối cùng fallback câu chuẩn RAM cache.
+            synthesized_bytes = b""
             try:
                 sub_results = getattr(result, "sub_results", []) or []
                 if len(sub_results) >= 2:
@@ -351,19 +357,31 @@ async def process_voice_command(
                     synthesized_bytes = await tts_manager.synthesize_compound(
                         sub_msgs,
                         clean_msg,
-                        timeout_sec=3.5,
+                        timeout_sec=2.0,
                     )
                 else:
                     synthesized_bytes = await tts_manager.synthesize(
                         clean_msg,
-                        timeout_sec=3.5,
+                        timeout_sec=2.0,
                         fast_mode=True,
                     )
-                if synthesized_bytes:
-                    mime = detect_audio_mime(synthesized_bytes)
-                    audio_data = f"data:{mime};base64,{base64.b64encode(synthesized_bytes).decode('ascii')}"
             except Exception as e:
                 logger.debug("Inline TTS synthesize skipped/timeout: %s", e)
+
+            if not synthesized_bytes:
+                # 3. Lưới an toàn: lấy câu báo lỗi/phản hồi ngữ nghĩa tương ứng đã nạp sẵn trong RAM (< 2ms)
+                #    tránh tuyệt đối im lặng hoặc để Frontend gọi lại /api/voice/tts gây double-timeout!
+                fallback_bytes = tts_manager.get_fallback_cached_audio(
+                    error_code=getattr(result, "error_code", None),
+                    message=clean_msg,
+                )
+                if fallback_bytes:
+                    synthesized_bytes = fallback_bytes
+
+            if synthesized_bytes:
+                mime = detect_audio_mime(synthesized_bytes)
+                audio_data = f"data:{mime};base64,{base64.b64encode(synthesized_bytes).decode('ascii')}"
+                audio_url = f"/api/voice/tts?text={urllib.parse.quote(clean_msg)}"
 
     sub_commands_data = []
     for sub in getattr(result, "sub_results", []):

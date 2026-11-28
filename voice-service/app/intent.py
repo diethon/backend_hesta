@@ -189,6 +189,21 @@ def generate_room_aliases(room_name: str) -> list[tuple[str, str]]:
         ]:
             aliases.append((variant, clean))
 
+    # Phòng bếp — hỗ trợ gọi ngắn gọn 'bếp', 'nhà bếp' (tránh mất room trong lệnh kép như 'tắt đèn bếp rồi mở rèm...')
+    if clean_norm in {"phong bep", "bep", "nha bep"}:
+        for variant in ["phòng bếp", "nhà bếp", "bếp"]:
+            aliases.append((variant, clean))
+
+    # Garden / Sân vườn — hỗ trợ song ngữ Việt-Anh
+    if clean_norm in {"garden", "san vuon", "vuon", "ngoai vuon"}:
+        for variant in ["sân vườn", "ngoài vườn", "vườn", "garden", "san vuon"]:
+            aliases.append((variant, clean))
+
+    # Garage / Gara / Nhà xe — hỗ trợ song ngữ Việt-Anh & phiên âm Whisper
+    if clean_norm in {"garage", "gara", "nha xe"}:
+        for variant in ["garage", "gara", "ga ra", "ga-ra", "nhà xe"]:
+            aliases.append((variant, clean))
+
     return list(dict.fromkeys(aliases))
 
 
@@ -219,6 +234,29 @@ def normalize_spoken_numbers(text: str) -> str:
     # Sửa lỗi âm học Whisper cho LED và RGB
     res = re.sub(r'\b(r\s*g\s*b|r-g-b|r\.g\.b|éc\s*gờ\s*bê|e\s*rờ\s*gờ\s*bê|rờ\s*gờ\s*bê|a\s*pi\s*di)\b', 'rgb', res)
     res = re.sub(r'\b(l\s*e\s*d|l-e-d|l\.e\.d|lét|lết|lép)\b', 'led', res)
+    # Chuyển số ghép tiếng Việt (11-99, VD: "hai mươi sáu" -> "26", "hai lăm" -> "25", "mười tám" -> "18")
+    # TRƯỚC khi đổi hàng chục đơn lẻ ("hai mươi" -> "20") để tránh mất chữ số hàng đơn vị!
+    _units = {
+        "một": 1, "mốt": 1, "hai": 2, "ba": 3, "bốn": 4, "tư": 4,
+        "năm": 5, "lăm": 5, "sáu": 6, "bảy": 7, "bẩy": 7, "tám": 8, "chín": 9,
+    }
+    _tens = {
+        "mười": 10, "hai mươi": 20, "ba mươi": 30, "bốn mươi": 40,
+        "năm mươi": 50, "sáu mươi": 60, "bảy mươi": 70, "tám mươi": 80, "chín mươi": 90,
+    }
+    _unit_pat = "|".join(_units.keys())
+    _ten_pat = "|".join(_tens.keys())
+    res = re.sub(
+        rf"\b({_ten_pat})\s+({_unit_pat})\b",
+        lambda m: str(_tens[m.group(1)] + _units[m.group(2)]),
+        res,
+    )
+    # Dạng nói tắt phổ biến cho nhiệt độ điều hòa: "hai lăm độ" -> "25 độ", "hai sáu độ" -> "26 độ"
+    res = re.sub(
+        rf"\bhai\s+({_unit_pat})(?=\s*độ\b)",
+        lambda m: str(20 + _units[m.group(1)]),
+        res,
+    )
     for pat, rep in VI_SPOKEN_NUMBERS:
         res = re.sub(pat, rep, res)
     return res
@@ -235,6 +273,170 @@ class IntentResult:
     matched_pattern: str = ""      # Pattern đã khớp
     raw_text: str = ""             # Câu gốc
     device_name_hint: str = ""     # VD: "ngủ" (đèn ngủ), "trần" (đèn trần), "bàn" (đèn bàn)
+    scene_query: str = ""          # VD: "1", "chào buổi sáng", "nghỉ trưa" (khi device_type == "scene")
+
+
+# Danh sách số từ 1-10 và thứ tự dạng chữ tiếng Việt cho tên/số thứ tự kịch bản
+_SCENE_WORD_TO_NUM = {
+    "một": "1", "mot": "1", "thứ nhất": "1", "thu nhat": "1", "đầu tiên": "1", "dau tien": "1", "số một": "1", "so mot": "1",
+    "hai": "2", "thứ hai": "2", "thu hai": "2", "số hai": "2", "so hai": "2",
+    "ba": "3", "thứ ba": "3", "thu ba": "3", "số ba": "3", "so ba": "3",
+    "bốn": "4", "bon": "4", "tư": "4", "tu": "4", "thứ tư": "4", "thu tu": "4", "thứ bốn": "4", "thu bon": "4",
+    "năm": "5", "nam": "5", "thứ năm": "5", "thu nam": "5",
+    "sáu": "6", "sau": "6", "thứ sáu": "6", "thu sau": "6",
+    "bảy": "7", "bay": "7", "bẩy": "7", "thứ bảy": "7", "thu bay": "7",
+    "tám": "8", "tam": "8", "thứ tám": "8", "thu tam": "8",
+    "chín": "9", "chin": "9", "thứ chín": "9", "thu chin": "9",
+    "mười": "10", "muoi": "10", "thứ mười": "10", "thu muoi": "10",
+}
+
+# Biến thể chuẩn (được phép có hoặc không có động từ trước)
+_SCENE_STRICT_NOUN = r"(?:kịch\s+bản|kich\s+ban|ngữ\s+cảnh|ngu\s+canh)\b"
+# Biến thể nghe nhầm từ STT (BẮT BUỘC phải có động từ điều khiển đi trước để không nhầm câu "kết bạn với tôi đi")
+_SCENE_ASR_NOUN = (
+    r"(?:kịch\s+bảng|kich\s+bang|kết\s+bảng|ket\s+bang|kích\s+bảng|"
+    r"kết\s+bạn|ket\s+ban|kích\s+bản|kịch\s+bạn|kịp\s+bản|kip\s+ban)\b"
+)
+_SCENE_ANY_NOUN = rf"(?:{_SCENE_STRICT_NOUN}|{_SCENE_ASR_NOUN})"
+_SCENE_ON_VERBS = r"(?:bật|bat|mở|mo|chạy|chay|kích\s+hoạt|kich\s+hoat|thực\s+thi|thuc\s+thi|dùng|dung|áp\s+dụng|ap\s+dung|chuyển\s+sang|chuyen\s+sang|đổi\s+sang|doi\s+sang)"
+_SCENE_OFF_VERBS = r"(?:tắt|tat|dừng|dung|hủy|huy|ngưng|ngung|thoát|thoat|đóng|dong|ngắt|ngat)"
+# Từ đệm lịch sự người Việt hay chèn sau động từ: "bật dùm cái", "mở cho tôi cái", "chạy giúp mình", "tắt hộ anh cái"
+_POLITE_FILLERS = r"(?:\s+(?:dùm|dum|giùm|gium|hộ|ho|giúp|giup|cho|tôi|toi|mình|minh|anh|em|chị|chi|cái|cai|phần|phan))*"
+_SCENE_TAIL = r"(?:\s+(?:đi|di|lên|len|lại|lai|nhé|nhe|nha|giùm|gium|dùm|dum|hộ|ho|giúp|giup|ngay|luôn|luon|nào|nao|với|voi))*$"
+
+# Các mẫu câu kích hoạt / tắt kịch bản (Scene Commands)
+_SCENE_ACTIVATE_RE = re.compile(
+    rf"^(?:(?:hãy|hay|xin|làm\s+ơn|lam\s+on|ơi|oi)\s+)?(?:(?:{_SCENE_ON_VERBS}){_POLITE_FILLERS}\s+{_SCENE_ANY_NOUN}|{_SCENE_STRICT_NOUN})\s*(?:số|so|tên|ten|là|la)?\s*(.+?){_SCENE_TAIL}",
+    re.IGNORECASE,
+)
+_SCENE_DEACTIVATE_RE = re.compile(
+    rf"^(?:(?:hãy|hay|xin|làm\s+ơn|lam\s+on|ơi|oi)\s+)?(?:{_SCENE_OFF_VERBS}){_POLITE_FILLERS}\s+{_SCENE_ANY_NOUN}\s*(?:số|so|tên|ten|là|la)?\s*(.+?){_SCENE_TAIL}",
+    re.IGNORECASE,
+)
+
+# Quy tắc lọc từ đệm lịch sự sau động từ cho TẤT CẢ câu lệnh Smart Home (VD: "bật dùm tôi cái đèn" -> "bật đèn")
+_STRIP_MID_FILLERS_RE = re.compile(
+    r"\b(bật|mở|tắt|đóng|dừng|chạy|kích\s+hoạt|hủy|chỉnh|đặt|tăng|giảm|đổi|chuyển)"
+    r"(?:\s+(?:dùm|giùm|hộ|giúp|cho\s+(?:tôi|mình|anh|em|chị)|tôi|mình|anh|em|chị|cái|cây|chiếc|bóng))+\s+",
+    re.IGNORECASE,
+)
+
+# Truy vấn hệ thống linh hoạt (liệt kê/đếm kịch bản, danh sách phòng, danh sách thiết bị, hủy lệnh)
+_QUERY_SIGNAL_RE = re.compile(
+    r"\b(?:mấy|may|bao\s+nhiêu|bao\s+nhieu|nào|nao|gì|gi|những|nhung|danh\s+sách|danh\s+sach|"
+    r"liệt\s+kê|liet\s+ke|kể\s+tên|ke\s+ten|xem|cho\s+biết|cho\s+biet|hiện\s+có|hien\s+co|hiện\s+tại\s+có|đang\s+có)\b",
+    re.IGNORECASE,
+)
+_CONTROL_VERB_RE = re.compile(
+    r"\b(?:bật|bat|tắt|tat|mở|mo|đóng|dong|chạy|chay|kích\s+hoạt|kich\s+hoat|dừng|dung|hủy|huy|ngưng|ngung|chỉnh|chinh|đặt|dat|tăng|tang|giảm|giam|đổi|doi|chuyển|chuyen)\b",
+    re.IGNORECASE,
+)
+_CANCEL_CONTEXT_RE = re.compile(
+    r"^(?:hủy\s+lệnh|hủy\s+bỏ|thôi\s+(?:bỏ\s+qua|không\s+cần(?:\s+nữa)?|đừng\s+làm(?:\s+gì)?)|bỏ\s+qua(?:\s+đi)?|đừng\s+làm\s+gì(?:\s+cả)?|không\s+cần\s+nữa)$",
+    re.IGNORECASE,
+)
+
+# Chặn câu cấm đoán / phủ định trước động từ điều khiển (VD: "đừng bật đèn", "đừng có mở cổng", "không được tắt quạt")
+_NEGATION_PROHIBITION_RE = re.compile(
+    r"^(?:(?:thôi|này|ơi|hesta\s+ơi)\s+)?(?:đừng(?:\s+có)?|không(?:\s+(?:được|nên|cần|muốn|phải))?|chớ|khoan(?:\s+hãy)?)\s+"
+    r"(?:bật|tắt|mở|đóng|chạy|kích\s+hoạt|thực\s+thi|tăng|giảm|đổi|chuyển|đặt|chỉnh|kéo|hạ|nâng|khóa)\b",
+    re.IGNORECASE,
+)
+
+# Gọt vế dẫn chuyện tự nhiên ở đầu câu (VD: "Trời sáng rồi bật cho tôi kịch bản buổi sáng đi", "Hesta ơi bật đèn phòng khách")
+_LEAD_IN_COMMAND_RE = re.compile(
+    r"^(.+?)\b((?:bật|tắt|mở|đóng|chạy|kích\s+hoạt|thực\s+thi|dừng|hủy|chỉnh|đặt|tăng|giảm|đổi|chuyển)\s+.+)$",
+    re.IGNORECASE,
+)
+
+# Các câu nói tự nhiên đời thường → ánh xạ thông minh sang Kịch bản tương ứng (nếu nhà có setup)
+_NATURAL_SCENE_TRIGGERS: list[tuple[re.Pattern, str, list[str]]] = [
+    (
+        re.compile(
+            r"^(?:(?:tôi|mình|anh|em|con|tao)\s+)?(?:muốn\s+đi\s+ngủ|đi\s+ngủ(?:\s+(?:thôi|nhé|đây|nha))?|chúc\s+ngủ\s+ngon(?:\s+nhé)?|ngủ\s+ngon(?:\s+nhé)?|tới\s+giờ\s+ngủ(?:\s+rồi)?|đến\s+giờ\s+ngủ(?:\s+rồi)?|buồn\s+ngủ\s+quá)$",
+            re.IGNORECASE,
+        ),
+        "Đi ngủ",
+        ["đi ngủ", "chúc ngủ ngon", "ngủ ngon", "ngủ"],
+    ),
+    (
+        re.compile(
+            r"^(?:chào\s+buổi\s+sáng(?:\s+nhé)?|(?:tôi|mình|anh|em)\s+(?:dậy\s+rồi|thức\s+dậy\s+rồi)|thức\s+dậy\s+thôi|sáng\s+rồi)$",
+            re.IGNORECASE,
+        ),
+        "Chào buổi sáng",
+        ["chào buổi sáng", "buổi sáng", "thức dậy"],
+    ),
+    (
+        re.compile(
+            r"^(?:(?:tôi|mình|anh|em)\s+)?(?:muốn\s+)?(?:nghỉ\s+trưa|ngủ\s+trưa)(?:\s+(?:thôi|nhé|đây))?$",
+            re.IGNORECASE,
+        ),
+        "Nghỉ trưa",
+        ["nghỉ trưa", "ngủ trưa"],
+    ),
+    (
+        re.compile(
+            r"^(?:(?:tôi|mình|anh|em)\s+)?(?:muốn\s+xem\s+phim|xem\s+phim\s+thôi|tối\s+nay\s+xem\s+phim|buổi\s+tối\s+xem\s+phim)$",
+            re.IGNORECASE,
+        ),
+        "Xem phim",
+        ["buổi tối xem phim", "xem phim", "chiếu phim", "rạp phim"],
+    ),
+    (
+        re.compile(
+            r"^(?:(?:tôi|mình|anh|em|con)\s+)?(?:về\s+nhà\s+rồi|về\s+đến\s+nhà(?:\s+rồi)?|đã\s+về\s+nhà|về\s+rồi)$",
+            re.IGNORECASE,
+        ),
+        "Về nhà",
+        ["về nhà", "về đến nhà", "chào mừng về nhà"],
+    ),
+    (
+        re.compile(
+            r"^(?:(?:tôi|mình|anh|em|con)\s+)?(?:đi\s+ra\s+ngoài(?:\s+(?:đây|nhé))?|ra\s+khỏi\s+nhà|đi\s+làm(?:\s+(?:đây|nhé))?|ra\s+ngoài\s+đây)$",
+            re.IGNORECASE,
+        ),
+        "Ra ngoài",
+        ["ra ngoài", "đi ra ngoài", "rời nhà", "đi làm"],
+    ),
+]
+
+# Danh từ thiết bị / chức năng KHÔNG được hỗ trợ trong hệ thống Smart Home HESTA
+# Giúp chặn ngay từ đầu thay vì để fuzzy matching đoán bừa sang điều hòa / đèn!
+_UNSUPPORTED_DOMAIN_RE = re.compile(
+    r"\b(?:tu\s+lanh|may\s+giat|may\s+say|lo\s+vi\s+song|noi\s+com|bep\s+tu|bep\s+ga|"
+    r"may\s+rua\s+bat|may\s+rua\s+chen|may\s+hut\s+bui|robot\s+hut\s+bui|may\s+loc\s+khong\s+khi|"
+    r"may\s+loc\s+nuoc|ban\s+la|ban\s+ui|may\s+in|may\s+tinh|dien\s+thoai|"
+    r"mo\s+nhac|bat\s+nhac|phat\s+nhac|nghe\s+nhac|youtube|facebook|zalo|tiktok|google|"
+    r"thoi\s+tiet|may\s+gio|bao\s+thuc|nhac\s+nho|goi\s+dien|nhan\s+tin|an\s+gi|uong\s+gi)\b",
+    re.IGNORECASE,
+)
+
+# Tối thiểu 1 từ khóa thuộc hành động Smart Home hoặc thiết bị Smart Home
+# LƯU Ý: KHÔNG đưa 'toi' (trùng 'tôi') hay 'lanh' đơn lẻ vào đây để tránh 'tôi đi ra ngoài' / 'lạnh quá' bị match nhầm!
+_SMART_HOME_SIGNAL_RE = re.compile(
+    r"\b(?:bat|mo|tat|dong|dung|ngung|chinh|dat|tang|giam|doi|chuyen|keo|ha|nang|khoa|"
+    r"den|bong\s+den|anh\s+sang|quat|dieu\s+hoa|may\s+lanh|rem|man|cong|cua|bom|"
+    r"tivi|ti\s+vi|tv|led|rgb|o\s+cam|binh\s+nong\s+lanh|nuoc\s+nong|thiet\s+bi|"
+    r"ca\s+nha|toan\s+bo|tat\s+ca|nhiet\s+do|do\s+sang|mau|"
+    r"kich\s+ban|ngu\s+canh|che\s+do)\b",
+    re.IGNORECASE,
+)
+
+# Bảng đối chiếu danh từ thiết bị tường minh -> tập device_type hợp lệ (chống lệch loại thiết bị!)
+_EXPLICIT_DEVICE_GROUPS: list[tuple[re.Pattern, set[str]]] = [
+    (re.compile(r"\b(?:led|rgb)\b"), {"led_rgb", "light"}),
+    (re.compile(r"\b(?:den|bong\s+den|anh\s+sang)\b"), {"light", "led_rgb"}),
+    (re.compile(r"\b(?:dieu\s+hoa|may\s+lanh|nhiet\s+do)\b"), {"air_conditioner"}),
+    (re.compile(r"\bquat\b"), {"fan"}),
+    (re.compile(r"\b(?:rem|man\s+cua)\b"), {"curtain"}),
+    (re.compile(r"\b(?:cong|cua\s+cuon|cua\s+cuong|cua\s+gara|cua\s+garage)\b"), {"gate"}),
+    (re.compile(r"\b(?:khoa\s+cua|cua\s+chinh|cua\s+so)\b"), {"door_lock", "gate"}),
+    (re.compile(r"\b(?:may\s+bom|bom\s+nuoc|bom)\b"), {"water_pump"}),
+    (re.compile(r"\b(?:binh\s+nong\s+lanh|may\s+nuoc\s+nong|binh\s+nuoc\s+nong)\b"), {"water_heater"}),
+    (re.compile(r"\bo\s+cam\b"), {"socket"}),
+    (re.compile(r"\b(?:tivi|ti\s+vi|tv)\b"), {"tv", "light"}),
+]
 
 
 # Các mẫu câu hành động ngữ cảnh ngắn (Ellipsis / Pronoun Commands)
@@ -574,13 +776,25 @@ class IntentMapper:
             )
 
             if dev_type == "air_conditioner":
-                if has_absolute_keyword or (16 <= value <= 30):
-                    # Số nằm trong khoảng nhiệt độ điều hòa (16-30°C) → chắc chắn tuyệt đối
+                is_relative_temp_cmd = (
+                    action in {"INCREASE_TEMPERATURE", "DECREASE_TEMPERATURE"}
+                    or bool(re.search(r"\b(?:tăng|giảm)\b", text_num))
+                )
+                if 16 <= value <= 32:
+                    # Số nằm trong khoảng nhiệt độ điều hòa (16-32°C) → chắc chắn tuyệt đối
+                    action = "SET_TEMPERATURE"
+                    params["temperature"] = value
+                    logger.info("Param: nhiệt độ tuyệt đối → SET_TEMPERATURE=%d°C", value)
+                elif 1 <= value <= 10 and is_relative_temp_cmd:
+                    # VD: "tăng nhiệt độ điều hòa lên 2 độ", "giảm đi 1 độ" → TUYỆT ĐỐI giữ tương đối (amount), không đặt 2°C!
+                    params["amount"] = value
+                    logger.info("Param: nhiệt độ tương đối → amount=%d", value)
+                elif has_absolute_keyword:
                     action = "SET_TEMPERATURE"
                     params["temperature"] = value
                     logger.info("Param: nhiệt độ tuyệt đối → SET_TEMPERATURE=%d°C", value)
                 else:
-                    # Số nhỏ (1-5) → tương đối (tăng/giảm thêm X độ)
+                    # Số nhỏ (1-10) → tương đối (tăng/giảm thêm X độ)
                     params["amount"] = value
                     logger.info("Param: nhiệt độ tương đối → amount=%d", value)
 
@@ -597,12 +811,386 @@ class IntentMapper:
 
         return action, params
 
-    def map(self, text: str, custom_rooms: list[str] | None = None) -> IntentResult | None:
+    @staticmethod
+    def _strip_conversational_lead_in(text: str) -> str:
+        """Gọt bỏ lời dẫn chuyện / gọi trợ lý ngắn ở đầu câu nếu theo sau là 1 lệnh điều khiển rõ ràng.
+
+        Ví dụ:
+          - 'Trời sáng rồi bật cho tôi kịch bản buổi sáng đi' -> 'bật cho tôi kịch bản buổi sáng đi'
+          - 'Hesta ơi bật đèn phòng khách đi'                -> 'bật đèn phòng khách đi'
+          - 'À quên tắt giúp mình kịch bản nghỉ trưa'        -> 'tắt giúp mình kịch bản nghỉ trưa'
+        KHÔNG cắt nếu phần đầu đã là 1 động từ điều khiển hoặc quá dài (> 6 từ).
+        """
+        raw = re.sub(r"\s+", " ", text).strip()
+        m = _LEAD_IN_COMMAND_RE.match(raw)
+        if not m:
+            return raw
+        prefix = m.group(1).strip(" ,;.")
+        cmd_part = m.group(2).strip()
+        if not prefix or not cmd_part:
+            return raw
+        # Không cắt nếu prefix chứa động từ điều khiển khác hoặc câu hỏi/phủ định ('đừng có bật', 'không bật')
+        if _CONTROL_VERB_RE.search(prefix):
+            return raw
+        if re.search(r"\b(?:đừng|không|chớ|khoan|đừng\s+có)\b", prefix, re.IGNORECASE):
+            return raw
+        # Chỉ gọt lời dẫn ngắn hợp lý (<= 6 từ, VD: 'trời sáng rồi', 'hesta ơi', 'tối rồi', 'à quên', 'mình về rồi')
+        if len(prefix.split()) <= 6:
+            return cmd_part
+        return raw
+
+    def _parse_scene_intent(
+        self,
+        text: str,
+        custom_scenes: list[str] | None = None,
+    ) -> IntentResult | None:
+        """Nhận diện các câu lệnh kích hoạt / tắt kịch bản (Scene Commands).
+
+        Hỗ trợ:
+          - 'bật kịch bản 1', 'chạy kịch bản số 2', 'bật kịch bản một'
+          - 'bật kịch bản chào buổi sáng', 'kích hoạt kịch bản xem phim'
+          - 'bật dùm cái kịch bản đi ngủ', 'Trời sáng rồi bật cho tôi kịch bản buổi sáng đi'
+          - 'tắt kịch bản nghỉ trưa', 'dừng kịch bản 1', 'hủy kịch bản đi ngủ'
+          - 'bật chế độ chào buổi sáng', 'bật chế độ cho buổi sáng', 'bật cho tôi cái đi ngủ đi'
+        """
+        raw = self._strip_conversational_lead_in(text.strip())
+        if not raw:
+            return None
+
+        # Chuẩn hóa lỗi âm học 'bắt/tắc/ngắt' -> 'tắt' nhưng bảo toàn nguyên văn tên kịch bản
+        norm_prefix = re.sub(r"^(?:bắt|đắt|tắc|bắc|ngắt|cắt)\b", "tắt", raw, flags=re.IGNORECASE)
+
+        # 1. Kiểm tra tắt / dừng kịch bản trước
+        m_off = _SCENE_DEACTIVATE_RE.match(norm_prefix)
+        if m_off:
+            query = m_off.group(1).strip(" .?!,")
+            if query:
+                query = _SCENE_WORD_TO_NUM.get(query.lower(), query)
+                return IntentResult(
+                    action="DEACTIVATE_SCENE",
+                    device_type="scene",
+                    room=None,
+                    parameters={"scene_query": query},
+                    confidence=100.0,
+                    matched_pattern=f"tắt kịch bản {query}",
+                    raw_text=text,
+                    scene_query=query,
+                )
+
+        # 2. Kiểm tra bật / chạy / kích hoạt kịch bản
+        m_on = _SCENE_ACTIVATE_RE.match(norm_prefix)
+        if m_on:
+            query = m_on.group(1).strip(" .?!,")
+            if query:
+                query = _SCENE_WORD_TO_NUM.get(query.lower(), query)
+                return IntentResult(
+                    action="ACTIVATE_SCENE",
+                    device_type="scene",
+                    room=None,
+                    parameters={"scene_query": query},
+                    confidence=100.0,
+                    matched_pattern=f"bật kịch bản {query}",
+                    raw_text=text,
+                    scene_query=query,
+                )
+
+        # 3. Kiểm tra khớp tên kịch bản thực tế khi người dùng nói:
+        #    - 'bật cho tôi cái đi ngủ đi', 'bật chế độ cho buổi sáng', 'bật dùm cái chào buổi sáng'
+        #    - Hoặc chỉ nói ngắn gọn tên kịch bản ('đi ngủ', 'cái đi ngủ', 'chào buổi sáng 1')
+        if custom_scenes:
+            raw_norm = strip_vietnamese_tones(norm_prefix.lower())
+            has_device_or_scope_word = bool(
+                re.search(
+                    r"\b(?:den|led|rgb|dieu\s+hoa|may\s+lanh|quat|rem|cong|cua|bom|tivi|tv|"
+                    r"thiet\s+bi|tat\s+ca|toan\s+bo|het|phong)\b",
+                    raw_norm,
+                )
+                or _UNSUPPORTED_DOMAIN_RE.search(raw_norm)
+            )
+            if not has_device_or_scope_word:
+                m_mode = re.match(
+                    r"^(?:(?:hay|xin|lam\s+on)\s+)?(bat|mo|chay|kich\s+hoat|chuyen\s+sang|doi\s+sang|tat|dung|huy|thoat|cho)"
+                    r"(?:\s+(?:dum|gium|ho|giup|cho|toi|minh|anh|em|chi|cai|phan|che\s+do))*\s+"
+                    r"(.+?)(?:\s+(?:di|len|lai|nhe|nha|gium|dum|ho|giup|voi|ngay|luon))*$",
+                    raw_norm,
+                )
+                if m_mode:
+                    verb = m_mode.group(1).strip()
+                    cand = m_mode.group(2).strip()
+                    # Tìm kịch bản khớp tốt nhất (exact -> chứa chuỗi con có ranh giới từ -> fuzzy chặt)
+                    best_scene_name: str | None = None
+                    best_score = 0.0
+                    for scene_name in custom_scenes:
+                        s_norm = strip_vietnamese_tones(scene_name.lower()).strip()
+                        if not s_norm or len(s_norm) < 4:
+                            continue
+                        if cand == s_norm:
+                            best_scene_name = scene_name
+                            best_score = 100.0
+                            break
+                        if len(cand) >= 4:
+                            cand_in_s = bool(re.search(rf"\b{re.escape(cand)}\b", s_norm))
+                            s_in_cand = bool(re.search(rf"\b{re.escape(s_norm)}\b", cand)) and (len(s_norm) / max(len(cand), 1) >= 0.45)
+                            if cand_in_s or s_in_cand:
+                                # Ưu tiên scene có độ dài sát nhất
+                                sub_score = 92.0 - min(10.0, abs(len(s_norm) - len(cand)) * 0.5)
+                                if sub_score > best_score:
+                                    best_score = sub_score
+                                    best_scene_name = scene_name
+                                continue
+                            fscore = max(fuzz.ratio(cand, s_norm), fuzz.token_set_ratio(cand, s_norm) * 0.92)
+                            if fscore >= 78.0 and fscore > best_score:
+                                best_score = fscore
+                                best_scene_name = scene_name
+
+                    if best_scene_name is not None:
+                        action = "DEACTIVATE_SCENE" if verb in {"tat", "dung", "huy", "thoat"} else "ACTIVATE_SCENE"
+                        return IntentResult(
+                            action=action,
+                            device_type="scene",
+                            room=None,
+                            parameters={"scene_query": best_scene_name},
+                            confidence=best_score,
+                            matched_pattern=f"{verb} kịch bản {best_scene_name}",
+                            raw_text=text,
+                            scene_query=best_scene_name,
+                        )
+
+                # Trường hợp nói ngắn gọn đích danh tên kịch bản (VD: "cái đi ngủ", "chào buổi sáng 1")
+                # Nhường các câu cảm thán tự nhiên ('chúc ngủ ngon', 'chào buổi sáng'...) cho Bước 0B xử lý với aliases ưu tiên enabled=True!
+                is_natural_trigger = any(pat.match(raw) for pat, _, _ in _NATURAL_SCENE_TRIGGERS)
+                if not is_natural_trigger:
+                    short_cand = re.sub(
+                        r"^(?:cai|phan|che\s+do)\s+",
+                        "",
+                        re.sub(r"\s+(?:di|nhe|nha|di\s+nhe)$", "", raw_norm).strip(),
+                    ).strip()
+                    if short_cand:
+                        for scene_name in custom_scenes:
+                            s_norm = strip_vietnamese_tones(scene_name.lower()).strip()
+                            if s_norm and len(s_norm) >= 4 and short_cand == s_norm:
+                                return IntentResult(
+                                    action="ACTIVATE_SCENE",
+                                    device_type="scene",
+                                    room=None,
+                                    parameters={"scene_query": scene_name},
+                                    confidence=92.0,
+                                    matched_pattern=f"bật kịch bản {scene_name}",
+                                    raw_text=text,
+                                    scene_query=scene_name,
+                                )
+
+        return None
+
+    def _allowed_device_types(self, remaining_norm: str) -> set[str] | None:
+        """Nếu câu có nêu rõ danh từ thiết bị, trả về tập device_type hợp lệ để cấm đoán bừa sang loại khác."""
+        allowed: set[str] = set()
+        for pat, dtypes in _EXPLICIT_DEVICE_GROUPS:
+            if pat.search(remaining_norm):
+                allowed.update(dtypes)
+        # Nếu câu có chữ 'den' VÀ chữ 'tv'/'tivi' (VD: 'đèn chiếu tivi', 'đèn tv') → chỉ cho phép đèn
+        if re.search(r"\bden\b", remaining_norm) and re.search(r"\b(?:tivi|ti\s+vi|tv)\b", remaining_norm):
+            return {"light", "led_rgb"}
+        # Nếu câu có 'tivi'/'tv' nhưng KHÔNG có 'den' → chỉ cho phép tv
+        if re.search(r"\b(?:tivi|ti\s+vi|tv)\b", remaining_norm) and not re.search(r"\bden\b", remaining_norm):
+            allowed.discard("light")
+        return allowed if allowed else None
+
+    @staticmethod
+    def _is_fuzzy_match_trustworthy(
+        remaining_norm: str,
+        matched_norm_pattern: str,
+        wratio_score: float,
+        has_explicit_device: bool = False,
+        target_device_type: str = "",
+        has_param_signal: bool = False,
+    ) -> bool:
+        """Chống bẫy partial_ratio của fuzz.WRatio khiến câu vô nghĩa/thừa chữ đạt điểm ảo."""
+        # Loại bỏ số đo (25 độ, 80%, mức 3) trước khi kiểm tra độ tương đồng cấu trúc
+        q_clean = re.sub(r"\b(?:\d+\s*(?:do|phan\s+tram|%|muc)?|do|phan\s+tram|muc|len|xuong|ve|thanh|sang|mau\s+\w+)\b", " ", remaining_norm)
+        q_clean = re.sub(r"\s+", " ", q_clean).strip() or remaining_norm
+        p_clean = matched_norm_pattern.strip()
+
+        q_words = q_clean.split()
+        p_words = p_clean.split()
+
+        # Exact hoặc gần exact
+        if q_clean == p_clean or remaining_norm == p_clean:
+            return True
+
+        # Nếu câu KHÔNG có danh từ thiết bị rõ ràng và KHÔNG phải lệnh 'all'/tham số
+        # (VD: 'đóng cuốn sách' bị partial_ratio nhầm thành 'đóng cổng' 85.5% dù ratio thật chỉ 52%)
+        # → yêu cầu fuzz.ratio toàn chuỗi >= 76% (vẫn cho qua lỗi dấu / gõ lệch 1-2 ký tự như 'tắt đền', 'bật quặt')
+        if not has_explicit_device and not has_param_signal and target_device_type not in ("all", ""):
+            if fuzz.ratio(q_clean, p_clean) < 76.0 and fuzz.token_sort_ratio(q_clean, p_clean) < 76.0:
+                return False
+
+        # Câu dài hơn pattern quá nhiều từ lạ (VD: 'hôm nay ăn gì bật thử xem sao' vs 'bật đèn')
+        if len(q_words) >= len(p_words) + 3:
+            tsort = fuzz.token_sort_ratio(q_clean, p_clean)
+            if tsort < 58.0:
+                return False
+
+        # Nếu WRatio không quá cao (< 88%), bắt buộc kiểm tra token_set_ratio & ratio chuẩn
+        if wratio_score < 88.0:
+            tset = fuzz.token_set_ratio(q_clean, p_clean)
+            simple_ratio = fuzz.ratio(q_clean, p_clean)
+            if tset < 66.0 and simple_ratio < 64.0:
+                return False
+
+        return True
+
+    def _parse_conversational_and_comfort_intent(
+        self,
+        text: str,
+        custom_rooms: list[str] | None = None,
+    ) -> IntentResult | None:
+        """Nhận diện các câu nói tự nhiên đời thường, truy vấn hệ thống và cảm giác môi trường:
+        1. Hỏi danh sách kịch bản / danh sách phòng / hủy lệnh.
+        2. Câu tự nhiên kích hoạt kịch bản ('tôi muốn đi ngủ', 'chào buổi sáng', 'tôi về nhà rồi'...).
+        3. Phản xạ cảm giác môi trường ('nóng quá', 'lạnh quá', 'tối quá', 'đèn sáng quá', 'quạt mạnh quá').
+        """
+        raw = re.sub(r"\s+", " ", text).strip(" .?!,")
+        if not raw:
+            return None
+
+        # 1. Truy vấn hệ thống linh hoạt (hỏi kịch bản / hỏi phòng / hỏi thiết bị / hủy lệnh)
+        raw_norm = strip_vietnamese_tones(raw.lower())
+        has_ctrl_verb = bool(_CONTROL_VERB_RE.search(raw))
+        has_query_sig = bool(_QUERY_SIGNAL_RE.search(raw))
+
+        if not has_ctrl_verb and has_query_sig:
+            if re.search(r"\b(?:kich\s+ban|ngu\s+canh)\b", raw_norm):
+                return IntentResult(
+                    action="LIST_SCENES",
+                    device_type="system",
+                    confidence=100.0,
+                    matched_pattern="danh sách kịch bản",
+                    raw_text=text,
+                )
+            if re.search(r"\bthiet\s+bi\b", raw_norm):
+                q_room, _ = self.extract_room(raw, custom_rooms=custom_rooms)
+                return IntentResult(
+                    action="LIST_DEVICES",
+                    device_type="system",
+                    room=q_room,
+                    confidence=100.0,
+                    matched_pattern="danh sách thiết bị",
+                    raw_text=text,
+                )
+            if re.search(r"\bphong\b", raw_norm):
+                return IntentResult(
+                    action="LIST_ROOMS",
+                    device_type="system",
+                    confidence=100.0,
+                    matched_pattern="danh sách phòng",
+                    raw_text=text,
+                )
+        if _CANCEL_CONTEXT_RE.match(raw):
+            return IntentResult(
+                action="CANCEL_CONTEXT",
+                device_type="system",
+                confidence=100.0,
+                matched_pattern="hủy lệnh",
+                raw_text=text,
+            )
+
+        # 2. Ngôn ngữ tự nhiên kích hoạt Kịch bản ('tôi muốn đi ngủ', 'chào buổi sáng', 'tôi đi ra ngoài'...)
+        for pat, canonical_name, aliases in _NATURAL_SCENE_TRIGGERS:
+            if pat.match(raw):
+                return IntentResult(
+                    action="ACTIVATE_SCENE",
+                    device_type="scene",
+                    room=None,
+                    parameters={
+                        "scene_query": canonical_name,
+                        "scene_aliases": aliases,
+                        "is_natural_trigger": True,
+                    },
+                    confidence=95.0,
+                    matched_pattern=f"kịch bản {canonical_name}",
+                    raw_text=text,
+                    scene_query=canonical_name,
+                )
+
+        # 3. Phản xạ cảm giác môi trường (có thể kèm tên phòng, VD: 'phòng khách nóng quá', 'phòng ngủ tối quá')
+        room, rem = self.extract_room(raw, custom_rooms=custom_rooms)
+        rem_lower = rem.strip().lower()
+
+        # Lạnh quá / rét quá -> TĂNG nhiệt độ điều hòa thêm 2 độ (KHÔNG bật máy lạnh!)
+        if re.match(r"^(?:(?:ở\s+đây|trong\s+phòng|trời|phòng)?\s*)?(?:lạnh\s+quá|rét\s+quá|hơi\s+lạnh|lạnh\s+lắm|lạnh\s+thế)(?:\s+(?:rồi|nhỉ|trời))?$", rem_lower):
+            return IntentResult(
+                action="INCREASE_TEMPERATURE",
+                device_type="air_conditioner",
+                room=room,
+                parameters={"amount": 2},
+                confidence=92.0,
+                matched_pattern="lạnh quá",
+                raw_text=text,
+            )
+
+        # Nóng quá / oi bức quá -> GIẢM nhiệt độ điều hòa đi 2 độ
+        if re.match(r"^(?:(?:ở\s+đây|trong\s+phòng|trời|phòng)?\s*)?(?:nóng\s+quá|nực\s+quá|oi\s+bức\s+quá|hơi\s+nóng|nóng\s+lắm|nóng\s+thế)(?:\s+(?:rồi|nhỉ|trời))?$", rem_lower):
+            return IntentResult(
+                action="DECREASE_TEMPERATURE",
+                device_type="air_conditioner",
+                room=room,
+                parameters={"amount": 2},
+                confidence=92.0,
+                matched_pattern="nóng quá",
+                raw_text=text,
+            )
+
+        # Tối quá / tối om -> BẬT đèn (chỉ khớp đúng 'tối' có dấu, tuyệt đối không nhầm 'tôi'!)
+        if re.match(r"^(?:(?:ở\s+đây|trong\s+phòng|phòng)?\s*)?(?:tối\s+quá|tối\s+om|tối\s+thế|tối\s+lắm|hơi\s+tối)(?:\s+(?:rồi|nhỉ))?$", rem_lower):
+            return IntentResult(
+                action="TURN_ON",
+                device_type="light",
+                room=room,
+                parameters={},
+                confidence=92.0,
+                matched_pattern="tối quá",
+                raw_text=text,
+            )
+
+        # Đèn sáng quá / chói quá -> GIẢM độ sáng đèn (KHÔNG bật đèn!)
+        if re.match(r"^(?:(?:đèn|ở\s+đây|trong\s+phòng|phòng)?\s*)?(?:sáng\s+quá|chói\s+quá|chói\s+mắt\s+quá|hơi\s+chói|hơi\s+sáng)(?:\s+(?:rồi|nhỉ))?$", rem_lower):
+            return IntentResult(
+                action="DECREASE_BRIGHTNESS",
+                device_type="light",
+                room=room,
+                parameters={"amount": 20},
+                confidence=92.0,
+                matched_pattern="đèn sáng quá",
+                raw_text=text,
+            )
+
+        # Quạt mạnh quá / gió mạnh quá -> TẮT quạt (KHÔNG bật quạt!)
+        if re.match(r"^(?:quạt|gió)\s+(?:mạnh\s+quá|to\s+quá|ồn\s+quá|lớn\s+quá)(?:\s+(?:rồi|nhỉ))?$", rem_lower):
+            return IntentResult(
+                action="TURN_OFF",
+                device_type="fan",
+                room=room,
+                parameters={},
+                confidence=92.0,
+                matched_pattern="quạt mạnh quá",
+                raw_text=text,
+            )
+
+        return None
+
+    def map(
+        self,
+        text: str,
+        custom_rooms: list[str] | None = None,
+        custom_scenes: list[str] | None = None,
+    ) -> IntentResult | None:
         """Map transcript text thành intent.
 
         Args:
             text: transcript từ STT
             custom_rooms: danh sách phòng tùy chỉnh từ DB (nếu có)
+            custom_scenes: danh sách tên kịch bản của nhà từ DB (nếu có)
 
         Returns:
             IntentResult nếu match, None nếu không match hoặc confidence quá thấp.
@@ -610,15 +1198,49 @@ class IntentMapper:
         if not text or not text.strip():
             return None
 
+        # Bước 0: Chặn câu cấm đoán / phủ định hành động (VD: "đừng bật đèn", "đừng có mở cổng", "không được tắt quạt")
+        raw_stripped = re.sub(r"\s+", " ", text).strip(" .?!,")
+        if not _CANCEL_CONTEXT_RE.match(raw_stripped) and _NEGATION_PROHIBITION_RE.match(raw_stripped):
+            logger.info("Rejected negated/prohibited command: '%s'", text)
+            return None
+
+        # Bước 0A: Ưu tiên nhận diện lệnh Kịch bản (Scene) tường minh TRƯỚC khi tách room/device
+        # Tránh việc tên kịch bản như 'Đi ngủ' hay 'Xem phim' bị cắt nhầm vào phòng ngủ / TV!
+        scene_intent = self._parse_scene_intent(text, custom_scenes=custom_scenes)
+        if scene_intent is not None:
+            logger.info(
+                "Scene intent mapped: '%s' → %s scene_query='%s'",
+                text, scene_intent.action, scene_intent.scene_query,
+            )
+            return scene_intent
+
+        # Bước 0B: Nhận diện ngôn ngữ đời thường (Natural Scene Triggers, Comfort, List Scenes/Rooms, Cancel)
+        conv_intent = self._parse_conversational_and_comfort_intent(text, custom_rooms=custom_rooms)
+        if conv_intent is not None:
+            logger.info(
+                "Conversational intent mapped: '%s' → %s %s room=%s",
+                text, conv_intent.action, conv_intent.device_type, conv_intent.room,
+            )
+            return conv_intent
+
         if not self._pattern_index:
             logger.warning("Chưa load intents! Gọi load_intents() trước.")
             return None
 
-        # Chuẩn hóa số đọc bằng chữ trước (VD: tám mươi -> 80)
-        text_norm_nums = normalize_spoken_numbers(text)
+        # Gọt lời dẫn chuyện ngắn ở đầu câu nếu có (VD: 'Hesta ơi bật đèn phòng khách', 'Tối rồi bật đèn đi')
+        stripped_lead = self._strip_conversational_lead_in(text)
+        # Chuẩn hóa số đọc bằng chữ + loại bỏ từ đệm lịch sự sau động từ (VD: "bật dùm tôi cái đèn" -> "bật đèn")
+        cleaned_fillers = _STRIP_MID_FILLERS_RE.sub(r"\1 ", stripped_lead)
+        text_norm_nums = normalize_spoken_numbers(cleaned_fillers)
 
         # Bước 1: Tách room (kết hợp danh mục tiêu chuẩn và custom_rooms)
         full_text_norm = strip_vietnamese_tones(text_norm_nums.lower())
+
+        # Lớp bảo vệ 1: Chặn ngay thiết bị / chức năng KHÔNG hỗ trợ (tủ lạnh, máy giặt, mở nhạc, hỏi giờ...)
+        if _UNSUPPORTED_DOMAIN_RE.search(full_text_norm) and "che do" not in full_text_norm:
+            logger.info("Từ chối lệnh ngoài phạm vi hỗ trợ (unsupported domain): '%s'", text)
+            return None
+
         is_rolling_or_garage_door = bool(
             re.search(
                 r"\b(?:cua cuon|cua cuong|cua gara|cua garage|cong gara|cong garage)\b",
@@ -640,11 +1262,13 @@ class IntentMapper:
         )
         if not mode_match:
             # 2. Tìm cụm từ chuyển đích: "(sang|thành|về) [màu] <tên>"
-            mode_match = re.search(
-                r"(?:sang|thành|về)\s+(?:màu\s+)?([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
-                remaining,
-                re.IGNORECASE,
-            )
+            # CHẶN hiểu nhầm "tôi về nhà" / "đi về nhà" thành đổi chế độ đèn!
+            if not re.search(r"\b(?:tôi|mình|anh|em|con|đi|trở)\s+về\b|\bvề\s+(?:đến\s+)?nhà\b", remaining, re.IGNORECASE):
+                mode_match = re.search(
+                    r"(?:sang|thành|về)\s+(?:màu\s+)?([a-zA-Z0-9_À-ỹ\s]+?)(?:\s+(?:ở|tại|trong|cho|phòng)\b|$)",
+                    remaining,
+                    re.IGNORECASE,
+                )
         if not mode_match:
             # 3. Tìm cụm "màu <tên>" không đứng ngay sau động từ đổi/chuyển/chỉnh/đặt
             m_color = re.search(
@@ -716,9 +1340,60 @@ class IntentMapper:
         mentions_all_devices_word = bool(re.search(r"\bthiet bi\b", remaining_norm))
 
         # Nhận diện các câu lệnh thuần túy hành động / ngữ cảnh ngắn (Ellipsis / Pronoun Commands)
-        # Ví dụ: "tắt đi", "tắt nó đi", "tắt giùm", "bật đi", "bật lên", "mở ra", "đóng lại", "dừng lại"...
-        # Tránh việc "tắt đi" (tat di) bị fuzzy match nhầm sang "tắt điều hòa" (tat dieu hoa) do partial ratio!
+        # Ví dụ: "tắt đi", "tắt nó đi", "bật lên", "mở ra", "đóng lại", "dừng lại",
+        # hoặc lệnh tiếp nối theo tham số ("đặt 24 độ", "tăng thêm 2 độ", "giảm đi 1 độ", "đổi sang màu xanh dương")
         if not has_explicit_device_noun and not mentions_all_devices_word:
+            # 1. Lệnh tiếp nối nhiệt độ (VD: "đặt 24 độ", "xuống 23 độ", "tăng thêm 2 độ", "giảm đi 1 độ")
+            m_temp_set = re.match(
+                r"^(?:dat|chinh|ha|giam|tang|len|xuong|ve|de)?\s*(?:nhiet\s+do\s+)?(?:ve|xuong|len|thanh|la|muc)?\s*(\d{2})\s*do(?:\s*c)?(?:\s+(?:di|nhe|nha))?$",
+                remaining_norm,
+            )
+            if m_temp_set:
+                t_val = int(m_temp_set.group(1))
+                if 16 <= t_val <= 32:
+                    return IntentResult(
+                        action="SET_TEMPERATURE",
+                        device_type="air_conditioner",
+                        room=room,
+                        parameters={"temperature": t_val},
+                        confidence=96.0,
+                        matched_pattern=f"đặt {t_val} độ",
+                        raw_text=text,
+                    )
+            m_temp_rel = re.match(
+                r"^(tang|giam|ha)\s*(?:nhiet\s+do\s+)?(?:them|len|xuong|di|bot)?\s*(\d+)?\s*do(?:\s+(?:di|nhe|nha))?$",
+                remaining_norm,
+            )
+            if m_temp_rel:
+                act_rel = "INCREASE_TEMPERATURE" if m_temp_rel.group(1) == "tang" else "DECREASE_TEMPERATURE"
+                amt = int(m_temp_rel.group(2)) if m_temp_rel.group(2) else 1
+                return IntentResult(
+                    action=act_rel,
+                    device_type="air_conditioner",
+                    room=room,
+                    parameters={"amount": amt},
+                    confidence=96.0,
+                    matched_pattern=remaining_for_match,
+                    raw_text=text,
+                )
+
+            # 2. Lệnh tiếp nối đổi màu đèn LED RGB (VD: "đổi sang màu xanh dương", "chuyển sang màu đỏ")
+            if mode_extracted and remaining_norm in {"doi", "chuyen", "chinh", "dat", "sang", "bat", "bật đèn"}:
+                c_action, c_params = self.extract_parameters(text, {"action": "SET_COLOR", "device_type": "led_rgb"}, mode_extracted=mode_extracted)
+                if "r" in c_params:
+                    # Người dùng nói tên màu trực tiếp ("xanh dương", "đỏ"...) -> bỏ mode để không ghi đè sang preset khác
+                    c_params.pop("mode", None)
+                    return IntentResult(
+                        action="SET_COLOR",
+                        device_type="led_rgb",
+                        room=room,
+                        parameters=c_params,
+                        confidence=95.0,
+                        matched_pattern=f"đổi màu {c_params.get('color', mode_extracted)}",
+                        raw_text=text,
+                    )
+
+        if not has_explicit_device_noun and not mentions_all_devices_word and not mode_extracted:
             for ctx_action, ctx_regex in CONTEXT_ACTION_PATTERNS:
                 if ctx_regex.match(remaining_norm):
                     logger.info("Khớp lệnh ngữ cảnh ngắn: '%s' -> action=%s, device_type=None", remaining_norm, ctx_action)
@@ -733,14 +1408,52 @@ class IntentMapper:
                         device_name_hint="",
                     )
 
+        # Nếu người dùng nói "bật chế độ <X>" không nêu tên đèn và không khớp kịch bản nào ở Bước 0 ->
+        # chỉ chạy tiếp sang đèn nếu câu có chữ 'đèn'/'led'/'rgb', ngược lại từ chối sạch thay vì báo 'Không xác định được loại thiết bị'
+        if mode_extracted and not has_explicit_device_noun and remaining_norm in {"bat", "mo", "tat", "doi", "chuyen", "chinh", "dat"}:
+            logger.info("Từ chối lệnh chế độ mơ hồ không khớp kịch bản và không nêu thiết bị: '%s'", text)
+            return None
+
+        # Lớp bảo vệ 2: Câu nói hoàn toàn không có tín hiệu hành động hay thiết bị Smart Home (vô nghĩa/xã giao)
+        # Kiểm tra bổ sung chữ 'tối' / 'sáng' CÓ DẤU (tuyệt đối không để chữ 'tôi' -> 'toi' lọt qua!)
+        has_accented_brightness_signal = bool(re.search(r"\b(?:tối\s+đi|sáng\s+lên|bớt\s+sáng|bật\s+sáng|tắt\s+sáng|nóng\s+lên|lạnh\s+hơn)\b", text.lower()))
+        if not _SMART_HOME_SIGNAL_RE.search(remaining_norm) and not _SMART_HOME_SIGNAL_RE.search(full_text_norm) and not has_accented_brightness_signal:
+            logger.info("Từ chối câu không chứa tín hiệu điều khiển Smart Home: '%s'", text)
+            return None
+
+        # Loại trừ nhóm device_type == 'scene' khỏi fuzzy match thiết bị (scene đã được xử lý riêng ở Bước 0)
+        base_entries = [
+            (orig, p_norm, idef)
+            for orig, p_norm, idef in self._pattern_index
+            if idef.get("device_type") != "scene"
+        ]
+
         if has_explicit_device_noun and not mentions_all_devices_word:
             candidate_entries = [
                 (orig, p_norm, idef)
-                for orig, p_norm, idef in self._pattern_index
+                for orig, p_norm, idef in base_entries
                 if idef.get("device_type") != "all"
             ]
         else:
-            candidate_entries = self._pattern_index
+            candidate_entries = base_entries
+
+        # Lớp bảo vệ 3: Nếu câu có danh từ thiết bị rõ ràng (VD: 'đèn', 'quạt', 'điều hòa'),
+        # BẮT BUỘC chỉ so khớp trong nhóm device_type tương thích → cấm đoán bừa sang thiết bị khác!
+        allowed_types = self._allowed_device_types(remaining_norm)
+        if allowed_types is not None and not mentions_all_devices_word:
+            typed_entries = [
+                (orig, p_norm, idef)
+                for orig, p_norm, idef in candidate_entries
+                if idef.get("device_type") in allowed_types
+            ]
+            if typed_entries:
+                candidate_entries = typed_entries
+            else:
+                logger.info(
+                    "Không có intent nào thuộc nhóm thiết bị %s cho câu '%s' → từ chối đoán bừa.",
+                    allowed_types, text,
+                )
+                return None
 
         # Tạo danh sách các pattern đã được chuẩn hóa
         all_norm_patterns = [p_norm for _, p_norm, _ in candidate_entries]
@@ -764,6 +1477,26 @@ class IntentMapper:
             logger.info(
                 "Confidence quá thấp: '%s' (norm: '%s') → '%s' (%.0f%% < %.0f%%)",
                 remaining, remaining_norm, matched_original_pattern, score, self.config.min_confidence,
+            )
+            return None
+
+        # Lớp bảo vệ 4: Kiểm tra chất lượng fuzzy match (chống bẫy partial_ratio trên câu vô nghĩa dài/lệch danh từ)
+        has_param_signal = bool(
+            mode_extracted
+            or intent_def.get("has_parameter")
+            or re.search(r"\b(?:nhiet\s+do|do\s+sang|mau|sang|toi|nong|lanh|mat|am)\b", remaining_norm)
+        )
+        if not self._is_fuzzy_match_trustworthy(
+            remaining_norm,
+            matched_norm_pattern,
+            score,
+            has_explicit_device=bool(allowed_types),
+            target_device_type=intent_def.get("device_type", ""),
+            has_param_signal=has_param_signal,
+        ):
+            logger.info(
+                "Từ chối fuzzy match kém chất lượng (anti-hallucination): '%s' → '%s' (WRatio=%.0f%%)",
+                remaining, matched_original_pattern, score,
             )
             return None
 

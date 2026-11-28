@@ -53,7 +53,7 @@ public class SecurityConfig {
                 .accessDeniedHandler(customAccessDeniedHandler)
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/internal/**").permitAll()
+                .requestMatchers("/api/v1/auth/**", "/api/v1/public/**", "/ws", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/internal/**").permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/devices/qr/**").permitAll()
                 // Camera AI pushes fall events without a user; viewing/handling incidents needs a logged-in member.
                 .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/emergency/fall/events", "/api/emergency/fall/events").permitAll()

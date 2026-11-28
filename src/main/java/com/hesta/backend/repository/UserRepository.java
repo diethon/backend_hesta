@@ -26,6 +26,8 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     long countByPlatformRole(PlatformRole platformRole);
 
+    List<User> findAllByPlatformRole(PlatformRole platformRole);
+
     long countByProvider(AuthProvider provider);
 
     long countByCreatedAtAfter(OffsetDateTime dateTime);

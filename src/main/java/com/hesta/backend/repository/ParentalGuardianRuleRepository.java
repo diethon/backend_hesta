@@ -15,7 +15,7 @@ public interface ParentalGuardianRuleRepository extends JpaRepository<ParentalGu
 
     Optional<ParentalGuardianRule> findByIdAndHomeId(UUID id, UUID homeId);
 
-    List<ParentalGuardianRule> findAllByTargetDeviceIdAndEnabledTrue(UUID targetDeviceId);
+    List<ParentalGuardianRule> findAllByTargetDevicesIdAndEnabledTrue(UUID targetDeviceId);
 
     List<ParentalGuardianRule> findAllByCameraDeviceIdAndEnabledTrue(UUID cameraDeviceId);
 

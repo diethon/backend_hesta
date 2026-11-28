@@ -769,6 +769,43 @@
         "tắt tivi phòng khách",
         "tắt tv phòng khách"
       ]
+    },
+    {
+      "action": "ACTIVATE_SCENE",
+      "device_type": "scene",
+      "patterns": [
+        "bật kịch bản",
+        "chạy kịch bản",
+        "kích hoạt kịch bản",
+        "mở kịch bản",
+        "thực thi kịch bản",
+        "áp dụng kịch bản",
+        "chuyển sang kịch bản",
+        "bật kịch bản 1",
+        "bật kịch bản 2",
+        "bật kịch bản chào buổi sáng",
+        "bật kịch bản đi ngủ",
+        "bật kịch bản nghỉ trưa",
+        "bật kịch bản xem phim",
+        "bật ngữ cảnh"
+      ]
+    },
+    {
+      "action": "DEACTIVATE_SCENE",
+      "device_type": "scene",
+      "patterns": [
+        "tắt kịch bản",
+        "dừng kịch bản",
+        "hủy kịch bản",
+        "ngưng kịch bản",
+        "thoát kịch bản",
+        "đóng kịch bản",
+        "tắt kịch bản 1",
+        "tắt kịch bản 2",
+        "tắt kịch bản nghỉ trưa",
+        "tắt kịch bản xem phim",
+        "tắt ngữ cảnh"
+      ]
     }
   ]
 }

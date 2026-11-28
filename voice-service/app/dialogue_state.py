@@ -189,7 +189,7 @@ class DialogueState:
         # Ví dụ: "tắt đèn đi", "bật quạt lên", "đóng rèm lại"
         # -------------------------------------------------------------
         if filled_device_type is not None and filled_room is None:
-            if filled_device_type not in {"gate", "water_pump", "all"}:
+            if filled_device_type not in {"gate", "water_pump", "all", "scene"}:
                 # 1.1. Ưu tiên tìm entry khớp cùng device_type mà có room
                 match_entry = next(
                     (e for e in reversed(valid_entries) if e.device_type == filled_device_type and e.room is not None),
@@ -217,12 +217,12 @@ class DialogueState:
                     )
                 elif action in {"TURN_ON", "TURN_OFF"}:
                     target_entry = next(
-                        (e for e in reversed(valid_entries) if e.device_type in {"light", "led_rgb", "fan", "air_conditioner", "water_pump", "water_heater", "tv", "socket"}),
+                        (e for e in reversed(valid_entries) if e.device_type in {"light", "led_rgb", "fan", "air_conditioner", "water_pump", "water_heater", "tv", "socket", "scene"}),
                         None,
                     )
                 elif action == "STOP":
                     target_entry = next(
-                        (e for e in reversed(valid_entries) if e.device_type in {"curtain", "gate"}),
+                        (e for e in reversed(valid_entries) if e.device_type in {"curtain", "gate", "scene"}),
                         None,
                     )
 
@@ -231,7 +231,7 @@ class DialogueState:
 
             if target_entry:
                 filled_device_type = target_entry.device_type
-                if target_entry.device_type not in {"gate", "water_pump", "all"}:
+                if target_entry.device_type not in {"gate", "water_pump", "all", "scene"}:
                     filled_room = target_entry.room
                 logger.info(
                     "Dùng device_type '%s' và room '%s' từ context entry (action=%s)",

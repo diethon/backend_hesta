@@ -158,6 +158,15 @@ public enum ErrorCode {
     MAINTENANCE_ATTACHMENT_REQUIRED(1736, "Vui lòng chọn tệp ảnh để tải lên", HttpStatus.BAD_REQUEST),
     MAINTENANCE_ATTACHMENT_TYPE_INVALID(1737, "Chỉ hỗ trợ ảnh định dạng JPEG, PNG hoặc WebP hợp lệ", HttpStatus.BAD_REQUEST),
     MAINTENANCE_ATTACHMENT_TOO_LARGE(1738, "Mỗi ảnh đính kèm không được vượt quá 5 MB", HttpStatus.PAYLOAD_TOO_LARGE),
+
+    // Installation contracts
+    CONTRACT_NOT_FOUND(1750, "Hợp đồng lắp đặt không tồn tại", HttpStatus.NOT_FOUND),
+    CONTRACT_INVALID_REQUEST(1751, "Dữ liệu hợp đồng lắp đặt không hợp lệ", HttpStatus.BAD_REQUEST),
+    CONTRACT_INVALID_STATUS(1752, "Trạng thái hợp đồng không cho phép thực hiện thao tác này", HttpStatus.CONFLICT),
+    CONTRACT_CLAIM_TOKEN_INVALID(1753, "Mã liên kết hợp đồng không hợp lệ hoặc đã hết hạn", HttpStatus.BAD_REQUEST),
+    CONTRACT_ALREADY_CLAIMED(1754, "Hợp đồng này đã được gắn vào một tài khoản khác", HttpStatus.CONFLICT),
+    CONTRACT_LOCKED_AFTER_SIGN(1755, "Hợp đồng đã được ký kết và khóa nội dung, không thể chỉnh sửa", HttpStatus.CONFLICT),
+    CONTRACT_HANDOVER_FAILED(1756, "Không thể hoàn tất bàn giao hệ thống cho hợp đồng này", HttpStatus.BAD_REQUEST),
     MAINTENANCE_ATTACHMENT_LIMIT_EXCEEDED(1739, "Mỗi ticket chỉ được đính kèm tối đa 5 ảnh", HttpStatus.BAD_REQUEST),
     MAINTENANCE_ATTACHMENT_NOT_FOUND(1740, "Ảnh đính kèm không tồn tại hoặc không thuộc quyền sở hữu của bạn", HttpStatus.BAD_REQUEST),
     MAINTENANCE_ATTACHMENT_UPLOAD_FAILED(1741, "Không thể tải ảnh đính kèm lên hệ thống, vui lòng thử lại sau", HttpStatus.BAD_GATEWAY),
