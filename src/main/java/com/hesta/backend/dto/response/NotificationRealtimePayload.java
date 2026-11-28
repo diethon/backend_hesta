@@ -12,15 +12,18 @@ public record NotificationRealtimePayload(
         UUID recipientId,
         UUID homeId,
         boolean isRead,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+        boolean silent
 ) {
-    public static NotificationRealtimePayload from(NotificationResponse notification) {
+    /** {@code silent}: recipient is in quiet hours, so clients list it without popup or sound. */
+    public static NotificationRealtimePayload from(NotificationResponse notification, boolean silent) {
         return new NotificationRealtimePayload(
                 notification.id(),
                 notification.userId(),
                 notification.homeId(),
                 notification.isRead(),
-                notification.createdAt()
+                notification.createdAt(),
+                silent
         );
     }
 }
