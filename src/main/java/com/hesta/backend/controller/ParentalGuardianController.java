@@ -1,7 +1,6 @@
 package com.hesta.backend.controller;
 
 import com.hesta.backend.dto.request.CreateParentalGuardianRequest;
-import com.hesta.backend.dto.request.GuardianSimulateEventRequest;
 import com.hesta.backend.dto.request.UpdateParentalGuardianRequest;
 import com.hesta.backend.dto.response.ApiResponse;
 import com.hesta.backend.dto.response.ParentalGuardianLogResponse;
@@ -104,16 +103,6 @@ public class ParentalGuardianController {
             @PathVariable UUID ruleId) {
         return ok("Đã mở khóa thiết bị thành công",
                 guardianService.unlock(user.getId(), homeId, ruleId));
-    }
-
-    @PostMapping("/{ruleId}/simulate")
-    public ResponseEntity<ApiResponse<ParentalGuardianResponse>> simulate(
-            @AuthenticationPrincipal CustomUserDetails user,
-            @PathVariable UUID homeId,
-            @PathVariable UUID ruleId,
-            @Valid @RequestBody GuardianSimulateEventRequest request) {
-        return ok("Mô phỏng sự kiện thành công",
-                guardianService.simulate(user.getId(), homeId, ruleId, request));
     }
 
     @GetMapping("/{ruleId}/logs")
