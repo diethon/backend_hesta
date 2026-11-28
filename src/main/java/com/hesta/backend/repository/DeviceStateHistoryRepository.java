@@ -20,6 +20,11 @@ public interface DeviceStateHistoryRepository extends JpaRepository<DeviceStateH
     @Query("SELECT h FROM DeviceStateHistory h WHERE h.device.id IN :deviceIds ORDER BY h.changedAt DESC LIMIT 500")
     List<DeviceStateHistory> findByDeviceIdInOrderByChangedAtDesc(@Param("deviceIds") List<UUID> deviceIds);
 
+    @Query("SELECT h FROM DeviceStateHistory h WHERE h.device.id IN :deviceIds ORDER BY h.changedAt DESC")
+    List<DeviceStateHistory> findRecentByDeviceIds(
+            @Param("deviceIds") List<UUID> deviceIds,
+            org.springframework.data.domain.Pageable pageable);
+
     List<DeviceStateHistory> findByDeviceIdAndChangedAtBetweenOrderByChangedAtAsc(
             UUID deviceId, OffsetDateTime from, OffsetDateTime to);
 
@@ -35,6 +40,23 @@ public interface DeviceStateHistoryRepository extends JpaRepository<DeviceStateH
             @Param("deviceIds") List<UUID> deviceIds,
             @Param("from") OffsetDateTime from,
             @Param("to") OffsetDateTime to);
+
+    @Query("""
+            SELECT h FROM DeviceStateHistory h
+            JOIN FETCH h.device
+            WHERE h.device.id IN :deviceIds
+              AND h.changedAt < :beforeTime
+              AND NOT EXISTS (
+                  SELECT h2.id FROM DeviceStateHistory h2
+                  WHERE h2.device.id = h.device.id
+                    AND h2.changedAt < :beforeTime
+                    AND (h2.changedAt > h.changedAt
+                         OR (h2.changedAt = h.changedAt AND h2.id > h.id))
+              )
+            """)
+    List<DeviceStateHistory> findLatestBeforeByDeviceIds(
+            @Param("deviceIds") List<UUID> deviceIds,
+            @Param("beforeTime") OffsetDateTime beforeTime);
 
     @Modifying
     @Transactional

@@ -61,6 +61,8 @@ public class MqttMessageReceiver {
     private com.hesta.backend.realtime.publisher.RealtimeEventPublisher realtimeEventPublisher;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.service.SecurityEventService securityEventService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
 
     /**
      * Receive all MQTT messages from mqttInputChannel.
@@ -1282,6 +1284,19 @@ public class MqttMessageReceiver {
                 log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
             }
             return;
+        }
+
+        if (cacheService != null) {
+            String homePrefix = homeId + ":";
+            cacheService.evictByPrefix("devices:home", homePrefix);
+            cacheService.evictByPrefix("home:activity", homePrefix);
+            cacheService.evictByPrefix("energy:home", homePrefix);
+            if (dev.getId() != null) {
+                String devPrefix = dev.getId() + ":";
+                cacheService.evictByPrefix("energy:device", devPrefix);
+                cacheService.evictByPrefix("device:uptime", devPrefix);
+                cacheService.evict("device:history", dev.getId().toString());
+            }
         }
 
         if (realtimeEventPublisher != null) {

@@ -27,6 +27,15 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
     private final UserRepository users;
     private final DeviceRepository devices;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
+
+    private void evictHomeDevicesCache(Device device) {
+        if (cacheService != null && device != null && device.getHome() != null && device.getHome().getId() != null) {
+            cacheService.evictByPrefix("devices:home", device.getHome().getId() + ":");
+        }
+    }
+
     private User resolveUser(UUID userId, Device device) {
         if (userId != null) {
             return users.findById(userId).orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
@@ -48,6 +57,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .user(user).eventType("MANUAL_OVERRIDE").action(reason).eventSource(eventSource)
                 .currentState(Map.of("expiresAt", now.plus(OVERRIDE_DURATION).toString()))
                 .occurredAt(now).build());
+        evictHomeDevicesCache(device);
         return now.plus(OVERRIDE_DURATION);
     }
 
@@ -70,6 +80,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .currentState(Map.of("expiresAt", expiresAt.toString()))
                 .occurredAt(now)
                 .build());
+        evictHomeDevicesCache(device);
         return expiresAt;
     }
 
@@ -94,6 +105,7 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .currentState(Map.of("expiresAt", newExpiresAt.toString()))
                 .occurredAt(now)
                 .build());
+        evictHomeDevicesCache(device);
         return newExpiresAt;
     }
 
@@ -157,5 +169,6 @@ public class ManualOverrideServiceImpl implements ManualOverrideService {
                 .user(user).eventType("MANUAL_OVERRIDE").action("RESUME").eventSource(eventSource)
                 .currentState(Map.of("resumedAt", now.toString()))
                 .occurredAt(now).build());
+        evictHomeDevicesCache(device);
     }
 }

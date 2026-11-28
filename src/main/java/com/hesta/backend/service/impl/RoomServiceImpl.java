@@ -1,5 +1,7 @@
 package com.hesta.backend.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.hesta.backend.cache.HestaCacheService;
 import com.hesta.backend.dto.request.RoomCreateRequest;
 import com.hesta.backend.dto.request.RoomUpdateRequest;
 import com.hesta.backend.dto.response.RoomResponse;
@@ -8,6 +10,7 @@ import com.hesta.backend.entity.Home;
 import com.hesta.backend.entity.Room;
 import com.hesta.backend.enums.AccessLevel;
 import com.hesta.backend.enums.AccessScope;
+import com.hesta.backend.event.MemberAccessChangedEvent;
 import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
@@ -20,12 +23,16 @@ import com.hesta.backend.service.MemberAccessContext;
 import com.hesta.backend.service.RoomService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -34,11 +41,22 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RoomServiceImpl implements RoomService {
 
+    private static final String ROOMS_HOME_NAMESPACE = "rooms:home";
+    private static final String DEVICES_HOME_NAMESPACE = "devices:home";
+    private static final Duration ROOMS_CACHE_TTL = Duration.ofSeconds(30);
+
     private final RoomRepository roomRepository;
     private final DeviceRepository deviceRepository;
     private final HomeAuthorizationService homeAuthorizationService;
     private final TwinLayoutRepository twinLayoutRepository;
     private final TwinRoomLayoutRepository twinRoomLayoutRepository;
+
+    @Autowired(required = false)
+    private HestaCacheService cacheService;
+
+    public void setCacheService(HestaCacheService cacheService) {
+        this.cacheService = cacheService;
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -46,9 +64,25 @@ public class RoomServiceImpl implements RoomService {
         homeAuthorizationService.requireAccess(userId, homeId);
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
         boolean isCustomMember = ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM;
+        String scopeKey = isCustomMember ? ("USER:" + userId) : "ALL";
+        String cacheKey = homeId + ":" + scopeKey;
+
+        if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            Optional<List<RoomResponse>> cached = cacheService.get(
+                    ROOMS_HOME_NAMESPACE,
+                    cacheKey,
+                    new TypeReference<List<RoomResponse>>() {}
+            );
+            if (cached.isPresent()) {
+                return cached.get();
+            }
+        }
 
         List<Room> rooms = roomRepository.findByHomeIdOrderByCreatedAtAsc(homeId);
         if (rooms.isEmpty()) {
+            if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(ROOMS_HOME_NAMESPACE, cacheKey, Collections.emptyList(), ROOMS_CACHE_TTL);
+            }
             return Collections.emptyList();
         }
 
@@ -60,7 +94,7 @@ public class RoomServiceImpl implements RoomService {
                 .collect(Collectors.groupingBy(d -> d.getRoom().getId(), Collectors.counting()));
 
         Map<UUID, Integer> floorByRoom = floorsByRoom(homeId);
-        return rooms.stream()
+        List<RoomResponse> result = rooms.stream()
                 .filter(room -> {
                     if (!isCustomMember) return true;
                     AccessLevel roomLevel = ctx.roomLevels().getOrDefault(room.getId(), AccessLevel.NONE);
@@ -73,6 +107,11 @@ public class RoomServiceImpl implements RoomService {
                     return response;
                 })
                 .collect(Collectors.toList());
+
+        if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            cacheService.put(ROOMS_HOME_NAMESPACE, cacheKey, result, ROOMS_CACHE_TTL);
+        }
+        return result;
     }
 
     private Map<UUID, Integer> floorsByRoom(UUID homeId) {
@@ -126,6 +165,7 @@ public class RoomServiceImpl implements RoomService {
                 .build();
 
         Room saved = roomRepository.save(room);
+        evictRoomCaches(homeId, false);
         log.info("User {} created new room '{}' (id: {}) in home {}", userId, saved.getName(), saved.getId(), homeId);
         return RoomResponse.fromEntity(saved, 0);
     }
@@ -155,6 +195,7 @@ public class RoomServiceImpl implements RoomService {
 
         Room updated = roomRepository.save(room);
         List<Device> devices = deviceRepository.findByRoomId(roomId);
+        evictRoomCaches(homeId, true);
         log.info("User {} updated room '{}' (id: {}) in home {}", userId, updated.getName(), updated.getId(), homeId);
         return RoomResponse.fromEntity(updated, devices.size());
     }
@@ -178,6 +219,28 @@ public class RoomServiceImpl implements RoomService {
         }
 
         roomRepository.delete(room);
+        evictRoomCaches(homeId, true);
         log.info("User {} deleted room '{}' (id: {}) in home {}", userId, room.getName(), roomId, homeId);
+    }
+
+    @org.springframework.transaction.event.TransactionalEventListener(
+            phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT,
+            fallbackExecution = true)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+    public void onMemberAccessChanged(MemberAccessChangedEvent event) {
+        if (event != null && event.homeId() != null) {
+            evictRoomCaches(event.homeId(), false);
+        }
+    }
+
+    private void evictRoomCaches(UUID homeId, boolean includeDevices) {
+        if (cacheService == null || homeId == null) {
+            return;
+        }
+        String prefix = homeId + ":";
+        cacheService.evictByPrefix(ROOMS_HOME_NAMESPACE, prefix);
+        if (includeDevices) {
+            cacheService.evictByPrefix(DEVICES_HOME_NAMESPACE, prefix);
+        }
     }
 }

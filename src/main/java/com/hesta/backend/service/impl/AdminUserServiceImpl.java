@@ -171,6 +171,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         user.setPlatformRole(request.getPlatformRole());
 
         User updated = userRepository.save(user);
+        evictAuthCache(id);
         return mapToAdminUserResponse(updated);
     }
 
@@ -187,6 +188,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         }
 
         User updated = userRepository.save(user);
+        evictAuthCache(id);
         return mapToAdminUserResponse(updated);
     }
 
@@ -201,6 +203,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         user.setLockedUntil(null);
 
         User updated = userRepository.save(user);
+        evictAuthCache(id);
         return mapToAdminUserResponse(updated);
     }
 
@@ -212,6 +215,16 @@ public class AdminUserServiceImpl implements AdminUserService {
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
+        evictAuthCache(id);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.security.CustomUserDetailsService customUserDetailsService;
+
+    private void evictAuthCache(UUID userId) {
+        if (customUserDetailsService != null) {
+            customUserDetailsService.evictUserCache(userId);
+        }
     }
 
     private AdminUserResponse mapToAdminUserResponse(User user) {

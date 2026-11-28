@@ -1,8 +1,10 @@
 package com.hesta.backend.dto.response;
 
 import com.hesta.backend.entity.DeviceStateHistory;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -10,6 +12,8 @@ import java.util.UUID;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class DeviceStateHistoryResponse {
     private UUID id;
     private UUID deviceId;

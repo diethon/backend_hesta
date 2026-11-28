@@ -60,6 +60,16 @@ public class AuthServiceImpl implements AuthService {
     GoogleAuthService googleAuthService;
     EmailService emailService;
 
+    @lombok.experimental.NonFinal
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    com.hesta.backend.security.CustomUserDetailsService customUserDetailsService;
+
+    private void evictAuthCache(java.util.UUID userId) {
+        if (customUserDetailsService != null && userId != null) {
+            customUserDetailsService.evictUserCache(userId);
+        }
+    }
+
     @Override
     @Transactional
     public UserResponse register(RegisterRequest request) {
@@ -116,7 +126,8 @@ public class AuthServiceImpl implements AuthService {
             throw new AppException(ErrorCode.ACCOUNT_DISABLED);
         }
 
-        if (user.getStatus() == AccountStatus.LOCKED) {
+        boolean wasLocked = user.getStatus() == AccountStatus.LOCKED;
+        if (wasLocked) {
             if (user.getLockedUntil() != null && OffsetDateTime.now().isBefore(user.getLockedUntil())) {
                 throw new AppException(ErrorCode.ACCOUNT_LOCKED);
             }
@@ -133,6 +144,7 @@ public class AuthServiceImpl implements AuthService {
                 user.setStatus(AccountStatus.LOCKED);
                 user.setLockedUntil(OffsetDateTime.now().plusMinutes(15));
                 userRepository.save(user);
+                evictAuthCache(user.getId());
                 throw new AppException(ErrorCode.ACCOUNT_LOCKED);
             }
 
@@ -145,6 +157,9 @@ public class AuthServiceImpl implements AuthService {
         user.setStatus(AccountStatus.ACTIVE);
         user.setLastActiveAt(OffsetDateTime.now());
         User updatedUser = userRepository.save(user);
+        if (wasLocked) {
+            evictAuthCache(updatedUser.getId());
+        }
 
         return issueTokensForUser(updatedUser, request.getDeviceId(), request.getDeviceType());
     }
@@ -167,7 +182,8 @@ public class AuthServiceImpl implements AuthService {
                 throw new AppException(ErrorCode.ACCOUNT_DISABLED);
             }
 
-            if (user.getStatus() == AccountStatus.LOCKED) {
+            boolean wasLocked = user.getStatus() == AccountStatus.LOCKED;
+            if (wasLocked) {
                 if (user.getLockedUntil() != null && OffsetDateTime.now().isBefore(user.getLockedUntil())) {
                     throw new AppException(ErrorCode.ACCOUNT_LOCKED);
                 }
@@ -184,6 +200,9 @@ public class AuthServiceImpl implements AuthService {
             }
             user.setLastActiveAt(OffsetDateTime.now());
             user = userRepository.save(user);
+            if (wasLocked) {
+                evictAuthCache(user.getId());
+            }
         } else {
             // Auto-provision new Google user
             user = User.builder()
@@ -322,6 +341,7 @@ public class AuthServiceImpl implements AuthService {
             user.setStatus(AccountStatus.ACTIVE);
         }
         userRepository.save(user);
+        evictAuthCache(user.getId());
 
         // Đánh dấu OTP đã dùng
         latestOtp.setIsUsed(true);

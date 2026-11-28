@@ -65,6 +65,9 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     @Autowired(required = false)
     private ObjectMapper objectMapper;
 
+    @Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
+
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
     private String brokerUrl;
 
@@ -581,6 +584,19 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 log.warn("Failed to publish DeviceStateChangedEvent for device {}: {}", dev.getId(), ex.getMessage());
             }
             return;
+        }
+
+        if (cacheService != null) {
+            String homePrefix = homeId + ":";
+            cacheService.evictByPrefix("devices:home", homePrefix);
+            cacheService.evictByPrefix("home:activity", homePrefix);
+            cacheService.evictByPrefix("energy:home", homePrefix);
+            if (dev.getId() != null) {
+                String devPrefix = dev.getId() + ":";
+                cacheService.evictByPrefix("energy:device", devPrefix);
+                cacheService.evictByPrefix("device:uptime", devPrefix);
+                cacheService.evict("device:history", dev.getId().toString());
+            }
         }
 
         if (realtimeEventPublisher != null) {
