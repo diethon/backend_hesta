@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -16,9 +17,7 @@ import java.util.UUID;
 public class ParentalGuardianResponse {
     private UUID id;
     private UUID homeId;
-    private UUID targetDeviceId;
-    private String targetDeviceName;
-    private String targetDeviceType;
+    private List<TargetDevice> targetDevices;
     private UUID cameraDeviceId;
     private String cameraDeviceName;
     private String name;
@@ -33,4 +32,7 @@ public class ParentalGuardianResponse {
     private boolean autoLockout;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+
+    public record TargetDevice(UUID id, String name, String deviceType) {
+    }
 }
