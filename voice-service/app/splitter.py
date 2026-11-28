@@ -62,7 +62,8 @@ ACTION_PHRASES = [
     "tắt tất cả", "tắt hết", "tắt toàn bộ",
     "mở tất cả", "mở hết", "mở toàn bộ",
     "đóng tất cả", "đóng hết", "đóng toàn bộ",
-    "bật", "tắt", "mở", "đóng", "dừng",
+    "kích hoạt", "thực thi", "áp dụng",
+    "bật", "tắt", "mở", "đóng", "dừng", "chạy", "hủy", "ngưng", "thoát",
     "chỉnh nhiệt độ", "đặt nhiệt độ", "tăng nhiệt độ", "giảm nhiệt độ",
     "chỉnh độ sáng", "đặt độ sáng", "tăng độ sáng", "giảm độ sáng",
     "chỉnh", "đặt", "tăng", "giảm",
@@ -74,9 +75,10 @@ ACTION_PHRASES = [
 
 # Từ khóa thiết bị (sắp xếp dài trước ngắn sau)
 DEVICE_KEYWORDS = [
+    "kịch bản", "kết bạn", "kích bản", "kịch bảng", "kết bảng", "ngữ cảnh",
     "bình nóng lạnh", "bình nước nóng", "máy nước nóng",
     "quạt thông gió", "quạt treo tường", "quạt trần", "quạt cây", "quạt",
-    "đèn led rgb", "đèn led", "đèn rgb", "đèn ngủ", "đèn trần", "đèn bàn", "đèn chùm", "đèn",
+    "đèn led rgb", "đèn led", "đèn rgb", "đèn chiếu tivi", "đèn chiếu tv", "đèn ngủ", "đèn trần", "đèn bàn", "đèn chùm", "đèn",
     "máy lạnh", "điều hòa", "máy bơm nước", "máy bơm",
     "rèm cửa", "màn cửa", "rèm",
     "cửa cuốn", "cửa cuống", "cửa gara", "cửa garage", "cửa chính", "cửa sổ", "cửa", "cổng",

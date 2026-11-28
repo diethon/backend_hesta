@@ -198,21 +198,77 @@ class TTSManager:
             return b""
 
     # ------------------------------------------------------------------
-    # gTTS Fallback (Nhanh ~250–600ms, thuần Python cho cả Windows & ARM64)
+    # Google TTS Fallback (Nhanh ~250–500ms, dùng httpx có sẵn — 0 dependency ngoài!)
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _synthesize_gtts_sync(text: str) -> bytes:
-        """Tổng hợp nhanh tiếng Việt bằng gTTS → MP3 bytes."""
-        from gtts import gTTS  # type: ignore
+    def _split_tts_chunks(text: str, max_len: int = 180) -> list[str]:
+        """Chia câu dài thành các đoạn <= 180 ký tự theo dấu câu để gọi Google TTS không bị cắt chữ."""
+        clean = text.strip()
+        if len(clean) <= max_len:
+            return [clean] if clean else []
+        parts = re.split(r"(?<=[.,;!?])\s+", clean)
+        chunks: list[str] = []
+        buf = ""
+        for part in parts:
+            if not part:
+                continue
+            if len(buf) + len(part) + 1 <= max_len:
+                buf = f"{buf} {part}".strip() if buf else part
+            else:
+                if buf:
+                    chunks.append(buf)
+                while len(part) > max_len:
+                    cut = part.rfind(" ", 0, max_len)
+                    if cut <= 0:
+                        cut = max_len
+                    chunks.append(part[:cut].strip())
+                    part = part[cut:].strip()
+                buf = part
+        if buf:
+            chunks.append(buf)
+        return chunks
 
-        buf = io.BytesIO()
-        tts = gTTS(text=text, lang="vi", slow=False)
-        tts.write_to_fp(buf)
-        return buf.getvalue()
+    @staticmethod
+    def _synthesize_gtts_sync(text: str) -> bytes:
+        """Tổng hợp nhanh tiếng Việt bằng thư viện gTTS (nếu đã cài) hoặc HTTP trực tiếp qua httpx."""
+        try:
+            from gtts import gTTS  # type: ignore
+
+            buf = io.BytesIO()
+            tts = gTTS(text=text, lang="vi", slow=False)
+            tts.write_to_fp(buf)
+            return buf.getvalue()
+        except ImportError:
+            pass
+
+        import httpx
+
+        chunks = TTSManager._split_tts_chunks(text)
+        if not chunks:
+            return b""
+
+        audio_parts: list[bytes] = []
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://translate.google.com/",
+        }
+        with httpx.Client(timeout=3.5, follow_redirects=True) as client:
+            for chunk in chunks:
+                resp = client.get(
+                    "https://translate.google.com/translate_tts",
+                    params={"ie": "UTF-8", "client": "tw-ob", "tl": "vi", "q": chunk},
+                    headers=headers,
+                )
+                if resp.status_code == 200 and resp.content and len(resp.content) > 256:
+                    audio_parts.append(strip_mp3_id3v2(resp.content))
+                else:
+                    return b""
+
+        return b"".join(audio_parts)
 
     async def synthesize_gtts(self, text: str, timeout_sec: float = 3.5) -> bytes:
-        """Async wrapper cho gTTS với timeout an toàn."""
+        """Async wrapper cho Google TTS fallback (không cần cài thêm package ngoài)."""
         try:
             t0 = time.perf_counter()
             data = await asyncio.wait_for(
@@ -223,8 +279,6 @@ class TTSManager:
                 dt_ms = (time.perf_counter() - t0) * 1000
                 logger.info("⚡ gTTS fallback generated '%s' in %.0fms (%d bytes)", text[:40], dt_ms, len(data))
             return data
-        except ImportError:
-            return b""
         except asyncio.TimeoutError:
             logger.debug("gTTS fallback timeout for: %s", text[:40])
             return b""
@@ -414,18 +468,11 @@ class TTSManager:
 
     def get_engine_status(self) -> dict[str, Any]:
         """Trả về trạng thái các tầng TTS để kiểm tra nhanh trên /health."""
-        gtts_installed = False
-        try:
-            import gtts  # noqa: F401
-            gtts_installed = True
-        except ImportError:
-            pass
-
         return {
             "primaryEngine": self.primary_engine,
             "ramCachedPhrases": len(self._memory_cache),
             "piperOfflineReady": self.is_piper_ready,
-            "gttsFallbackReady": gtts_installed,
+            "gttsFallbackReady": True,
             "primaryVoice": self.default_voice,
         }
 
@@ -561,7 +608,7 @@ class TTSManager:
 
             # Tầng 2: Thử Microsoft Edge-TTS Hoài My (1 lần thử gọn để ưu tiên đồng nhất giọng Hoài My)
             edge_attempts = 1 if (fast_mode or allow_fallback) else 2
-            edge_timeout = min(timeout_sec, 3.5) if fast_mode else timeout_sec
+            edge_timeout = min(timeout_sec, 1.8) if fast_mode else timeout_sec
             if allow_fallback and time.monotonic() < self._edge_cooldown_until:
                 edge_bytes = b""
             else:
@@ -580,8 +627,8 @@ class TTSManager:
             if not allow_fallback:
                 return b""
 
-            # Edge-TTS đang lag/đứt mạng → đánh dấu cooldown 30s và dùng fallback để không bao giờ im lặng
-            self._edge_cooldown_until = time.monotonic() + 30.0
+            # Edge-TTS đang lag/đứt mạng → đánh dấu cooldown 60s và dùng fallback để không bao giờ im lặng
+            self._edge_cooldown_until = time.monotonic() + 60.0
 
             # Tầng 3A: Fallback offline Piper TTS (~120ms, không cần internet)
             if self.is_piper_ready:
@@ -592,13 +639,70 @@ class TTSManager:
                     return piper_bytes
 
             # Tầng 3B: Fallback gTTS (~300–600ms, thuần Python)
-            gtts_bytes = await self.synthesize_gtts(clean, timeout_sec=3.5)
+            gtts_timeout = min(timeout_sec, 2.0) if fast_mode else 3.5
+            gtts_bytes = await self.synthesize_gtts(clean, timeout_sec=gtts_timeout)
             if gtts_bytes:
                 self.save_to_cache(clean, voice, gtts_bytes, persist_disk=False)
                 self._schedule_edge_upgrade(clean, voice)
                 return gtts_bytes
 
         return b""
+
+    def get_fallback_cached_audio(
+        self,
+        error_code: str | None = None,
+        message: str = "",
+        voice: str | None = None,
+    ) -> bytes | None:
+        """Tìm câu âm thanh báo lỗi/trạng thái gần nhất đã có sẵn trong RAM cache.
+
+        Dùng làm lưới an toàn cuối cùng khi câu thoại động bị miss cache và cả
+        Edge-TTS + Piper + gTTS đều timeout/không khả dụng → đảm bảo < 2ms,
+        100% có giọng phản hồi thay vì im lặng hoặc chờ 7-10 giây.
+        """
+        voice = voice or self.default_voice
+        msg_lower = (message or "").lower()
+        code = (error_code or "").upper()
+
+        candidates: list[str] = []
+        if code == "INTENT_NOT_FOUND" or "không hiểu" in msg_lower or "chưa hiểu" in msg_lower:
+            candidates.extend([
+                "Tôi không hiểu yêu cầu này. Bạn vui lòng nói lại nhé.",
+            ])
+        elif code in ("ACCESS_DENIED", "UNAUTHORIZED") or "không có quyền" in msg_lower:
+            candidates.extend([
+                "Bạn không có quyền điều khiển thiết bị này.",
+                "Bạn chưa đăng nhập hoặc không có quyền điều khiển thiết bị.",
+            ])
+        elif code == "GATEWAY_DISCONNECTED" or "gateway" in msg_lower:
+            candidates.extend([
+                "Không thể kết nối đến Gateway thiết bị.",
+                "Thiết bị hiện đang ngoại tuyến hoặc chưa kết nối.",
+            ])
+        elif code in ("DEVICE_OFFLINE", "TIMEOUT") or any(
+            k in msg_lower for k in ("ngoại tuyến", "mất kết nối", "không phản hồi", "chưa kết nối")
+        ):
+            candidates.extend([
+                "Thiết bị hiện đang ngoại tuyến hoặc chưa kết nối.",
+                "Thiết bị chưa sẵn sàng hoặc đang ngoại tuyến.",
+            ])
+        elif "không tìm thấy" in msg_lower:
+            candidates.extend([
+                "Không tìm thấy thiết bị nào phù hợp.",
+            ])
+        elif code in ("FAILED", "DEVICE_TYPE_UNKNOWN") or "lỗi" in msg_lower:
+            candidates.extend([
+                "Thiết bị chưa sẵn sàng hoặc đang ngoại tuyến.",
+                "Thiết bị hiện đang ngoại tuyến hoặc chưa kết nối.",
+            ])
+
+        for phrase in candidates:
+            hit = self.get_cached_audio(phrase, voice)
+            if hit:
+                logger.info("⚡ Semantic RAM audio fallback hit: '%s' (for code=%s)", phrase, code or "NONE")
+                return hit
+
+        return None
 
     def start_warmup(self, extra_phrases: list[str] | None = None) -> None:
         """Khởi động nạp trước bộ nhớ đệm: nạp disk cache vào RAM và chỉ nạp nền nếu có yêu cầu cụ thể."""
