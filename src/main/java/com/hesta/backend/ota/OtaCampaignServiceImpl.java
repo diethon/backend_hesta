@@ -10,6 +10,7 @@ import com.hesta.backend.exception.AppException;
 import com.hesta.backend.exception.ErrorCode;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.EdgeNodeRepository;
+import com.hesta.backend.service.CloudinaryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +29,11 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.MalformedURLException;
+import java.net.NetworkInterface;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -49,9 +54,14 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
     private static final Set<String> INTERMEDIATE_STATUSES = Set.of(
             "DOWNLOADING", "VERIFYING", "FLASHING", "REBOOTING", "PROGRESS"
     );
+    private static final Set<String> REPORTABLE_IN_PROGRESS_STATUSES = Set.of(
+            "DOWNLOADING", "VERIFYING", "FLASHING", "REBOOTING"
+    );
     private static final Set<String> TERMINAL_NODE_STATUSES = Set.of(
             "SUCCEEDED", "FAILED", "CANCELLED"
     );
+
+    private record NodeDispatchTarget(UUID nodeId, String nodeCode) {}
 
     private final EdgeNodeRepository edgeNodeRepository;
     private final OtaFirmwarePackageRepository packageRepository;
@@ -71,6 +81,9 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
     @Autowired(required = false)
     private PlatformTransactionManager transactionManager;
 
+    @Autowired(required = false)
+    private CloudinaryService cloudinaryService;
+
     @Value("${mqtt.topic.prefix:hesta/nodes}")
     private String topicPrefix = "hesta/nodes";
 
@@ -79,6 +92,9 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
 
     @Value("${hesta.ota.public-base-url:}")
     private String publicBaseUrl = "";
+
+    @Value("${hesta.ota.cloudinary-enabled:true}")
+    private boolean cloudinaryEnabled = true;
 
     @Value("${hesta.ota.node-timeout-seconds:180}")
     private long nodeTimeoutSeconds = 180L;
@@ -147,13 +163,25 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
 
         String base = resolvePublicBaseUrl(requestBaseUrl);
         String downloadUrl = base + "/api/v1/ota/packages/" + packageId + "/download";
+        String storedKey = storageKey;
+        if (cloudinaryService != null && cloudinaryEnabled) {
+            try {
+                CloudinaryService.UploadResult cloudRes = cloudinaryService.uploadFirmwareBinary(targetPath, storageKey);
+                downloadUrl = cloudRes.url();
+                storedKey = "cloud:" + cloudRes.publicId() + "|" + storageKey;
+                log.info("Uploaded OTA Firmware Package [{}] to Cloudinary URL [{}]", packageId, downloadUrl);
+            } catch (Exception ex) {
+                log.warn("Cloudinary upload failed for OTA package [{}], falling back to local URL [{}]: {}",
+                        packageId, downloadUrl, ex.getMessage());
+            }
+        }
 
         OtaFirmwarePackageEntity entity = OtaFirmwarePackageEntity.builder()
                 .id(packageId)
                 .deviceType(cleanType)
                 .version(cleanVersion)
                 .fileUrl(downloadUrl)
-                .storageKey(storageKey)
+                .storageKey(storedKey)
                 .originalFileName(originalName)
                 .uploaded(true)
                 .checksumSha256(sha256Hex)
@@ -226,17 +254,57 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
     }
 
     @Override
+    @Transactional
+    public void deletePackage(UUID packageId) {
+        if (packageId == null) {
+            throw new AppException(ErrorCode.OTA_PACKAGE_NOT_FOUND);
+        }
+        OtaFirmwarePackageEntity entity = packageRepository.findById(packageId)
+                .orElseThrow(() -> new AppException(ErrorCode.OTA_PACKAGE_NOT_FOUND));
+        if (campaignRepository.existsByFirmwarePackageId(packageId)) {
+            throw new AppException(ErrorCode.OTA_CAMPAIGN_CONFLICT,
+                    "Không thể xóa gói firmware đã được sử dụng trong chiến dịch OTA");
+        }
+
+        String rawStorageKey = entity.getStorageKey();
+        String cloudPublicId = extractCloudPublicId(rawStorageKey);
+        String localKey = extractLocalStorageKey(rawStorageKey);
+
+        packageRepository.delete(entity);
+        log.info("Deleted OTA Firmware Package [{}] type={} version={}",
+                packageId, entity.getDeviceType(), entity.getVersion());
+
+        runAfterCommit(() -> {
+            if (cloudinaryService != null && cloudPublicId != null && !cloudPublicId.isBlank()) {
+                cloudinaryService.deleteFirmwareBinary(cloudPublicId);
+            }
+            if (localKey != null && !localKey.isBlank()) {
+                Path rootDir = resolveStorageRoot();
+                Path filePath = rootDir.resolve(localKey).normalize();
+                if (filePath.startsWith(rootDir)) {
+                    try {
+                        Files.deleteIfExists(filePath);
+                    } catch (IOException ex) {
+                        log.warn("Không thể xóa file firmware cục bộ [{}]: {}", filePath, ex.getMessage());
+                    }
+                }
+            }
+        });
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public FirmwareDownloadPayload loadFirmwareForDownload(UUID packageId) {
         OtaFirmwarePackageEntity entity = packageRepository.findById(packageId)
                 .orElseThrow(() -> new AppException(ErrorCode.OTA_PACKAGE_NOT_FOUND));
 
-        if (!entity.isUploaded() || entity.getStorageKey() == null || entity.getStorageKey().isBlank()) {
+        String localKey = extractLocalStorageKey(entity.getStorageKey());
+        if (!entity.isUploaded() || localKey == null || localKey.isBlank()) {
             throw new AppException(ErrorCode.OTA_PACKAGE_NOT_FOUND, "Gói firmware này được host bên ngoài, không lưu trên máy chủ");
         }
 
         Path rootDir = resolveStorageRoot();
-        Path filePath = rootDir.resolve(entity.getStorageKey()).normalize();
+        Path filePath = rootDir.resolve(localKey).normalize();
         if (!filePath.startsWith(rootDir) || !Files.exists(filePath) || !Files.isReadable(filePath)) {
             throw new AppException(ErrorCode.OTA_PACKAGE_NOT_FOUND, "Tệp nhị phân firmware không tồn tại trên ổ đĩa");
         }
@@ -266,9 +334,26 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
             throw new AppException(ErrorCode.OTA_CAMPAIGN_CONFLICT);
         }
 
-        List<EdgeNode> targetNodes = resolveTargetNodes(pkg.getDeviceType());
-        if (targetNodes.isEmpty()) {
-            throw new AppException(ErrorCode.OTA_NO_TARGET_NODES);
+        List<EdgeNode> targetNodes;
+        if (request.getTargetNodeIds() != null && !request.getTargetNodeIds().isEmpty()) {
+            Set<UUID> requestedIds = new HashSet<>(request.getTargetNodeIds());
+            targetNodes = edgeNodeRepository.findAll().stream()
+                    .filter(n -> n.getId() != null
+                            && requestedIds.contains(n.getId())
+                            && n.getStatus() == EdgeNodeStatus.ONLINE)
+                    .sorted(Comparator.comparing(EdgeNode::getNodeCode, Comparator.nullsLast(String::compareTo)))
+                    .toList();
+            if (targetNodes.isEmpty()) {
+                throw new AppException(
+                        ErrorCode.OTA_NO_TARGET_NODES,
+                        "Không có Edge Node trực tuyến nào trong danh sách bạn đã chọn"
+                );
+            }
+        } else {
+            targetNodes = resolveTargetNodes(pkg.getDeviceType());
+            if (targetNodes.isEmpty()) {
+                throw new AppException(ErrorCode.OTA_NO_TARGET_NODES);
+            }
         }
 
         String strategy = (request.getRolloutStrategy() != null && !request.getRolloutStrategy().isBlank())
@@ -292,6 +377,9 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
         int wave2Cumulative = "IMMEDIATE".equals(strategy)
                 ? totalNodes
                 : Math.max(wave1Count, (int) Math.ceil(totalNodes * 0.50));
+        if ("CANARY".equals(strategy) && totalNodes >= 2 && wave2Cumulative <= wave1Count) {
+            wave2Cumulative = Math.min(totalNodes, wave1Count + 1);
+        }
 
         String initialStatus = "CANARY".equals(strategy) ? "RUNNING_CANARY_10" : "RUNNING_FULL_100";
 
@@ -348,8 +436,10 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
 
         FirmwarePackageDto pkgDto = toPackageDto(pkg);
         OtaCampaignDto campaignDto = toCampaignDto(campaign, nodeExecutions);
-        runAfterCommit(() -> publishOtaNotifyBatch(campaignDto, pkgDto,
-                wave1Nodes.stream().map(EdgeNode::getNodeCode).toList()));
+        List<NodeDispatchTarget> wave1Targets = wave1Nodes.stream()
+                .map(n -> new NodeDispatchTarget(n.getId(), n.getNodeCode()))
+                .toList();
+        runAfterCommit(() -> publishOtaNotifyBatch(campaignDto, pkgDto, wave1Targets));
 
         log.info("Created and started OTA Campaign [{}] ({}) for {} target nodes (Wave 1: {}) with threshold {}%",
                 campaignId, campaign.getName(), totalNodes, wave1Nodes.size(), threshold);
@@ -381,7 +471,7 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
                 .map(c -> {
                     List<OtaCampaignNodeEntity> nodes = new ArrayList<>(nodesByCampaign.getOrDefault(c.getId(), List.of()));
                     nodes.sort(Comparator.comparingInt(OtaCampaignNodeEntity::getWave)
-                            .thenComparing(OtaCampaignNodeEntity::getNodeCode));
+                            .thenComparing(OtaCampaignNodeEntity::getNodeCode, Comparator.nullsLast(String::compareTo)));
                     return toCampaignDto(c, nodes);
                 })
                 .collect(Collectors.toList());
@@ -400,12 +490,12 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
         campaign.setUpdatedAt(now);
 
         List<OtaCampaignNodeEntity> nodes = campaignNodeRepository.findByCampaignIdOrderByWaveAscNodeCodeAsc(campaignId);
-        List<String> activeNodeCodes = cancelActiveNodes(nodes, finalReason, now);
+        List<NodeDispatchTarget> activeTargets = cancelActiveNodes(nodes, finalReason, now);
 
         campaignNodeRepository.saveAll(nodes);
         campaignRepository.save(campaign);
 
-        runAfterCommit(() -> publishOtaAbortBatch(campaign.getId(), finalReason, activeNodeCodes));
+        runAfterCommit(() -> publishOtaAbortBatch(campaign.getId(), finalReason, activeTargets));
         log.warn("Admin manually aborted OTA campaign [{}]. Reason: {}", campaignId, finalReason);
         return toCampaignDto(campaign, nodes);
     }
@@ -429,27 +519,30 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
             return;
         }
 
-        OtaCampaignEntity campaign = resolveLockedRunningCampaign(nodeCode, campaignIdStr, version);
+        String trimmedIdent = nodeCode.trim();
+        UUID parsedUuid = tryParseUuid(trimmedIdent);
+
+        OtaCampaignEntity campaign = resolveLockedRunningCampaign(trimmedIdent, parsedUuid, campaignIdStr, version);
         if (campaign == null) {
             log.debug("No running OTA campaign matched for node [{}] campaignId [{}] version [{}]",
-                    nodeCode, campaignIdStr, version);
+                    trimmedIdent, campaignIdStr, version);
             return;
         }
 
         List<OtaCampaignNodeEntity> allNodes = campaignNodeRepository.findByCampaignIdOrderByWaveAscNodeCodeAsc(campaign.getId());
         OtaCampaignNodeEntity targetNode = allNodes.stream()
-                .filter(n -> nodeCode.equalsIgnoreCase(n.getNodeCode()))
+                .filter(n -> matchesCampaignNode(n, trimmedIdent, parsedUuid, trimmedIdent))
                 .findFirst()
                 .orElse(null);
 
         if (targetNode == null) {
-            log.debug("Node [{}] is not enrolled in OTA campaign [{}]", nodeCode, campaign.getId());
+            log.debug("Node [{}] is not enrolled in OTA campaign [{}]", trimmedIdent, campaign.getId());
             return;
         }
 
         if (TERMINAL_NODE_STATUSES.contains(targetNode.getStatus())) {
             log.debug("Ignoring duplicate terminal OTA status [{}] for node [{}] in campaign [{}]",
-                    targetNode.getStatus(), nodeCode, campaign.getId());
+                    targetNode.getStatus(), targetNode.getNodeCode(), campaign.getId());
             return;
         }
 
@@ -503,7 +596,7 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
                     + "%) vượt ngưỡng an toàn (" + campaign.getFailureThresholdPercent() + "%)";
             campaign.setStatus("ABORTED_FAILURE_THRESHOLD");
             campaign.setAbortReason(reason);
-            List<String> activeToAbort = cancelActiveNodes(allNodes, reason, now);
+            List<NodeDispatchTarget> activeToAbort = cancelActiveNodes(allNodes, reason, now);
             campaignNodeRepository.saveAll(allNodes);
             campaignRepository.save(campaign);
             runAfterCommit(() -> publishOtaAbortBatch(campaign.getId(), reason, activeToAbort));
@@ -532,13 +625,13 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
             campaign.setCurrentWave(nextWave);
             campaign.setStatus(nextWave == 2 ? "RUNNING_CANARY_50" : "RUNNING_FULL_100");
 
-            List<String> nextWaveNodeCodes = new ArrayList<>();
+            List<NodeDispatchTarget> nextWaveTargets = new ArrayList<>();
             for (OtaCampaignNodeEntity n : allNodes) {
                 if (n.getWave() == nextWave && "PENDING".equals(n.getStatus())) {
                     n.setStatus("DISPATCHED");
                     n.setDispatchedAt(now);
                     n.setUpdatedAt(now);
-                    nextWaveNodeCodes.add(n.getNodeCode());
+                    nextWaveTargets.add(new NodeDispatchTarget(n.getNodeId(), n.getNodeCode()));
                 }
             }
 
@@ -546,18 +639,53 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
             campaignRepository.save(campaign);
 
             OtaFirmwarePackageEntity pkg = packageRepository.findById(campaign.getFirmwarePackageId()).orElse(null);
-            if (pkg != null && !nextWaveNodeCodes.isEmpty()) {
+            if (pkg != null && !nextWaveTargets.isEmpty()) {
                 FirmwarePackageDto pkgDto = toPackageDto(pkg);
                 OtaCampaignDto campaignDto = toCampaignDto(campaign, allNodes);
-                runAfterCommit(() -> publishOtaNotifyBatch(campaignDto, pkgDto, nextWaveNodeCodes));
+                runAfterCommit(() -> publishOtaNotifyBatch(campaignDto, pkgDto, nextWaveTargets));
             }
             log.info("OTA Campaign [{}] advanced to wave {} ({}) dispatching {} nodes",
-                    campaign.getId(), nextWave, campaign.getStatus(), nextWaveNodeCodes.size());
+                    campaign.getId(), nextWave, campaign.getStatus(), nextWaveTargets.size());
             return;
         }
 
         campaignNodeRepository.saveAll(allNodes);
         campaignRepository.save(campaign);
+    }
+
+    @Override
+    @Transactional
+    public void onNodeVersionReported(UUID nodeId, String nodeCode, String reportedVersion) {
+        if ((nodeId == null && (nodeCode == null || nodeCode.isBlank()))
+                || reportedVersion == null || reportedVersion.isBlank()) {
+            return;
+        }
+
+        String lookupCode = nodeCode != null ? nodeCode.trim() : "";
+        List<OtaCampaignEntity> running = campaignRepository.findRunningCampaignsForNodeForUpdate(lookupCode, nodeId);
+        if (running == null || running.isEmpty()) {
+            return;
+        }
+
+        String normalizedReported = normalizeVersion(reportedVersion);
+        for (OtaCampaignEntity campaign : running) {
+            if (!normalizedReported.equalsIgnoreCase(normalizeVersion(campaign.getVersion()))) {
+                continue;
+            }
+            List<OtaCampaignNodeEntity> allNodes = campaignNodeRepository.findByCampaignIdOrderByWaveAscNodeCodeAsc(campaign.getId());
+            OtaCampaignNodeEntity target = allNodes.stream()
+                    .filter(n -> matchesCampaignNode(n, lookupCode, nodeId, lookupCode))
+                    .findFirst()
+                    .orElse(null);
+            if (target != null && REPORTABLE_IN_PROGRESS_STATUSES.contains(target.getStatus())) {
+                String nodeIdent = (target.getNodeCode() != null && !target.getNodeCode().isBlank())
+                        ? target.getNodeCode()
+                        : (target.getNodeId() != null ? target.getNodeId().toString() : lookupCode);
+                log.info("Auto-completing OTA campaign [{}] node [{}] from post-reboot register/discovery firmwareVersion [{}]",
+                        campaign.getId(), nodeIdent, reportedVersion);
+                handleNodeOtaResult(nodeIdent, campaign.getId().toString(), reportedVersion, "SUCCEEDED", 100, null);
+            }
+        }
     }
 
     /**
@@ -573,8 +701,14 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
             return;
         }
         for (OtaCampaignNodeEntity node : stale) {
+            String nodeIdent = (node.getNodeCode() != null && !node.getNodeCode().isBlank())
+                    ? node.getNodeCode()
+                    : (node.getNodeId() != null ? node.getNodeId().toString() : null);
+            if (nodeIdent == null || nodeIdent.isBlank()) {
+                continue;
+            }
             String msg = "Node không phản hồi kết quả OTA sau " + timeoutSec + "s (mất kết nối hoặc treo cập nhật)";
-            Runnable task = () -> handleNodeOtaResult(node.getNodeCode(), node.getCampaignId().toString(), null, "FAILED", null, msg);
+            Runnable task = () -> handleNodeOtaResult(nodeIdent, node.getCampaignId().toString(), null, "FAILED", null, msg);
             if (transactionManager != null) {
                 new TransactionTemplate(transactionManager).executeWithoutResult(status -> task.run());
             } else {
@@ -602,6 +736,23 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
     }
 
     private boolean matchesDeviceType(EdgeNode node, String targetType) {
+        if (deviceRepository != null && node.getId() != null && node.getNodeCode() != null) {
+            try {
+                List<Device> activeDevices = deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode())
+                        .stream()
+                        .filter(dev -> !dev.isDeleted())
+                        .toList();
+                if (!activeDevices.isEmpty()) {
+                    if (node.getDeviceType() != null && targetType.equalsIgnoreCase(node.getDeviceType().trim())) {
+                        return true;
+                    }
+                    return activeDevices.stream()
+                            .anyMatch(dev -> dev.getDeviceType() != null && targetType.equalsIgnoreCase(dev.getDeviceType().trim()));
+                }
+            } catch (Exception e) {
+                log.debug("Could not inspect child devices for node {}: {}", node.getNodeCode(), e.getMessage());
+            }
+        }
         if (node.getDeviceType() != null && targetType.equalsIgnoreCase(node.getDeviceType().trim())) {
             return true;
         }
@@ -614,22 +765,11 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
                 }
             }
         }
-        if (deviceRepository != null && node.getId() != null && node.getNodeCode() != null) {
-            try {
-                List<Device> childDevices = deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
-                for (Device dev : childDevices) {
-                    if (dev.getDeviceType() != null && targetType.equalsIgnoreCase(dev.getDeviceType().trim())) {
-                        return true;
-                    }
-                }
-            } catch (Exception e) {
-                log.debug("Could not inspect child devices for node {}: {}", node.getNodeCode(), e.getMessage());
-            }
-        }
         return false;
     }
 
-    private OtaCampaignEntity resolveLockedRunningCampaign(String nodeCode, String campaignIdStr, String version) {
+    private OtaCampaignEntity resolveLockedRunningCampaign(
+            String nodeIdent, UUID parsedUuid, String campaignIdStr, String version) {
         if (campaignIdStr != null && !campaignIdStr.isBlank()) {
             try {
                 UUID cid = UUID.fromString(campaignIdStr.trim());
@@ -641,13 +781,70 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
                 log.debug("Invalid campaignId string received from MQTT OTA status: {}", campaignIdStr);
             }
         }
-        if (version != null && !version.isBlank()) {
-            List<OtaCampaignEntity> list = campaignRepository.findActiveCampaignsForNodeAndVersionForUpdate(nodeCode, version.trim());
-            if (!list.isEmpty()) {
-                return list.get(0);
+
+        UUID lookupId = parsedUuid;
+        String lookupCode = nodeIdent != null ? nodeIdent : "";
+        if (lookupId == null && !lookupCode.isBlank()) {
+            EdgeNode found = edgeNodeRepository.findByNodeCode(lookupCode).orElse(null);
+            if (found != null) {
+                lookupId = found.getId();
+                if (found.getNodeCode() != null) {
+                    lookupCode = found.getNodeCode();
+                }
+            }
+        } else if (lookupId != null) {
+            EdgeNode found = edgeNodeRepository.findById(lookupId).orElse(null);
+            if (found != null && found.getNodeCode() != null) {
+                lookupCode = found.getNodeCode();
             }
         }
-        return null;
+
+        List<OtaCampaignEntity> running = campaignRepository.findRunningCampaignsForNodeForUpdate(lookupCode, lookupId);
+        if (running == null || running.isEmpty()) {
+            return null;
+        }
+        if (version != null && !version.isBlank()) {
+            String normVer = normalizeVersion(version);
+            for (OtaCampaignEntity c : running) {
+                if (normVer.equalsIgnoreCase(normalizeVersion(c.getVersion()))) {
+                    return c;
+                }
+            }
+        }
+        return running.get(0);
+    }
+
+    private boolean matchesCampaignNode(OtaCampaignNodeEntity entry, String rawIdent, UUID resolvedId, String resolvedCode) {
+        if (entry == null) return false;
+        if (rawIdent != null && entry.getNodeCode() != null && rawIdent.equalsIgnoreCase(entry.getNodeCode())) {
+            return true;
+        }
+        if (resolvedCode != null && !resolvedCode.isBlank()
+                && entry.getNodeCode() != null && resolvedCode.equalsIgnoreCase(entry.getNodeCode())) {
+            return true;
+        }
+        if (resolvedId != null && entry.getNodeId() != null && resolvedId.equals(entry.getNodeId())) {
+            return true;
+        }
+        return rawIdent != null && entry.getNodeId() != null && rawIdent.equalsIgnoreCase(entry.getNodeId().toString());
+    }
+
+    private UUID tryParseUuid(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private String normalizeVersion(String v) {
+        if (v == null) return "";
+        String trimmed = v.trim();
+        if (trimmed.length() > 1 && (trimmed.charAt(0) == 'v' || trimmed.charAt(0) == 'V')) {
+            return trimmed.substring(1);
+        }
+        return trimmed;
     }
 
     private void updateEdgeNodeFirmwareVersion(UUID nodeId, String nodeCode, String version) {
@@ -675,13 +872,13 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
         campaign.setAttemptedNodes(success + failed);
     }
 
-    private List<String> cancelActiveNodes(List<OtaCampaignNodeEntity> nodes, String reason, OffsetDateTime now) {
-        List<String> activeDispatchedCodes = new ArrayList<>();
+    private List<NodeDispatchTarget> cancelActiveNodes(List<OtaCampaignNodeEntity> nodes, String reason, OffsetDateTime now) {
+        List<NodeDispatchTarget> activeDispatchedTargets = new ArrayList<>();
         for (OtaCampaignNodeEntity n : nodes) {
             if (!TERMINAL_NODE_STATUSES.contains(n.getStatus())) {
                 boolean wasDispatched = !"PENDING".equals(n.getStatus());
                 if (wasDispatched) {
-                    activeDispatchedCodes.add(n.getNodeCode());
+                    activeDispatchedTargets.add(new NodeDispatchTarget(n.getNodeId(), n.getNodeCode()));
                 }
                 n.setStatus("CANCELLED");
                 n.setErrorMessage(reason);
@@ -689,17 +886,31 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
                 n.setUpdatedAt(now);
             }
         }
-        return activeDispatchedCodes;
+        return activeDispatchedTargets;
     }
 
-    private void publishOtaNotifyBatch(OtaCampaignDto campaign, FirmwarePackageDto pkg, List<String> nodeCodes) {
+    private List<String> resolveDispatchIdentifiers(NodeDispatchTarget target) {
+        List<String> idents = new ArrayList<>(2);
+        if (target.nodeCode() != null && !target.nodeCode().isBlank()) {
+            idents.add(target.nodeCode().trim());
+        }
+        if (target.nodeId() != null) {
+            String uuidStr = target.nodeId().toString();
+            boolean alreadyIncluded = idents.stream().anyMatch(existing -> existing.equalsIgnoreCase(uuidStr));
+            if (!alreadyIncluded) {
+                idents.add(uuidStr);
+            }
+        }
+        return idents;
+    }
+
+    private void publishOtaNotifyBatch(OtaCampaignDto campaign, FirmwarePackageDto pkg, List<NodeDispatchTarget> targets) {
         if (mqttGateway == null) {
             log.warn("MqttGateway not available. Skipping MQTT OTA dispatch for campaign [{}]", campaign.getId());
             return;
         }
         String prefix = normalizedTopicPrefix();
-        for (String nodeCode : nodeCodes) {
-            String topic = prefix + "/" + nodeCode + "/ota/notify";
+        for (NodeDispatchTarget target : targets) {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("campaignId", campaign.getId().toString());
             payload.put("packageId", pkg.getId().toString());
@@ -710,24 +921,29 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
             payload.put("fileSizeBytes", pkg.getFileSizeBytes());
             payload.put("timestamp", OffsetDateTime.now().toString());
 
-            sendMqttAndRecord(topic, payload);
-            log.info("Dispatched OTA notify to topic [{}] for node [{}]", topic, nodeCode);
+            for (String ident : resolveDispatchIdentifiers(target)) {
+                String topic = prefix + "/" + ident + "/ota/notify";
+                sendMqttAndRecord(topic, payload);
+                log.info("Dispatched OTA notify to topic [{}] for node [{}]", topic, target.nodeCode());
+            }
         }
     }
 
-    private void publishOtaAbortBatch(UUID campaignId, String reason, List<String> nodeCodes) {
-        if (mqttGateway == null || nodeCodes.isEmpty()) {
+    private void publishOtaAbortBatch(UUID campaignId, String reason, List<NodeDispatchTarget> targets) {
+        if (mqttGateway == null || targets.isEmpty()) {
             return;
         }
         String prefix = normalizedTopicPrefix();
-        for (String nodeCode : nodeCodes) {
-            String topic = prefix + "/" + nodeCode + "/ota/abort";
+        for (NodeDispatchTarget target : targets) {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("campaignId", campaignId.toString());
             payload.put("reason", reason);
             payload.put("timestamp", OffsetDateTime.now().toString());
-            sendMqttAndRecord(topic, payload);
-            log.info("Dispatched OTA abort to topic [{}] for node [{}]", topic, nodeCode);
+            for (String ident : resolveDispatchIdentifiers(target)) {
+                String topic = prefix + "/" + ident + "/ota/abort";
+                sendMqttAndRecord(topic, payload);
+                log.info("Dispatched OTA abort to topic [{}] for node [{}]", topic, target.nodeCode());
+            }
         }
     }
 
@@ -766,14 +982,76 @@ public class OtaCampaignServiceImpl implements OtaCampaignService {
         return Paths.get(dir).toAbsolutePath().normalize();
     }
 
+    private String extractCloudPublicId(String rawStorageKey) {
+        if (rawStorageKey == null || !rawStorageKey.startsWith("cloud:")) {
+            return null;
+        }
+        int pipe = rawStorageKey.lastIndexOf('|');
+        String candidate = pipe >= 0
+                ? rawStorageKey.substring("cloud:".length(), pipe)
+                : rawStorageKey.substring("cloud:".length());
+        return candidate.isBlank() ? null : candidate.trim();
+    }
+
+    private String extractLocalStorageKey(String rawStorageKey) {
+        if (rawStorageKey == null || rawStorageKey.isBlank()) {
+            return null;
+        }
+        if (rawStorageKey.startsWith("cloud:")) {
+            int pipe = rawStorageKey.lastIndexOf('|');
+            if (pipe >= 0 && pipe + 1 < rawStorageKey.length()) {
+                return rawStorageKey.substring(pipe + 1);
+            }
+            return null;
+        }
+        return rawStorageKey;
+    }
+
     private String resolvePublicBaseUrl(String requestBaseUrl) {
         String base = (publicBaseUrl != null && !publicBaseUrl.isBlank())
                 ? publicBaseUrl.trim()
                 : (requestBaseUrl != null ? requestBaseUrl.trim() : "");
+        if (publicBaseUrl == null || publicBaseUrl.isBlank()) {
+            base = replaceLoopbackWithLanIp(base);
+        }
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
         return base;
+    }
+
+    private String replaceLoopbackWithLanIp(String url) {
+        if (url == null || url.isBlank()) return url;
+        try {
+            URI uri = URI.create(url);
+            String host = uri.getHost();
+            if ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)) {
+                String lanIp = detectLanIpv4Address();
+                if (lanIp != null) {
+                    int port = uri.getPort();
+                    return uri.getScheme() + "://" + lanIp + (port > 0 ? ":" + port : "");
+                }
+            }
+        } catch (Exception ignored) {}
+        return url;
+    }
+
+    private String detectLanIpv4Address() {
+        try {
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            while (ifaces != null && ifaces.hasMoreElements()) {
+                NetworkInterface iface = ifaces.nextElement();
+                if (!iface.isUp() || iface.isLoopback() || iface.isVirtual()) continue;
+                Enumeration<InetAddress> addrs = iface.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    InetAddress addr = addrs.nextElement();
+                    if (addr instanceof Inet4Address ipv4 && ipv4.isSiteLocalAddress() && !ipv4.isLoopbackAddress()) {
+                        return ipv4.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private String requireNonBlank(String value, String message) {

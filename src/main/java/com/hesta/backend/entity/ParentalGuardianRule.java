@@ -7,6 +7,8 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -26,9 +28,13 @@ public class ParentalGuardianRule {
     @JoinColumn(name = "home_id", nullable = false)
     private Home home;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "target_device_id", nullable = false)
-    private Device targetDevice;
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "parental_guardian_rule_devices",
+            joinColumns = @JoinColumn(name = "rule_id"),
+            inverseJoinColumns = @JoinColumn(name = "device_id"))
+    @OrderBy("name ASC")
+    @Builder.Default
+    private List<Device> targetDevices = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "camera_device_id")

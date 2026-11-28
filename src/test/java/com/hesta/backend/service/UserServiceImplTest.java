@@ -20,6 +20,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.io.IOException;
+import java.time.LocalTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -61,6 +62,35 @@ class UserServiceImplTest {
         assertThat(response.systemEnabled()).isFalse();
         assertThat(stored.getNotificationPreference().isSecurityEnabled()).isFalse();
         verify(userPreferenceRepository).save(stored);
+    }
+
+    @Test
+    void updateNotificationPreferences_savesQuietHoursAndKeepsThemWhenOmitted() {
+        UUID userId = UUID.randomUUID();
+        UserPreference stored = UserPreference.builder().userId(userId).build();
+        when(userPreferenceRepository.findById(userId)).thenReturn(Optional.of(stored));
+
+        userService.updateNotificationPreferences(userId, new UpdateNotificationPreferenceRequest(
+                true, true, true, true, LocalTime.of(23, 0), LocalTime.of(6, 0)));
+        var response = userService.updateNotificationPreferences(
+                userId, new UpdateNotificationPreferenceRequest(true, false, true));
+
+        assertThat(response.automationEnabled()).isFalse();
+        assertThat(response.quietHoursEnabled()).isTrue();
+        assertThat(response.quietHoursStart()).isEqualTo(LocalTime.of(23, 0));
+        assertThat(response.quietHoursEnd()).isEqualTo(LocalTime.of(6, 0));
+    }
+
+    @Test
+    void updateNotificationPreferences_rejectsEmptyQuietWindow() {
+        UUID userId = UUID.randomUUID();
+        when(userPreferenceRepository.findById(userId))
+                .thenReturn(Optional.of(UserPreference.builder().userId(userId).build()));
+
+        assertThatThrownBy(() -> userService.updateNotificationPreferences(userId,
+                new UpdateNotificationPreferenceRequest(true, true, true, true, LocalTime.NOON, LocalTime.NOON)))
+                .isInstanceOf(AppException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
     }
 
     @Test

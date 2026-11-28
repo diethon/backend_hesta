@@ -63,11 +63,24 @@ public class UserServiceImpl implements UserService {
                         .user(userRepository.findById(userId)
                                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND)))
                         .build());
-        NotificationPreference preference = NotificationPreference.builder()
+        NotificationPreference current = userPreference.getNotificationPreference() == null
+                ? NotificationPreference.defaults()
+                : userPreference.getNotificationPreference();
+        NotificationPreference preference = current.toBuilder()
                 .securityEnabled(request.securityEnabled())
                 .automationEnabled(request.automationEnabled())
                 .systemEnabled(request.systemEnabled())
+                .quietHoursEnabled(request.quietHoursEnabled() == null
+                        ? current.isQuietHoursEnabled() : request.quietHoursEnabled())
+                .quietHoursStart(request.quietHoursStart() == null
+                        ? current.getQuietHoursStart() : request.quietHoursStart())
+                .quietHoursEnd(request.quietHoursEnd() == null
+                        ? current.getQuietHoursEnd() : request.quietHoursEnd())
                 .build();
+        if (preference.isQuietHoursEnabled()
+                && preference.getQuietHoursStart().equals(preference.getQuietHoursEnd())) {
+            throw new AppException(ErrorCode.INVALID_REQUEST);
+        }
         userPreference.setNotificationPreference(preference);
         userPreferenceRepository.save(userPreference);
         return NotificationPreferenceResponse.from(preference);

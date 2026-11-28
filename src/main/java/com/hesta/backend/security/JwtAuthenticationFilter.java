@@ -47,15 +47,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 UUID userId = tokenProvider.getUserIdFromToken(jwt);
 
                 UserDetails userDetails = userDetailsService.loadUserById(userId);
-                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities()
-                );
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                if (userDetails != null && userDetails.isEnabled() && userDetails.isAccountNonLocked()) {
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                            userDetails, null, userDetails.getAuthorities()
+                    );
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-                
-                // Save context for Async Dispatch
-                request.setAttribute("CACHED_SECURITY_CONTEXT", SecurityContextHolder.getContext());
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                    // Save context for Async Dispatch
+                    request.setAttribute("CACHED_SECURITY_CONTEXT", SecurityContextHolder.getContext());
+                } else {
+                    log.warn("Rejected JWT authentication for inactive or locked user: {}", userId);
+                }
             }
         } catch (Exception ex) {
             log.error("Error setting authentication in Security Context", ex);

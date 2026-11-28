@@ -30,4 +30,8 @@ public interface MqttDiagnosticsService {
     void recordPacket(String topic, String direction, int qos, String payload);
 
     List<MqttPacketDto> getSnifferPackets();
+
+    default List<MqttPacketDto> getSnifferPackets(String nodeCode, UUID homeId) {
+        return getSnifferPackets();
+    }
 }

@@ -9,6 +9,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -150,6 +154,66 @@ public class CloudinaryService {
         } catch (IOException | RuntimeException e) {
             log.error("Lỗi khi upload avatar lên Cloudinary", e);
             throw new IOException("Không thể upload avatar, vui lòng thử lại sau.", e);
+        }
+    }
+
+    public UploadResult uploadFirmwareBinary(Path filePath, String publicId) throws IOException {
+        if (filePath == null || publicId == null || publicId.isBlank()) {
+            throw new IOException("Thiếu tệp firmware hoặc publicId.");
+        }
+        String baseId = publicId.trim();
+        if (baseId.toLowerCase(Locale.ROOT).endsWith(".bin")) {
+            baseId = baseId.substring(0, baseId.length() - 4);
+        }
+        String safePublicId = baseId.toLowerCase(Locale.ROOT).endsWith(".ota") ? baseId : baseId + ".ota";
+
+        Path tempOta = null;
+        try {
+            // Cloudinary blocks ".bin" raw assets by default; stream a ".ota" temp copy instead.
+            Path parentDir = filePath.getParent();
+            tempOta = (parentDir != null)
+                    ? Files.createTempFile(parentDir, "cld-ota-", ".ota")
+                    : Files.createTempFile("cld-ota-", ".ota");
+            Files.copy(filePath, tempOta, StandardCopyOption.REPLACE_EXISTING);
+
+            Map<?, ?> uploadResult = cloudinary.uploader().upload(tempOta.toFile(),
+                    ObjectUtils.asMap(
+                            "folder", "hesta/ota-firmware",
+                            "public_id", safePublicId,
+                            "resource_type", "raw",
+                            "type", "upload",
+                            "overwrite", true,
+                            "use_filename", false
+                    ));
+            Object returnedPublicId = uploadResult.get("public_id");
+            String finalPublicId = returnedPublicId != null && !returnedPublicId.toString().isBlank()
+                    ? returnedPublicId.toString()
+                    : "hesta/ota-firmware/" + safePublicId;
+            return new UploadResult(finalPublicId, secureUrl(uploadResult));
+        } catch (IOException | RuntimeException e) {
+            log.warn("Không thể upload firmware lên Cloudinary ({}): {}", safePublicId, e.getMessage());
+            throw new IOException("Không thể upload firmware lên Cloudinary.", e);
+        } finally {
+            if (tempOta != null) {
+                try {
+                    Files.deleteIfExists(tempOta);
+                } catch (IOException ignored) {}
+            }
+        }
+    }
+
+    public void deleteFirmwareBinary(String publicId) {
+        if (publicId == null || publicId.isBlank()) {
+            return;
+        }
+        try {
+            cloudinary.uploader().destroy(publicId.trim(), ObjectUtils.asMap(
+                    "resource_type", "raw",
+                    "type", "upload",
+                    "invalidate", true
+            ));
+        } catch (Exception e) {
+            log.warn("Không thể xóa firmware Cloudinary {}: {}", publicId, e.getMessage());
         }
     }
 

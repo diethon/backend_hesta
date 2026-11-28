@@ -14,6 +14,8 @@ public interface OtaCampaignRepository extends JpaRepository<OtaCampaignEntity, 
 
     List<OtaCampaignEntity> findAllByOrderByCreatedAtDesc();
 
+    boolean existsByFirmwarePackageId(UUID firmwarePackageId);
+
     @Query("""
             SELECT COUNT(c) > 0 FROM OtaCampaignEntity c
             WHERE LOWER(c.deviceType) = LOWER(:deviceType)
@@ -32,12 +34,32 @@ public interface OtaCampaignRepository extends JpaRepository<OtaCampaignEntity, 
               AND LOWER(c.version) = LOWER(:version)
               AND EXISTS (
                   SELECT 1 FROM OtaCampaignNodeEntity cn
-                  WHERE cn.campaignId = c.id AND cn.nodeCode = :nodeCode
+                  WHERE cn.campaignId = c.id
+                    AND (LOWER(cn.nodeCode) = LOWER(:nodeCode)
+                         OR (:nodeId IS NOT NULL AND cn.nodeId = :nodeId))
               )
             ORDER BY c.createdAt DESC
             """)
     List<OtaCampaignEntity> findActiveCampaignsForNodeAndVersionForUpdate(
             @Param("nodeCode") String nodeCode,
+            @Param("nodeId") UUID nodeId,
             @Param("version") String version
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT c FROM OtaCampaignEntity c
+            WHERE c.status LIKE 'RUNNING%'
+              AND EXISTS (
+                  SELECT 1 FROM OtaCampaignNodeEntity cn
+                  WHERE cn.campaignId = c.id
+                    AND (LOWER(cn.nodeCode) = LOWER(:nodeCode)
+                         OR (:nodeId IS NOT NULL AND cn.nodeId = :nodeId))
+              )
+            ORDER BY c.createdAt DESC
+            """)
+    List<OtaCampaignEntity> findRunningCampaignsForNodeForUpdate(
+            @Param("nodeCode") String nodeCode,
+            @Param("nodeId") UUID nodeId
     );
 }

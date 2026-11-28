@@ -69,7 +69,7 @@ class NotificationRealtimeTransactionTest {
     private NotificationCreatedEvent event() {
         UUID homeId = UUID.randomUUID();
         return new NotificationCreatedEvent(new NotificationRealtimePayload(
-                UUID.randomUUID(), UUID.randomUUID(), homeId, false, OffsetDateTime.now()
+                UUID.randomUUID(), UUID.randomUUID(), homeId, false, OffsetDateTime.now(), false
         ));
     }
 

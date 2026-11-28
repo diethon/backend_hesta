@@ -2,6 +2,8 @@ package com.hesta.backend.service.impl;
 
 
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.hesta.backend.cache.HestaCacheService;
 import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 
 import com.hesta.backend.dto.request.DeviceUpdateRequest;
@@ -102,7 +104,20 @@ public class DeviceServiceImpl implements DeviceService {
     private com.hesta.backend.service.EnergyAnalyticsService energyAnalyticsService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.hesta.backend.repository.EdgeNodeRepository edgeNodeRepository;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private HestaCacheService cacheService;
 
+    void setCacheService(HestaCacheService cacheService) {
+        this.cacheService = cacheService;
+    }
+
+    private static final String HOME_DEVICES_NAMESPACE = "devices:home";
+    private static final String HOME_ACTIVITY_NAMESPACE = "home:activity";
+    private static final String ROOMS_HOME_NAMESPACE = "rooms:home";
+    private static final Duration HOME_DEVICES_CACHE_TTL = Duration.ofSeconds(20);
+    private static final Duration HOME_ACTIVITY_CACHE_TTL = Duration.ofSeconds(15);
+
+    private static final String HISTORY_CACHE_NAMESPACE = "device:history";
     private static final long HISTORY_CACHE_TTL_MILLIS = 15_000L;
     private final Map<UUID, CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>> historyCache = new ConcurrentHashMap<>();
 
@@ -164,9 +179,28 @@ public class DeviceServiceImpl implements DeviceService {
 
         checkHomeAccess(userId, homeId);
         MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        String scopeKey = (ctx == null || ctx.isOwner() || ctx.scope() != AccessScope.CUSTOM)
+                ? "ALL"
+                : ("USER:" + (userId != null ? userId.toString() : "anon"));
+        String cacheKey = homeId + ":" + scopeKey;
+
+        if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            java.util.Optional<List<DeviceResponse>> cached = cacheService.get(
+                    HOME_DEVICES_NAMESPACE,
+                    cacheKey,
+                    new TypeReference<List<DeviceResponse>>() {}
+            );
+            if (cached.isPresent()) {
+                return cached.get();
+            }
+        }
+
         List<Device> deviceList = deviceRepository.findByHomeIdWithRoomAndNode(homeId);
 
         if (deviceList.isEmpty()) {
+            if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(HOME_DEVICES_NAMESPACE, cacheKey, Collections.emptyList(), HOME_DEVICES_CACHE_TTL);
+            }
             return Collections.emptyList();
         }
 
@@ -182,6 +216,9 @@ public class DeviceServiceImpl implements DeviceService {
                 .collect(Collectors.toList());
 
         if (visibleDevices.isEmpty()) {
+            if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(HOME_DEVICES_NAMESPACE, cacheKey, Collections.emptyList(), HOME_DEVICES_CACHE_TTL);
+            }
             return Collections.emptyList();
 
         }
@@ -212,6 +249,9 @@ public class DeviceServiceImpl implements DeviceService {
         }).collect(Collectors.toList());
 
         hydrateLatestSensorReadings(responses);
+        if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            cacheService.put(HOME_DEVICES_NAMESPACE, cacheKey, responses, HOME_DEVICES_CACHE_TTL);
+        }
         return responses;
 
     }
@@ -614,7 +654,7 @@ public class DeviceServiceImpl implements DeviceService {
                 }
             }
 
-            historyCache.remove(device.getId());
+            evictDeviceHistoryCache(device.getId());
             if (device.getHome() != null && device.getHome().getId() != null) {
 
                 applicationEventPublisher.publishEvent(new DeviceStateChangedEvent(
@@ -716,9 +756,11 @@ public class DeviceServiceImpl implements DeviceService {
 
 
         Device saved = deviceRepository.save(device);
-        historyCache.remove(deviceId);
-        if (energyAnalyticsService != null && getHomeId(device) != null) {
-            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        UUID homeId = getHomeId(device);
+        evictDeviceHistoryCache(deviceId);
+        evictHomeDevicesAndActivityCache(homeId, true);
+        if (energyAnalyticsService != null && homeId != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(homeId, deviceId);
         }
         return DeviceResponse.fromEntity(saved);
 
@@ -738,15 +780,17 @@ public class DeviceServiceImpl implements DeviceService {
 
 
 
-        checkHomeOwner(userId, getHomeId(device));
+        UUID homeId = getHomeId(device);
+        checkHomeOwner(userId, homeId);
 
         deviceReferenceCleaner.detach(deviceId);
         device.setDeleted(true);
 
         deviceRepository.save(device);
-        historyCache.remove(deviceId);
-        if (energyAnalyticsService != null && getHomeId(device) != null) {
-            energyAnalyticsService.evictHomeAndDeviceCache(getHomeId(device), deviceId);
+        evictDeviceHistoryCache(deviceId);
+        evictHomeDevicesAndActivityCache(homeId, true);
+        if (energyAnalyticsService != null && homeId != null) {
+            energyAnalyticsService.evictHomeAndDeviceCache(homeId, deviceId);
         }
     }
 
@@ -765,9 +809,22 @@ public class DeviceServiceImpl implements DeviceService {
         checkHomeAccess(userId, getHomeId(device));
         homeAuthorizationService.requireDeviceAccess(userId, deviceId, AccessLevel.VIEW);
 
-        CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>> cached = historyCache.get(deviceId);
-        if (cached != null && !cached.isExpired()) {
-            return cached.value();
+        if (cacheService != null) {
+            if (cacheService.isReadThroughCacheEnabled()) {
+                java.util.Optional<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>> cachedOpt = cacheService.get(
+                        HISTORY_CACHE_NAMESPACE,
+                        deviceId.toString(),
+                        new TypeReference<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>>() {}
+                );
+                if (cachedOpt.isPresent()) {
+                    return cachedOpt.get();
+                }
+            }
+        } else {
+            CacheEntry<List<com.hesta.backend.dto.response.DeviceStateHistoryResponse>> cached = historyCache.get(deviceId);
+            if (cached != null && !cached.isExpired()) {
+                return cached.value();
+            }
         }
 
         List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> result = deviceStateHistoryRepository
@@ -778,7 +835,86 @@ public class DeviceServiceImpl implements DeviceService {
 
                 .collect(Collectors.toList());
 
-        historyCache.put(deviceId, new CacheEntry<>(result, System.currentTimeMillis() + HISTORY_CACHE_TTL_MILLIS));
+        if (cacheService != null) {
+            if (cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(HISTORY_CACHE_NAMESPACE, deviceId.toString(), result, Duration.ofMillis(HISTORY_CACHE_TTL_MILLIS));
+            }
+        } else {
+            historyCache.put(deviceId, new CacheEntry<>(result, System.currentTimeMillis() + HISTORY_CACHE_TTL_MILLIS));
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.hesta.backend.dto.response.HomeActivityItemResponse> getHomeRecentActivity(
+            UUID userId, UUID homeId, int limit) {
+        checkHomeAccess(userId, homeId);
+        MemberAccessContext ctx = homeAuthorizationService.loadAccessContext(homeId, userId);
+        int clamped = Math.max(1, Math.min(limit, 50));
+        String scopeKey = (ctx == null || ctx.isOwner() || ctx.scope() != AccessScope.CUSTOM)
+                ? "ALL"
+                : ("USER:" + (userId != null ? userId.toString() : "anon"));
+        String cacheKey = homeId + ":" + scopeKey + ":" + clamped;
+
+        if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            java.util.Optional<List<com.hesta.backend.dto.response.HomeActivityItemResponse>> cached =
+                    cacheService.get(
+                            HOME_ACTIVITY_NAMESPACE,
+                            cacheKey,
+                            new TypeReference<List<com.hesta.backend.dto.response.HomeActivityItemResponse>>() {}
+                    );
+            if (cached.isPresent()) {
+                return cached.get();
+            }
+        }
+
+        List<Device> visibleDevices = deviceRepository.findByHomeIdWithRoomAndNode(homeId).stream()
+                .filter(d -> !d.isDeleted())
+                .filter(d -> {
+                    if (ctx != null && !ctx.isOwner() && ctx.scope() == AccessScope.CUSTOM) {
+                        AccessLevel level = homeAuthorizationService.effectiveLevel(ctx, d);
+                        return level != null && level.canView();
+                    }
+                    return true;
+                })
+                .toList();
+
+        if (visibleDevices.isEmpty()) {
+            if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(HOME_ACTIVITY_NAMESPACE, cacheKey, Collections.emptyList(), HOME_ACTIVITY_CACHE_TTL);
+            }
+            return Collections.emptyList();
+        }
+
+        Map<UUID, Device> deviceById = visibleDevices.stream()
+                .collect(Collectors.toMap(Device::getId, d -> d, (a, b) -> a));
+
+        List<com.hesta.backend.dto.response.HomeActivityItemResponse> result = deviceStateHistoryRepository
+                .findRecentByDeviceIds(
+                        new ArrayList<>(deviceById.keySet()),
+                        org.springframework.data.domain.PageRequest.of(0, clamped))
+                .stream()
+                .limit(clamped)
+                .map(h -> {
+                    UUID devId = h.getDevice() != null ? h.getDevice().getId() : null;
+                    Device dev = devId != null ? deviceById.get(devId) : null;
+                    return com.hesta.backend.dto.response.HomeActivityItemResponse.builder()
+                            .id(h.getId())
+                            .deviceId(devId)
+                            .deviceName(dev != null ? dev.getName() : "Thiết bị")
+                            .deviceType(dev != null ? dev.getDeviceType() : null)
+                            .previousState(h.getPreviousState())
+                            .newState(h.getNewState())
+                            .source(h.getSource() != null ? h.getSource().name() : null)
+                            .changedAt(h.getChangedAt())
+                            .build();
+                })
+                .toList();
+
+        if (cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            cacheService.put(HOME_ACTIVITY_NAMESPACE, cacheKey, result, HOME_ACTIVITY_CACHE_TTL);
+        }
         return result;
     }
 
@@ -786,15 +922,60 @@ public class DeviceServiceImpl implements DeviceService {
     public void evictDeviceHistoryCache(UUID deviceId) {
         if (deviceId != null) {
             historyCache.remove(deviceId);
+            if (cacheService != null) {
+                cacheService.evict(HISTORY_CACHE_NAMESPACE, deviceId.toString());
+            }
         } else {
             historyCache.clear();
+            if (cacheService != null) {
+                cacheService.clearNamespace(HISTORY_CACHE_NAMESPACE);
+            }
         }
     }
 
-    @org.springframework.context.event.EventListener
+    private void evictHomeDevicesAndActivityCache(UUID homeId, boolean includeRooms) {
+        if (cacheService == null || homeId == null) {
+            return;
+        }
+        String prefix = homeId + ":";
+        cacheService.evictByPrefix(HOME_DEVICES_NAMESPACE, prefix);
+        cacheService.evictByPrefix(HOME_ACTIVITY_NAMESPACE, prefix);
+        if (includeRooms) {
+            cacheService.evictByPrefix(ROOMS_HOME_NAMESPACE, prefix);
+        }
+    }
+
+    @org.springframework.transaction.event.TransactionalEventListener(
+            phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT,
+            fallbackExecution = true)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
     public void onDeviceStateChanged(DeviceStateChangedEvent event) {
-        if (event != null && event.payload() != null && event.payload().deviceId() != null) {
+        if (event == null) return;
+        if (event.payload() != null && event.payload().deviceId() != null) {
             evictDeviceHistoryCache(event.payload().deviceId());
+        }
+        if (event.homeId() != null) {
+            evictHomeDevicesAndActivityCache(event.homeId(), false);
+        }
+    }
+
+    @org.springframework.transaction.event.TransactionalEventListener(
+            phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT,
+            fallbackExecution = true)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+    public void onSensorReadingUpdated(com.hesta.backend.dto.command.SensorReadingUpdatedEvent event) {
+        if (event != null && event.homeId() != null && cacheService != null) {
+            cacheService.evictByPrefix(HOME_DEVICES_NAMESPACE, event.homeId() + ":");
+        }
+    }
+
+    @org.springframework.transaction.event.TransactionalEventListener(
+            phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT,
+            fallbackExecution = true)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+    public void onMemberAccessChanged(com.hesta.backend.event.MemberAccessChangedEvent event) {
+        if (event != null && event.homeId() != null) {
+            evictHomeDevicesAndActivityCache(event.homeId(), false);
         }
     }
 

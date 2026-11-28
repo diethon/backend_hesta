@@ -271,6 +271,21 @@ public class DeviceController {
                 .build());
     }
 
+    @GetMapping("/homes/{homeId}/devices/recent-activity")
+    public ResponseEntity<ApiResponse<List<com.hesta.backend.dto.response.HomeActivityItemResponse>>> getHomeRecentActivity(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID homeId,
+            @RequestParam(defaultValue = "10") int limit) {
+
+        List<com.hesta.backend.dto.response.HomeActivityItemResponse> result =
+                deviceService.getHomeRecentActivity(userDetails.getId(), homeId, limit);
+
+        return ResponseEntity.ok(ApiResponse.<List<com.hesta.backend.dto.response.HomeActivityItemResponse>>builder()
+                .code(1000)
+                .result(result)
+                .build());
+    }
+
     @GetMapping(value = "/devices/{deviceId}/history/export", produces = "text/csv; charset=UTF-8")
     public ResponseEntity<byte[]> exportDeviceHistory(
             @AuthenticationPrincipal CustomUserDetails userDetails,

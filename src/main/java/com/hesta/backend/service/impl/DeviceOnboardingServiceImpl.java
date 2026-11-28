@@ -43,6 +43,9 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
     private final HomeAuthorizationService homeAuthorizationService;
     private final com.hesta.backend.repository.DeviceCatalogRepository catalogRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
+
     private static final int TOKEN_EXPIRY_DAYS = 7;
     private static final String QR_SCHEME_PREFIX = "syna://device/register?token=";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
@@ -338,6 +341,11 @@ public class DeviceOnboardingServiceImpl implements DeviceOnboardingService {
         tokenRepository.save(token);
 
         Device saved = deviceRepository.save(device);
+        if (cacheService != null && home != null && home.getId() != null) {
+            String prefix = home.getId() + ":";
+            cacheService.evictByPrefix("devices:home", prefix);
+            cacheService.evictByPrefix("rooms:home", prefix);
+        }
         log.info("Device [{}] claimed successfully as [{}] in room [{}]", saved.getId(), saved.getName(), room.getName());
         return DeviceResponse.fromEntity(saved);
     }

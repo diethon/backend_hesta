@@ -35,7 +35,7 @@ class NotificationRealtimeListenerTest {
         UUID recipientId = UUID.randomUUID();
         UUID homeId = UUID.randomUUID();
         NotificationRealtimePayload payload = new NotificationRealtimePayload(
-                notificationId, recipientId, homeId, false, OffsetDateTime.now()
+                notificationId, recipientId, homeId, false, OffsetDateTime.now(), false
         );
 
         listener.onNotificationCreated(new NotificationCreatedEvent(payload));

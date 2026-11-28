@@ -155,13 +155,18 @@ class OtaAndDiagnosticsIntegrationTest {
                 .andExpect(header().string("X-Firmware-Sha256", expectedSha))
                 .andExpect(content().bytes(binary));
 
-        // Track MQTT notify dispatches across waves
+        // Track MQTT notify dispatches across waves (each node receives dual-ID notify: nodeCode + UUID)
         Map<Integer, List<String>> dispatchedTopics = new HashMap<>();
         List<String> waveTopics = Collections.synchronizedList(new ArrayList<>());
+        List<String> waveAllNotifyTopics = Collections.synchronizedList(new ArrayList<>());
         doAnswer(inv -> {
             String topic = inv.getArgument(0);
             if (topic.endsWith("/ota/notify")) {
-                waveTopics.add(topic);
+                waveAllNotifyTopics.add(topic);
+                String seg = topic.split("/")[2];
+                if (!seg.matches("^[0-9a-fA-F-]{36}$")) {
+                    waveTopics.add(topic);
+                }
             }
             return null;
         }).when(mqttGateway).sendToMqtt(anyString(), anyInt(), anyString());
@@ -185,10 +190,12 @@ class OtaAndDiagnosticsIntegrationTest {
 
         String campaignId = objectMapper.readTree(campRes.getResponse().getContentAsString()).get("result").get("id").asText();
 
-        // Wave 1: ceil(10 * 0.10) = 1 node dispatched
+        // Wave 1: ceil(10 * 0.10) = 1 node dispatched (2 dual topics: nodeCode + nodeId)
         assertEquals(1, waveTopics.size());
+        assertEquals(2, waveAllNotifyTopics.size());
         dispatchedTopics.put(1, new ArrayList<>(waveTopics));
         waveTopics.clear();
+        waveAllNotifyTopics.clear();
 
         // Duplicate intermediate + terminal messages via MqttMessageReceiver -> advances to Wave 2 (4 more nodes = 50% cumulative)
         String wave1Node = dispatchedTopics.get(1).get(0).split("/")[2];
@@ -207,25 +214,33 @@ class OtaAndDiagnosticsIntegrationTest {
                 .build());
 
         assertEquals(4, waveTopics.size());
+        assertEquals(8, waveAllNotifyTopics.size());
         dispatchedTopics.put(2, new ArrayList<>(waveTopics));
         waveTopics.clear();
+        waveAllNotifyTopics.clear();
 
         OtaCampaignDto wave2State = otaCampaignService.getCampaign(UUID.fromString(campaignId));
         assertEquals("RUNNING_CANARY_50", wave2State.getStatus());
         assertEquals(1, wave2State.getSuccessNodes());
 
-        // Report success from all 4 Wave 2 nodes -> advances to Wave 3 (5 remaining nodes = 100%)
-        for (String topic : dispatchedTopics.get(2)) {
-            String nc = topic.split("/")[2];
+        // Report success from all 4 Wave 2 nodes (first replies via UUID topic, others via nodeCode) -> advances to Wave 3 (5 remaining = 100%)
+        List<String> wave2Topics = dispatchedTopics.get(2);
+        for (int i = 0; i < wave2Topics.size(); i++) {
+            String nc = wave2Topics.get(i).split("/")[2];
+            String statusIdent = (i == 0)
+                    ? nodes.stream().filter(n -> n.getNodeCode().equals(nc)).findFirst().orElseThrow().getId().toString()
+                    : nc;
             mqttMessageReceiver.handleMessage(MessageBuilder.withPayload(
                             objectMapper.writeValueAsString(Map.of("campaignId", campaignId, "version", "v2.2.0", "status", "SUCCESS")))
-                    .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + nc + "/ota/status")
+                    .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + statusIdent + "/ota/status")
                     .build());
         }
 
         assertEquals(5, waveTopics.size());
+        assertEquals(10, waveAllNotifyTopics.size());
         dispatchedTopics.put(3, new ArrayList<>(waveTopics));
         waveTopics.clear();
+        waveAllNotifyTopics.clear();
         assertEquals("RUNNING_FULL_100", otaCampaignService.getCampaign(UUID.fromString(campaignId)).getStatus());
 
         // Report success from Wave 3 nodes -> COMPLETED and all 10 EdgeNodes updated to v2.2.0
@@ -244,6 +259,37 @@ class OtaAndDiagnosticsIntegrationTest {
         for (EdgeNode en : edgeNodeRepository.findAll()) {
             assertEquals("v2.2.0", en.getFirmwareVersion());
         }
+
+        // Package referenced by an existing campaign cannot be deleted -> 409 Conflict
+        mockMvc.perform(delete("/api/v1/admin/ota/packages/" + packageId)
+                        .with(authentication(adminAuth)))
+                .andExpect(status().isConflict());
+
+        // Standalone unused package can be deleted cleanly (DB + storage) -> 200 OK then 404 Not Found
+        MockMultipartFile unusedFile = new MockMultipartFile(
+                "file", "unused_v2.3.0.bin", "application/octet-stream", binary);
+        MvcResult unusedUploadRes = mockMvc.perform(multipart("/api/v1/admin/ota/packages/upload")
+                        .file(unusedFile)
+                        .param("deviceType", "ESP32_RELAY")
+                        .param("version", "v2.3.0")
+                        .with(authentication(adminAuth)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String unusedPackageId = objectMapper.readTree(unusedUploadRes.getResponse().getContentAsString())
+                .get("result").get("id").asText();
+
+        mockMvc.perform(delete("/api/v1/admin/ota/packages/" + unusedPackageId)
+                        .with(authentication(userAuth)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(delete("/api/v1/admin/ota/packages/" + unusedPackageId)
+                        .with(authentication(adminAuth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1000));
+
+        mockMvc.perform(get("/api/v1/admin/ota/packages/" + unusedPackageId)
+                        .with(authentication(adminAuth)))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -388,5 +434,88 @@ class OtaAndDiagnosticsIntegrationTest {
                 .filter(n -> "CANCELLED".equals(n.getStatus()))
                 .count();
         assertEquals(3L, cancelledCount);
+    }
+
+    @Test
+    @DisplayName("Dual-ID Routing & Post-Reboot Recovery: UUID topics complete OTA/ping and /register only auto-completes active flash")
+    void dualIdUuidAndPostRebootRegisterAutoCompletion() throws Exception {
+        EdgeNode espNode = edgeNodeRepository.save(EdgeNode.builder()
+                .home(testHome)
+                .nodeCode("HESTA-TOWNHOUSE-F1")
+                .status(EdgeNodeStatus.ONLINE)
+                .deviceType("ESP32_RELAY")
+                .firmwareVersion("2.3.0")
+                .build());
+
+        FirmwarePackageDto pkg = otaCampaignService.registerPackage(FirmwarePackageDto.builder()
+                .deviceType("ESP32_RELAY")
+                .version("v5.0.0")
+                .fileUrl("https://res.cloudinary.com/demo/raw/upload/v1/hesta/ota-firmware/f1-v5.0.0.bin")
+                .checksumSha256("d".repeat(64))
+                .build());
+
+        OtaCampaignDto campaign = otaCampaignService.createAndStartCampaign(CreateOtaCampaignRequest.builder()
+                .name("F1 Dual-ID Verification")
+                .firmwarePackageId(pkg.getId())
+                .rolloutStrategy("IMMEDIATE")
+                .targetNodeIds(List.of(espNode.getId()))
+                .build());
+
+        // Must dispatch to BOTH nodeCode and UUID topics
+        verify(mqttGateway).sendToMqtt(eq("hesta/nodes/HESTA-TOWNHOUSE-F1/ota/notify"), eq(1), anyString());
+        verify(mqttGateway).sendToMqtt(eq("hesta/nodes/" + espNode.getId() + "/ota/notify"), eq(1), anyString());
+
+        // Guard: /register reporting new version while still DISPATCHED (never started flashing) must NOT auto-complete
+        mqttMessageReceiver.handleMessage(MessageBuilder.withPayload(
+                        objectMapper.writeValueAsString(Map.of(
+                                "nodeId", espNode.getId().toString(),
+                                "firmwareVersion", "5.0.0"
+                        )))
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + espNode.getId() + "/register")
+                .build());
+        assertEquals("RUNNING_FULL_100", otaCampaignService.getCampaign(campaign.getId()).getStatus());
+
+        // Node starts REBOOTING via UUID topic, then post-reboot /register sends "5.0.0" (normalized == "v5.0.0")
+        mqttMessageReceiver.handleMessage(MessageBuilder.withPayload(
+                        objectMapper.writeValueAsString(Map.of(
+                                "campaignId", campaign.getId().toString(),
+                                "version", "v5.0.0",
+                                "status", "REBOOTING"
+                        )))
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + espNode.getId() + "/ota/status")
+                .build());
+
+        mqttMessageReceiver.handleMessage(MessageBuilder.withPayload(
+                        objectMapper.writeValueAsString(Map.of(
+                                "nodeId", espNode.getId().toString(),
+                                "firmwareVersion", "5.0.0"
+                        )))
+                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + espNode.getId() + "/register")
+                .build());
+
+        OtaCampaignDto completed = otaCampaignService.getCampaign(campaign.getId());
+        assertEquals("COMPLETED", completed.getStatus());
+        assertEquals(1, completed.getSuccessNodes());
+
+        // Dual-ID Diagnostics Ping: reply arriving on UUID /pong topic must resolve 200 OK
+        String uuidPingTopic = "hesta/nodes/" + espNode.getId() + "/ping";
+        doAnswer(inv -> {
+            String topic = inv.getArgument(0);
+            String payload = inv.getArgument(2);
+            if (uuidPingTopic.equals(topic)) {
+                String pingId = objectMapper.readTree(payload).get("pingId").asText();
+                new Thread(() -> mqttMessageReceiver.handleMessage(
+                        MessageBuilder.withPayload("{\"pingId\":\"" + pingId + "\"}")
+                                .setHeader(MqttHeaders.RECEIVED_TOPIC, "hesta/nodes/" + espNode.getId() + "/pong")
+                                .build())).start();
+            }
+            return null;
+        }).when(mqttGateway).sendToMqtt(anyString(), anyInt(), anyString());
+
+        mockMvc.perform(post("/api/v1/admin/diagnostics/nodes/" + espNode.getId() + "/ping")
+                        .with(authentication(adminAuth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.nodeCode").value("HESTA-TOWNHOUSE-F1"))
+                .andExpect(jsonPath("$.result.averageLatencyMs").isNumber());
     }
 }

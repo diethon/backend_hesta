@@ -17,6 +17,11 @@ public class NodeDiagnosticsResponse {
     private UUID nodeId;
     private String nodeCode;
     private String status;
+    private String firmwareVersion;
+    private String deviceType;
+    private int attachedDeviceCount;
+    @Builder.Default
+    private java.util.List<String> attachedDeviceTypes = java.util.List.of();
     private UUID homeId;
     private String homeName;
     private CircuitState circuitState;
