@@ -32,6 +32,7 @@ public final class EndpointPolicyRegistry {
 
         // Internal service controller
         CLASS_POLICIES.put("InternalDeviceController", AccessPolicyType.INTERNAL_SERVICE);
+        CLASS_POLICIES.put("InternalSceneController", AccessPolicyType.INTERNAL_SERVICE);
 
         // User / Profile
         CLASS_POLICIES.put("UserController", AccessPolicyType.AUTHENTICATED);
