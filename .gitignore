@@ -80,3 +80,4 @@ voice-service/assets/piper/*.onnx
 voice-service/assets/piper/*.onnx.json
 eval-images/
 
+recommendation-service/test-data/

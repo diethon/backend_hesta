@@ -2,7 +2,6 @@ package com.hesta.backend.service;
 
 import com.hesta.backend.dto.command.NotificationEvent;
 import com.hesta.backend.dto.request.CreateParentalGuardianRequest;
-import com.hesta.backend.dto.request.GuardianSimulateEventRequest;
 import com.hesta.backend.dto.response.ParentalGuardianResponse;
 import com.hesta.backend.entity.Device;
 import com.hesta.backend.entity.Home;
@@ -11,6 +10,7 @@ import com.hesta.backend.entity.Room;
 import com.hesta.backend.entity.User;
 import com.hesta.backend.enums.GuardianStatus;
 import com.hesta.backend.enums.StateChangeSource;
+import com.hesta.backend.exception.AppException;
 import com.hesta.backend.repository.DeviceRepository;
 import com.hesta.backend.repository.ParentalGuardianLogRepository;
 import com.hesta.backend.repository.ParentalGuardianRuleRepository;
@@ -25,12 +25,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -70,7 +72,7 @@ class ParentalGuardianServiceTest {
         rule = ParentalGuardianRule.builder()
                 .id(ruleId)
                 .home(home)
-                .targetDevice(tvDevice)
+                .targetDevices(new ArrayList<>(List.of(tvDevice)))
                 .name("Giới hạn xem TV khi vắng nhà")
                 .enabled(true)
                 .parentAway(false)
@@ -85,7 +87,7 @@ class ParentalGuardianServiceTest {
     @DisplayName("Tạo quy tắc Giám hộ thành công")
     void testCreateRule() {
         when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
-        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(tvDevice));
+        when(deviceRepository.findAllById(List.of(deviceId))).thenReturn(List.of(tvDevice));
         when(ruleRepository.save(any(ParentalGuardianRule.class))).thenAnswer(i -> {
             ParentalGuardianRule r = i.getArgument(0);
             r.setId(ruleId);
@@ -94,7 +96,7 @@ class ParentalGuardianServiceTest {
 
         CreateParentalGuardianRequest request = CreateParentalGuardianRequest.builder()
                 .name("Giới hạn xem TV khi vắng nhà")
-                .targetDeviceId(deviceId)
+                .targetDeviceIds(List.of(deviceId, deviceId))
                 .allowedDurationMinutes(45)
                 .warningMinutesBefore(5)
                 .autoLockout(true)
@@ -106,6 +108,7 @@ class ParentalGuardianServiceTest {
         assertThat(response.getName()).isEqualTo("Giới hạn xem TV khi vắng nhà");
         assertThat(response.getAllowedDurationMinutes()).isEqualTo(45);
         assertThat(response.getStatus()).isEqualTo(GuardianStatus.IDLE);
+        assertThat(response.getTargetDevices()).extracting(ParentalGuardianResponse.TargetDevice::id).containsExactly(deviceId);
         verify(ruleRepository).save(any(ParentalGuardianRule.class));
         verify(logRepository).save(any());
     }
@@ -146,7 +149,7 @@ class ParentalGuardianServiceTest {
     void testOnDeviceStateChanged_StartsCountdown() {
         rule.setParentAway(true);
         rule.setStatus(GuardianStatus.IDLE);
-        when(ruleRepository.findAllByTargetDeviceIdAndEnabledTrue(deviceId)).thenReturn(List.of(rule));
+        when(ruleRepository.findAllByTargetDevicesIdAndEnabledTrue(deviceId)).thenReturn(List.of(rule));
         when(ruleRepository.save(any(ParentalGuardianRule.class))).thenAnswer(i -> i.getArgument(0));
 
         service.onDeviceStateChanged(homeId, deviceId, Map.of("power", true));
@@ -163,7 +166,7 @@ class ParentalGuardianServiceTest {
     void testOnDeviceStateChanged_BlocksTamper() {
         rule.setParentAway(true);
         rule.setStatus(GuardianStatus.LOCKED_OUT);
-        when(ruleRepository.findAllByTargetDeviceIdAndEnabledTrue(deviceId)).thenReturn(List.of(rule));
+        when(ruleRepository.findAllByTargetDevicesIdAndEnabledTrue(deviceId)).thenReturn(List.of(rule));
 
         service.onDeviceStateChanged(homeId, deviceId, Map.of("power", true));
 
@@ -204,36 +207,51 @@ class ParentalGuardianServiceTest {
         ParentalGuardianResponse response = service.grantExtension(userId, homeId, ruleId, 15);
 
         assertThat(response.getStatus()).isEqualTo(GuardianStatus.COUNTDOWN);
-        verify(deviceCommandService).sendCommand(eq(deviceId), eq("TURN_ON"), eq(Map.of()), eq(StateChangeSource.MANUAL));
+        verifyNoInteractions(deviceCommandService);
         verify(notificationService).receiveEvent(any(NotificationEvent.class));
     }
 
     @Test
-    @DisplayName("Mô phỏng demo: Bố mẹ ra khỏi nhà, bé bật TV, hết giờ và chống lách luật")
-    void testSimulate() {
+    @DisplayName("Thiết bị không thuộc nhà hoặc không tồn tại -> từ chối tạo quy tắc")
+    void testCreateRule_RejectsUnknownDevice() {
+        UUID missingId = UUID.randomUUID();
         when(authorization.requireSceneManagement(userId, homeId)).thenReturn(home);
-        when(ruleRepository.findByIdAndHomeId(ruleId, homeId)).thenReturn(Optional.of(rule));
+        when(deviceRepository.findAllById(List.of(deviceId, missingId))).thenReturn(List.of(tvDevice));
+
+        CreateParentalGuardianRequest request = CreateParentalGuardianRequest.builder()
+                .name("Giới hạn")
+                .targetDeviceIds(List.of(deviceId, missingId))
+                .build();
+
+        assertThatThrownBy(() -> service.createRule(userId, homeId, request))
+                .isInstanceOf(AppException.class);
+        verify(ruleRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Nhiều thiết bị: hết giờ -> ngắt nguồn tất cả; bật lại 1 máy khi khóa -> chỉ ngắt máy đó")
+    void testMultipleDevices_SharedBudget() {
+        UUID pcId = UUID.randomUUID();
+        Device pc = Device.builder().id(pcId).name("Máy tính").room(tvDevice.getRoom()).build();
+        rule.getTargetDevices().add(pc);
+        rule.setParentAway(true);
+        rule.setStatus(GuardianStatus.COUNTDOWN);
+        rule.setSessionExpiresAt(OffsetDateTime.now().minusSeconds(1));
+        when(ruleRepository.findAllByEnabledTrueAndStatusIn(anyList())).thenReturn(List.of(rule));
         when(ruleRepository.save(any(ParentalGuardianRule.class))).thenAnswer(i -> i.getArgument(0));
 
-        // 1. Phụ huynh ra khỏi nhà
-        ParentalGuardianResponse r1 = service.simulate(userId, homeId, ruleId,
-                GuardianSimulateEventRequest.builder().eventType("PARENT_DEPARTURE").build());
-        assertThat(r1.isParentAway()).isTrue();
+        service.checkDueSessions();
 
-        // 2. Bé bật TV
-        ParentalGuardianResponse r2 = service.simulate(userId, homeId, ruleId,
-                GuardianSimulateEventRequest.builder().eventType("DEVICE_POWER_ON").build());
-        assertThat(r2.getStatus()).isEqualTo(GuardianStatus.COUNTDOWN);
-
-        // 3. Hết giờ ngay lập tức
-        ParentalGuardianResponse r3 = service.simulate(userId, homeId, ruleId,
-                GuardianSimulateEventRequest.builder().eventType("FAST_FORWARD_EXPIRE").build());
-        assertThat(r3.getStatus()).isEqualTo(GuardianStatus.LOCKED_OUT);
+        assertThat(rule.getStatus()).isEqualTo(GuardianStatus.LOCKED_OUT);
         verify(deviceCommandService).sendCommand(eq(deviceId), eq("TURN_OFF"), eq(Map.of()), eq(StateChangeSource.AUTOMATION));
+        verify(deviceCommandService).sendCommand(eq(pcId), eq("TURN_OFF"), eq(Map.of()), eq(StateChangeSource.AUTOMATION));
 
-        // 4. Bé cố tình bật lại -> cưỡng chế ngắt
-        ParentalGuardianResponse r4 = service.simulate(userId, homeId, ruleId,
-                GuardianSimulateEventRequest.builder().eventType("TAMPER_POWER_ON").build());
-        assertThat(r4.getStatus()).isEqualTo(GuardianStatus.LOCKED_OUT);
+        clearInvocations(deviceCommandService);
+        when(ruleRepository.findAllByTargetDevicesIdAndEnabledTrue(pcId)).thenReturn(List.of(rule));
+
+        service.onDeviceStateChanged(homeId, pcId, Map.of("power", true));
+
+        verify(deviceCommandService).sendCommand(eq(pcId), eq("TURN_OFF"), eq(Map.of()), eq(StateChangeSource.AUTOMATION));
+        verifyNoMoreInteractions(deviceCommandService);
     }
 }
