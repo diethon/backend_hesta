@@ -67,6 +67,33 @@ public class HomeServiceImpl implements HomeService {
     @org.springframework.beans.factory.annotation.Value("${access.custom-scope.enabled:true}")
     private boolean customScopeEnabled;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
+
+    public void setCacheService(com.hesta.backend.cache.HestaCacheService cacheService) {
+        this.cacheService = cacheService;
+    }
+
+    private static final String HOMES_USER_NAMESPACE = "homes:user";
+    private static final String ROOMS_HOME_NAMESPACE = "rooms:home";
+    private static final java.time.Duration HOMES_CACHE_TTL = java.time.Duration.ofSeconds(30);
+
+    private void evictUserHomesCache(UUID userId) {
+        if (cacheService != null && userId != null) {
+            cacheService.evict(HOMES_USER_NAMESPACE, userId.toString());
+        }
+    }
+
+    @org.springframework.transaction.event.TransactionalEventListener(
+            phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT,
+            fallbackExecution = true)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+    public void onMemberAccessChanged(MemberAccessChangedEvent event) {
+        if (event != null && event.userId() != null) {
+            evictUserHomesCache(event.userId());
+        }
+    }
+
 
 
     @Override
@@ -304,7 +331,7 @@ public class HomeServiceImpl implements HomeService {
         invitation.setStatus(InvitationStatus.ACCEPTED);
 
         homeInvitationRepository.save(invitation);
-
+        evictUserHomesCache(userId);
     }
 
 
@@ -426,7 +453,7 @@ public class HomeServiceImpl implements HomeService {
 
     @Override
 
-    @Transactional(readOnly = true)
+    @Transactional
 
     public Object getHomeRooms(UUID userId, UUID homeId) {
 
@@ -450,6 +477,9 @@ public class HomeServiceImpl implements HomeService {
                             .build()));
                 }
                 rooms = createdRooms;
+                if (cacheService != null) {
+                    cacheService.evictByPrefix(ROOMS_HOME_NAMESPACE, homeId + ":");
+                }
             }
         }
 
@@ -502,6 +532,9 @@ public class HomeServiceImpl implements HomeService {
                 .build();
 
         roomRepository.save(room);
+        if (cacheService != null) {
+            cacheService.evictByPrefix(ROOMS_HOME_NAMESPACE, homeId + ":");
+        }
 
     }
 
@@ -512,6 +545,17 @@ public class HomeServiceImpl implements HomeService {
     @Transactional(readOnly = true)
 
     public Object getUserHomes(UUID userId) {
+
+        if (userId != null && cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            Optional<List<Map<String, Object>>> cached = cacheService.get(
+                    HOMES_USER_NAMESPACE,
+                    userId.toString(),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}
+            );
+            if (cached.isPresent()) {
+                return cached.get();
+            }
+        }
 
         List<HomeMember> memberships = homeMemberRepository.findByUserIdWithHomeOrderByJoinedAtDesc(userId);
 
@@ -526,6 +570,10 @@ public class HomeServiceImpl implements HomeService {
             homeItem.put("accessScope", m.getAccessScope() != null ? m.getAccessScope().name() : "ALL");
             result.add(homeItem);
 
+        }
+
+        if (userId != null && cacheService != null && cacheService.isReadThroughCacheEnabled()) {
+            cacheService.put(HOMES_USER_NAMESPACE, userId.toString(), result, HOMES_CACHE_TTL);
         }
 
         return result;
@@ -572,6 +620,7 @@ public class HomeServiceImpl implements HomeService {
             memberDeviceAccessRepository.flush();
         }
         homeMemberRepository.save(target);
+        evictUserHomesCache(memberId);
         if (applicationEventPublisher != null) {
             applicationEventPublisher.publishEvent(new MemberAccessChangedEvent(homeId, memberId));
         }
@@ -611,6 +660,7 @@ public class HomeServiceImpl implements HomeService {
         memberRoomAccessRepository.flush();
         memberDeviceAccessRepository.flush();
         homeMemberRepository.delete(target);
+        evictUserHomesCache(memberId);
         if (applicationEventPublisher != null) {
             applicationEventPublisher.publishEvent(new MemberAccessChangedEvent(homeId, memberId));
         }
@@ -670,6 +720,7 @@ public class HomeServiceImpl implements HomeService {
                     .build());
         }
 
+        evictUserHomesCache(userId);
         return Map.of(
 
                 "homeId", savedHome.getId(),
@@ -711,6 +762,17 @@ public class HomeServiceImpl implements HomeService {
         home.setName(newName.trim());
 
         Home savedHome = homeRepository.save(home);
+        if (cacheService != null) {
+            evictUserHomesCache(userId);
+            List<HomeMember> homeMembers = homeMemberRepository.findByHomeIdWithUser(homeId);
+            if (homeMembers != null) {
+                for (HomeMember hm : homeMembers) {
+                    if (hm.getUser() != null && hm.getUser().getId() != null) {
+                        evictUserHomesCache(hm.getUser().getId());
+                    }
+                }
+            }
+        }
 
 
 

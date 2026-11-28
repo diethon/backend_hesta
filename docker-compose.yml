@@ -11,3 +11,22 @@ services:
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: hesta-redis-local
+    env_file:
+      - path: .env
+        required: false
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+        else
+          exec redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+        fi
+    ports:
+      - "127.0.0.1:6379:6379"
+    restart: unless-stopped

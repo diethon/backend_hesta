@@ -52,6 +52,9 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
     private final DeviceRepository deviceRepository;
     private final SensorReadingRepository sensorReadingRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
+
     @Override
     @Transactional(readOnly = true)
     public TwinLayoutResponse getLayout(UUID userId, UUID homeId) {
@@ -109,6 +112,9 @@ public class TwinLayoutServiceImpl implements TwinLayoutService {
                 .roomId(node.roomId()).x(node.x()).y(node.y()).build()).toList());
         roomLayoutRepository.flush();
         nodeLayoutRepository.flush();
+        if (cacheService != null && homeId != null) {
+            cacheService.evictByPrefix("rooms:home", homeId + ":");
+        }
         return toResponse(layout);
     }
 

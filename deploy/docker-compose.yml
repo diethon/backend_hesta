@@ -11,12 +11,21 @@ services:
       MQTT_BROKER_URL: tcp://mosquitto:1883
       HESTA_ML_SERVICE_URL: http://recommendation:8000
       TZ: Asia/Ho_Chi_Minh
+      HESTA_REDIS_ENABLED: "true"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
     volumes:
       - ./app.jar:/app/app.jar:ro
       - ./uploads:/app/uploads
     ports:
       - "127.0.0.1:8080:8080"
-    depends_on: [mosquitto, redis, recommendation]
+    depends_on:
+      mosquitto:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      recommendation:
+        condition: service_started
     restart: unless-stopped
 
   recommendation:
@@ -45,10 +54,23 @@ services:
   redis:
     image: redis:7-alpine
     container_name: hesta-redis
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru"]
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+        else
+          exec redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+        fi
     env_file: .env
     volumes:
       - ./redis-data:/data
     ports:
       - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG; else redis-cli ping | grep -q PONG; fi"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped

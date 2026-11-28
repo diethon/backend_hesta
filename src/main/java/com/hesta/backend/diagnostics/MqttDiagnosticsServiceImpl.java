@@ -65,6 +65,9 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
     @Autowired(required = false)
     private ObjectMapper objectMapper;
 
+    @Autowired(required = false)
+    private com.hesta.backend.cache.HestaCacheService cacheService;
+
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
     private String brokerUrl;
 
@@ -85,6 +88,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
     private static final int RTT_BUFFER_SIZE = 100;
     private static final int SNIFFER_BUFFER_SIZE = 50;
+    private static final int NODE_SNIFFER_BUFFER_SIZE = 100;
 
     private final AtomicBoolean brokerConnected = new AtomicBoolean(false);
     private final ConcurrentHashMap<String, NodeHealthTracker> trackers = new ConcurrentHashMap<>();
@@ -94,11 +98,13 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
     private static class PingRequest {
         final String nodeCode;
+        final UUID nodeId;
         final long startNanos;
         final CompletableFuture<Long> future;
 
-        PingRequest(String nodeCode, long startNanos, CompletableFuture<Long> future) {
+        PingRequest(String nodeCode, UUID nodeId, long startNanos, CompletableFuture<Long> future) {
             this.nodeCode = nodeCode;
+            this.nodeId = nodeId;
             this.startNanos = startNanos;
             this.future = future;
         }
@@ -132,6 +138,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         final AtomicInteger successfulCommands = new AtomicInteger(0);
         final AtomicLong totalLatencyMs = new AtomicLong(0);
         final java.util.concurrent.ConcurrentLinkedDeque<Long> nodeRttBuffer = new java.util.concurrent.ConcurrentLinkedDeque<>();
+        final java.util.concurrent.ConcurrentLinkedDeque<MqttPacketDto> nodePacketBuffer = new java.util.concurrent.ConcurrentLinkedDeque<>();
         final AtomicReference<CircuitState> state = new AtomicReference<>(CircuitState.CLOSED);
         final java.util.concurrent.atomic.AtomicBoolean halfOpenTrialInFlight = new java.util.concurrent.atomic.AtomicBoolean(false);
         volatile OffsetDateTime lastTrippedAt = null;
@@ -154,8 +161,19 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         return edgeNodeRepository.findByNodeCode(nodeIdent).orElse(null);
     }
 
+    private String canonicalNodeKey(EdgeNode node) {
+        if (node != null && node.getNodeCode() != null && !node.getNodeCode().isBlank()) {
+            return node.getNodeCode().trim();
+        }
+        if (node != null && node.getId() != null) {
+            return node.getId().toString();
+        }
+        return "UNKNOWN";
+    }
+
     private NodeHealthTracker getTracker(String nodeCode) {
-        return trackers.computeIfAbsent(nodeCode, k -> new NodeHealthTracker());
+        String key = (nodeCode == null || nodeCode.isBlank()) ? "UNKNOWN" : nodeCode;
+        return trackers.computeIfAbsent(key, k -> new NodeHealthTracker());
     }
 
     private long[] calculateLatencyStats(java.util.Collection<Long> samples) {
@@ -274,10 +292,10 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         if (node == null) {
             try {
                 node = edgeNodeRepository.findByIdWithHome(UUID.fromString(nodeCode)).orElse(null);
-                if (node != null) {
-                    nodeCode = node.getNodeCode();
-                }
             } catch (Exception ignored) {}
+        }
+        if (node != null) {
+            nodeCode = canonicalNodeKey(node);
         }
         NodeHealthTracker tracker = getTracker(nodeCode);
         tracker.state.set(CircuitState.OPEN);
@@ -299,10 +317,16 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             }
         }
 
+        NodeDeviceMeta meta = loadSingleNodeDeviceMeta(node);
+
         return NodeDiagnosticsResponse.builder()
                 .nodeId(node != null ? node.getId() : null)
                 .nodeCode(nodeCode)
                 .status(node != null && node.getStatus() != null ? node.getStatus().name() : "OFFLINE")
+                .firmwareVersion(node != null ? node.getFirmwareVersion() : null)
+                .deviceType(node != null ? node.getDeviceType() : null)
+                .attachedDeviceCount(meta.count())
+                .attachedDeviceTypes(resolveAttachedDeviceTypes(node, meta))
                 .homeId(homeId)
                 .homeName(homeName)
                 .circuitState(CircuitState.OPEN)
@@ -325,7 +349,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         EdgeNode node = edgeNodeRepository.findByIdWithHome(nodeId)
                 .or(() -> edgeNodeRepository.findById(nodeId))
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
-        return tripCircuitBreaker(node.getNodeCode());
+        return tripCircuitBreaker(canonicalNodeKey(node));
     }
 
     @Override
@@ -356,6 +380,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         while (snifferBuffer.size() > SNIFFER_BUFFER_SIZE) {
             snifferBuffer.pollLast();
         }
+        recordNodeSnifferPacket(topic, packet);
 
         if (messagingTemplate != null) {
             try {
@@ -441,11 +466,14 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         long uptimeMs = System.currentTimeMillis() - serviceStartupTimestampMs;
 
         for (EdgeNode node : allNodes) {
-            NodeHealthTracker t = trackers.get(node.getNodeCode());
+            String nodeKey = canonicalNodeKey(node);
+            NodeHealthTracker t = trackers.get(nodeKey);
             if (t == null) {
-                t = trackers.computeIfAbsent(node.getNodeCode(), k -> new NodeHealthTracker());
+                t = trackers.computeIfAbsent(nodeKey, k -> new NodeHealthTracker());
                 t.isOnline.set(node.getStatus() == EdgeNodeStatus.ONLINE);
-                trackers.putIfAbsent(node.getId().toString(), t);
+                if (node.getId() != null) {
+                    trackers.putIfAbsent(node.getId().toString(), t);
+                }
             }
 
             if (t.lastPingAt != null) {
@@ -460,7 +488,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     t.isOnline.set(false);
                     cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
                     log.warn("[PHO-038 Dead Man's Snitch] Node {} timed out (>60s without heartbeat, last seen {}s ago). Status marked OFFLINE.",
-                            node.getNodeCode(), elapsedSeconds);
+                            nodeKey, elapsedSeconds);
                 } else if (elapsedSeconds <= 60) {
                     if (node.getStatus() != EdgeNodeStatus.ONLINE) {
                         node.setStatus(EdgeNodeStatus.ONLINE);
@@ -468,11 +496,12 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                     }
                     t.isOnline.set(true);
                     cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.ONLINE);
-                    if (mqttGateway != null && node.getNodeCode() != null && !node.getNodeCode().equalsIgnoreCase(node.getId().toString())) {
+                    if (mqttGateway != null && !nodeKey.equals("UNKNOWN")
+                            && (node.getId() == null || !nodeKey.equalsIgnoreCase(node.getId().toString()))) {
                         try {
-                            mqttGateway.sendToMqtt("hesta/nodes/" + node.getNodeCode() + "/status", 0, "ONLINE");
+                            mqttGateway.sendToMqtt("hesta/nodes/" + nodeKey + "/status", 0, "ONLINE");
                         } catch (Exception ex) {
-                            log.debug("Failed to bridge status heartbeat for node {}: {}", node.getNodeCode(), ex.getMessage());
+                            log.debug("Failed to bridge status heartbeat for node {}: {}", nodeKey, ex.getMessage());
                         }
                     }
                 }
@@ -487,7 +516,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 t.isOnline.set(false);
                 cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
                 log.warn("[PHO-038 Dead Man's Snitch] Node {} has had no heartbeat since server boot (>60s). Marking OFFLINE.",
-                        node.getNodeCode());
+                        nodeKey);
             } else if (node.getStatus() == EdgeNodeStatus.OFFLINE) {
                 // Node đang OFFLINE: Đảm bảo toàn bộ thiết bị phụ thuộc vào Node cũng phải là OFFLINE
                 cascadeNodeStatusToDevices(node, com.hesta.backend.enums.DeviceStatus.OFFLINE);
@@ -557,6 +586,19 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
             return;
         }
 
+        if (cacheService != null) {
+            String homePrefix = homeId + ":";
+            cacheService.evictByPrefix("devices:home", homePrefix);
+            cacheService.evictByPrefix("home:activity", homePrefix);
+            cacheService.evictByPrefix("energy:home", homePrefix);
+            if (dev.getId() != null) {
+                String devPrefix = dev.getId() + ":";
+                cacheService.evictByPrefix("energy:device", devPrefix);
+                cacheService.evictByPrefix("device:uptime", devPrefix);
+                cacheService.evict("device:history", dev.getId().toString());
+            }
+        }
+
         if (realtimeEventPublisher != null) {
             try {
                 var snapshot = twinSnapshotMapper != null ? twinSnapshotMapper.device(dev) : null;
@@ -574,23 +616,209 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         }
     }
 
+    private void recordNodeSnifferPacket(String topic, MqttPacketDto packet) {
+        if (topic == null || !topic.startsWith("hesta/nodes/")) {
+            return;
+        }
+        String[] parts = topic.split("/");
+        if (parts.length < 3) {
+            return;
+        }
+        String nodeIdent = parts[2];
+        if (nodeIdent == null || nodeIdent.isBlank()
+                || "broadcast".equalsIgnoreCase(nodeIdent)
+                || "unknown".equalsIgnoreCase(nodeIdent)) {
+            return;
+        }
+        NodeHealthTracker tracker = trackers.get(nodeIdent);
+        if (tracker == null) {
+            EdgeNode matched = resolveEdgeNode(nodeIdent);
+            if (matched != null && matched.getNodeCode() != null && !matched.getNodeCode().isBlank()) {
+                tracker = trackers.computeIfAbsent(matched.getNodeCode(), k -> {
+                    NodeHealthTracker created = new NodeHealthTracker();
+                    created.isOnline.set(matched.getStatus() == EdgeNodeStatus.ONLINE);
+                    return created;
+                });
+                trackers.putIfAbsent(nodeIdent, tracker);
+                if (matched.getId() != null) {
+                    trackers.putIfAbsent(matched.getId().toString(), tracker);
+                }
+            } else {
+                tracker = getTracker(nodeIdent);
+            }
+        }
+        tracker.nodePacketBuffer.addFirst(packet);
+        while (tracker.nodePacketBuffer.size() > NODE_SNIFFER_BUFFER_SIZE) {
+            tracker.nodePacketBuffer.pollLast();
+        }
+    }
+
+    @Override
     public java.util.List<MqttPacketDto> getSnifferPackets() {
         return new java.util.ArrayList<>(snifferBuffer);
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public java.util.List<MqttPacketDto> getSnifferPackets(String nodeCode, UUID homeId) {
+        boolean hasNode = nodeCode != null && !nodeCode.isBlank();
+        if (!hasNode && homeId == null) {
+            return getSnifferPackets();
+        }
+
+        java.util.Set<String> targetIdents = new java.util.LinkedHashSet<>();
+        if (hasNode) {
+            String trimmed = nodeCode.trim();
+            targetIdents.add(trimmed);
+            EdgeNode resolved = resolveEdgeNode(trimmed);
+            if (resolved != null) {
+                if (resolved.getNodeCode() != null && !resolved.getNodeCode().isBlank()) {
+                    targetIdents.add(resolved.getNodeCode());
+                }
+                if (resolved.getId() != null) {
+                    targetIdents.add(resolved.getId().toString());
+                }
+            }
+        } else {
+            List<EdgeNode> homeNodes = edgeNodeRepository.findByHome_Id(homeId);
+            if (homeNodes != null) {
+                for (EdgeNode n : homeNodes) {
+                    if (n.getNodeCode() != null && !n.getNodeCode().isBlank()) {
+                        targetIdents.add(n.getNodeCode());
+                    }
+                    if (n.getId() != null) {
+                        targetIdents.add(n.getId().toString());
+                    }
+                }
+            }
+        }
+
+        if (targetIdents.isEmpty()) {
+            return java.util.List.of();
+        }
+
+        java.util.Map<String, MqttPacketDto> merged = new java.util.LinkedHashMap<>();
+        for (String ident : targetIdents) {
+            NodeHealthTracker tracker = trackers.get(ident);
+            if (tracker != null) {
+                for (MqttPacketDto pkt : tracker.nodePacketBuffer) {
+                    if (pkt != null && pkt.getId() != null) {
+                        merged.putIfAbsent(pkt.getId(), pkt);
+                    }
+                }
+            }
+        }
+
+        for (MqttPacketDto pkt : snifferBuffer) {
+            if (pkt == null || pkt.getTopic() == null) continue;
+            String t = pkt.getTopic();
+            for (String ident : targetIdents) {
+                if (t.startsWith("hesta/nodes/" + ident + "/") || t.equals("hesta/nodes/" + ident)) {
+                    merged.putIfAbsent(pkt.getId() != null ? pkt.getId() : (t + pkt.getTimestamp()), pkt);
+                    break;
+                }
+            }
+        }
+
+        return merged.values().stream()
+                .sorted((a, b) -> {
+                    if (a.getTimestamp() == null && b.getTimestamp() == null) return 0;
+                    if (a.getTimestamp() == null) return 1;
+                    if (b.getTimestamp() == null) return -1;
+                    return b.getTimestamp().compareTo(a.getTimestamp());
+                })
+                .limit(NODE_SNIFFER_BUFFER_SIZE)
+                .collect(Collectors.toList());
+    }
+
+    private record NodeDeviceMeta(int count, java.util.Set<String> types) {}
+
+    private NodeDeviceMeta loadSingleNodeDeviceMeta(EdgeNode node) {
+        if (deviceRepository == null || node == null || node.getId() == null) {
+            return new NodeDeviceMeta(0, java.util.Set.of());
+        }
+        try {
+            List<com.hesta.backend.entity.Device> list = deviceRepository.findByNodeIdOrNodeCode(node.getId(), node.getNodeCode());
+            if (list == null || list.isEmpty()) {
+                return new NodeDeviceMeta(0, java.util.Set.of());
+            }
+            int activeCount = 0;
+            java.util.Set<String> types = new java.util.LinkedHashSet<>();
+            for (com.hesta.backend.entity.Device d : list) {
+                if (d.isDeleted()) continue;
+                activeCount++;
+                if (d.getDeviceType() != null && !d.getDeviceType().isBlank()) {
+                    types.add(d.getDeviceType().trim().toUpperCase(java.util.Locale.ROOT));
+                }
+            }
+            return new NodeDeviceMeta(activeCount, types);
+        } catch (Exception ex) {
+            return new NodeDeviceMeta(0, java.util.Set.of());
+        }
+    }
+
+    private java.util.Map<UUID, NodeDeviceMeta> loadAttachedDeviceMetadata() {
+        java.util.Map<UUID, NodeDeviceMeta> map = new java.util.HashMap<>();
+        if (deviceRepository == null) {
+            return map;
+        }
+        try {
+            List<Object[]> rows = deviceRepository.countAttachedDevicesByNodeAndType();
+            if (rows == null) return map;
+            for (Object[] row : rows) {
+                if (row == null || row.length < 3 || !(row[0] instanceof UUID nodeId)) continue;
+                String devType = row[1] != null ? row[1].toString().trim().toUpperCase(java.util.Locale.ROOT) : "";
+                int cnt = row[2] instanceof Number num ? num.intValue() : 0;
+                NodeDeviceMeta existing = map.get(nodeId);
+                java.util.Set<String> types = existing != null
+                        ? new java.util.LinkedHashSet<>(existing.types())
+                        : new java.util.LinkedHashSet<>();
+                if (!devType.isBlank()) {
+                    types.add(devType);
+                }
+                int nextCount = (existing != null ? existing.count() : 0) + cnt;
+                map.put(nodeId, new NodeDeviceMeta(nextCount, types));
+            }
+        } catch (Exception ex) {
+            log.debug("Failed to load attached device metadata: {}", ex.getMessage());
+        }
+        return map;
+    }
+
+    private java.util.List<String> resolveAttachedDeviceTypes(EdgeNode node, NodeDeviceMeta dbMeta) {
+        if (dbMeta != null && dbMeta.types() != null && !dbMeta.types().isEmpty()) {
+            return new java.util.ArrayList<>(dbMeta.types());
+        }
+        java.util.Set<String> types = new java.util.LinkedHashSet<>();
+        if (node != null && node.getDeviceType() != null && !node.getDeviceType().isBlank()) {
+            types.add(node.getDeviceType().trim().toUpperCase(java.util.Locale.ROOT));
+        }
+        return new java.util.ArrayList<>(types);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public DiagnosticsSummaryResponse getSummary() {
-        List<EdgeNode> allNodes = edgeNodeRepository.findAll();
+        List<EdgeNode> allNodes = edgeNodeRepository.findAllWithHome();
+        if (allNodes == null || allNodes.isEmpty()) {
+            allNodes = edgeNodeRepository.findAll();
+        }
         int total = allNodes.size();
         int online = (int) allNodes.stream().filter(n -> n.getStatus() == EdgeNodeStatus.ONLINE).count();
         int offline = total - online;
 
+        java.util.Set<UUID> homeIds = new java.util.HashSet<>();
         int quarantined = 0;
         int totalCmds = 0;
         int successCmds = 0;
 
         for (EdgeNode node : allNodes) {
-            NodeHealthTracker t = trackers.get(node.getNodeCode());
+            try {
+                if (node.getHome() != null && node.getHome().getId() != null) {
+                    homeIds.add(node.getHome().getId());
+                }
+            } catch (Exception ignored) {}
+            NodeHealthTracker t = trackers.get(canonicalNodeKey(node));
             if (t != null) {
                 if (t.state.get() == CircuitState.OPEN) quarantined++;
                 totalCmds += t.totalCommands.get();
@@ -604,6 +832,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         return DiagnosticsSummaryResponse.builder()
                 .brokerConnected(brokerConnected.get())
                 .brokerUrl(brokerUrl)
+                .totalHomes(homeIds.size())
                 .totalNodes(total)
                 .onlineNodes(online)
                 .offlineNodes(offline)
@@ -624,16 +853,23 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         if (allNodes == null || allNodes.isEmpty()) {
             allNodes = edgeNodeRepository.findAll();
         }
+        java.util.Map<UUID, NodeDeviceMeta> deviceMetaMap = loadAttachedDeviceMetadata();
         return allNodes.stream().map(node -> {
-            NodeHealthTracker t = getTracker(node.getNodeCode());
+            String nodeKey = canonicalNodeKey(node);
+            NodeHealthTracker t = getTracker(nodeKey);
             int total = t.totalCommands.get();
             int succ = t.successfulCommands.get();
             long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
+            NodeDeviceMeta meta = node.getId() != null ? deviceMetaMap.get(node.getId()) : null;
 
             return NodeDiagnosticsResponse.builder()
                     .nodeId(node.getId())
                     .nodeCode(node.getNodeCode())
                     .status(node.getStatus() != null ? node.getStatus().name() : "OFFLINE")
+                    .firmwareVersion(node.getFirmwareVersion())
+                    .deviceType(node.getDeviceType())
+                    .attachedDeviceCount(meta != null ? meta.count() : 0)
+                    .attachedDeviceTypes(resolveAttachedDeviceTypes(node, meta))
                     .homeId(node.getHome() != null ? node.getHome().getId() : null)
                     .homeName(node.getHome() != null ? node.getHome().getName() : "N/A")
                     .circuitState(t.state.get())
@@ -658,19 +894,25 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .or(() -> edgeNodeRepository.findById(nodeId))
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
-        NodeHealthTracker t = getTracker(node.getNodeCode());
+        String nodeKey = canonicalNodeKey(node);
+        NodeHealthTracker t = getTracker(nodeKey);
         t.consecutiveFailures.set(0);
         t.state.set(CircuitState.CLOSED);
         t.halfOpenTrialInFlight.set(false);
         t.lastTrippedAt = null;
-        log.info("Admin manually RESET circuit breaker for node {}", node.getNodeCode());
+        log.info("Admin manually RESET circuit breaker for node {}", nodeKey);
 
         long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
+        NodeDeviceMeta meta = loadSingleNodeDeviceMeta(node);
 
         return NodeDiagnosticsResponse.builder()
                 .nodeId(node.getId())
                 .nodeCode(node.getNodeCode())
                 .status(node.getStatus() != null ? node.getStatus().name() : "ONLINE")
+                .firmwareVersion(node.getFirmwareVersion())
+                .deviceType(node.getDeviceType())
+                .attachedDeviceCount(meta.count())
+                .attachedDeviceTypes(resolveAttachedDeviceTypes(node, meta))
                 .homeId(node.getHome() != null ? node.getHome().getId() : null)
                 .homeName(node.getHome() != null ? node.getHome().getName() : "N/A")
                 .circuitState(CircuitState.CLOSED)
@@ -693,7 +935,7 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
                 .or(() -> edgeNodeRepository.findById(nodeId))
                 .orElseThrow(() -> new AppException(ErrorCode.DEVICE_NOT_FOUND));
 
-        String nodeCode = node.getNodeCode();
+        String nodeCode = canonicalNodeKey(node);
         UUID homeId = null;
         String homeName = "N/A";
         if (node.getHome() != null) {
@@ -714,13 +956,22 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         if (prefix.endsWith("/")) {
             prefix = prefix.substring(0, prefix.length() - 1);
         }
-        String pingTopic = prefix + "/" + nodeCode + "/ping";
+
+        NodeHealthTracker canonicalTracker = getTracker(nodeCode);
+        trackers.putIfAbsent(nodeId.toString(), canonicalTracker);
+
+        java.util.List<String> pingIdents = new java.util.ArrayList<>(2);
+        pingIdents.add(nodeCode);
+        if (!nodeCode.equalsIgnoreCase(nodeId.toString())) {
+            pingIdents.add(nodeId.toString());
+        }
 
         String payload;
         try {
             payload = getObjectMapper().writeValueAsString(Map.of(
                     "pingId", pingId,
                     "nodeCode", nodeCode,
+                    "nodeId", nodeId.toString(),
                     "timestamp", System.currentTimeMillis()
             ));
         } catch (Exception e) {
@@ -728,14 +979,17 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         }
 
         CompletableFuture<Long> future = new CompletableFuture<>();
-        PingRequest pingReq = new PingRequest(nodeCode, System.nanoTime(), future);
+        PingRequest pingReq = new PingRequest(nodeCode, nodeId, System.nanoTime(), future);
         pendingPings.put(pingId, pingReq);
 
         long measuredLatency;
         try {
             try {
-                mqttGateway.sendToMqtt(pingTopic, 1, payload);
-                recordPacket(pingTopic, "OUT", 1, payload);
+                for (String ident : pingIdents) {
+                    String pingTopic = prefix + "/" + ident + "/ping";
+                    mqttGateway.sendToMqtt(pingTopic, 1, payload);
+                    recordPacket(pingTopic, "OUT", 1, payload);
+                }
             } catch (Exception e) {
                 recordCommandFailure(nodeCode);
                 String msg = e.getMessage() != null ? e.getMessage() : "";
@@ -765,11 +1019,16 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         EdgeNode refreshed = edgeNodeRepository.findById(nodeId).orElse(node);
         NodeHealthTracker t = getTracker(nodeCode);
         long[] stats = calculateLatencyStats(t.nodeRttBuffer.isEmpty() ? globalRttBuffer : t.nodeRttBuffer);
+        NodeDeviceMeta meta = loadSingleNodeDeviceMeta(refreshed);
 
         return NodeDiagnosticsResponse.builder()
                 .nodeId(refreshed.getId())
                 .nodeCode(nodeCode)
                 .status(refreshed.getStatus() != null ? refreshed.getStatus().name() : "ONLINE")
+                .firmwareVersion(refreshed.getFirmwareVersion())
+                .deviceType(refreshed.getDeviceType())
+                .attachedDeviceCount(meta.count())
+                .attachedDeviceTypes(resolveAttachedDeviceTypes(refreshed, meta))
                 .homeId(homeId)
                 .homeName(homeName)
                 .circuitState(t.state.get())
@@ -788,16 +1047,26 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
 
     @Override
     public void handlePong(String nodeCode, String payload) {
-        if (nodeCode == null || nodeCode.isBlank()) {
+        if ((nodeCode == null || nodeCode.isBlank()) && (payload == null || payload.isBlank())) {
             return;
         }
         String pingId = null;
+        String payloadNodeCode = null;
+        String payloadNodeId = null;
         if (payload != null && !payload.isBlank()) {
             try {
                 Map<String, Object> data = getObjectMapper().readValue(payload, new TypeReference<Map<String, Object>>() {});
                 Object rawId = data.get("pingId");
                 if (rawId != null && !rawId.toString().isBlank()) {
                     pingId = rawId.toString().trim();
+                }
+                Object rawCode = data.get("nodeCode");
+                if (rawCode != null && !rawCode.toString().isBlank()) {
+                    payloadNodeCode = rawCode.toString().trim();
+                }
+                Object rawNodeId = data.get("nodeId");
+                if (rawNodeId != null && !rawNodeId.toString().isBlank()) {
+                    payloadNodeId = rawNodeId.toString().trim();
                 }
             } catch (Exception e) {
                 log.debug("Could not parse pong JSON payload from node {}: {}", nodeCode, e.getMessage());
@@ -810,8 +1079,12 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         }
         if (matched == null) {
             for (Map.Entry<String, PingRequest> entry : pendingPings.entrySet()) {
-                if (nodeCode.equalsIgnoreCase(entry.getValue().nodeCode) && pendingPings.remove(entry.getKey(), entry.getValue())) {
-                    matched = entry.getValue();
+                PingRequest req = entry.getValue();
+                boolean idMatch = matchesPingTarget(req, nodeCode)
+                        || matchesPingTarget(req, payloadNodeCode)
+                        || matchesPingTarget(req, payloadNodeId);
+                if (idMatch && pendingPings.remove(entry.getKey(), req)) {
+                    matched = req;
                     break;
                 }
             }
@@ -827,5 +1100,12 @@ public class MqttDiagnosticsServiceImpl implements MqttDiagnosticsService {
         } else {
             log.debug("[Diagnostics] Unmatched PONG received from node {} (already timed out or unsolicited)", nodeCode);
         }
+    }
+
+    private boolean matchesPingTarget(PingRequest req, String candidate) {
+        if (req == null || candidate == null || candidate.isBlank()) return false;
+        String clean = candidate.trim();
+        if (req.nodeCode != null && clean.equalsIgnoreCase(req.nodeCode)) return true;
+        return req.nodeId != null && clean.equalsIgnoreCase(req.nodeId.toString());
     }
 }

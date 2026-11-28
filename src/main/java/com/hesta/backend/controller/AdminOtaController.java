@@ -32,16 +32,41 @@ public class AdminOtaController {
             @RequestParam("version") String version,
             @RequestParam(value = "releaseNotes", required = false) String releaseNotes,
             HttpServletRequest request) {
-        String requestBaseUrl = ServletUriComponentsBuilder.fromRequestUri(request)
-                .replacePath(null)
-                .build()
-                .toUriString();
+        String requestBaseUrl = resolveRequestBaseUrl(request);
         FirmwarePackageDto result = otaCampaignService.uploadPackage(file, deviceType, version, releaseNotes, requestBaseUrl);
         return ResponseEntity.ok(ApiResponse.<FirmwarePackageDto>builder()
                 .code(1000)
                 .message("Tải lên tệp Firmware OTA thành công")
                 .result(result)
                 .build());
+    }
+
+    private String resolveRequestBaseUrl(HttpServletRequest request) {
+        String forwardedProto = firstHeaderValue(request.getHeader("X-Forwarded-Proto"));
+        String forwardedHost = firstHeaderValue(request.getHeader("X-Forwarded-Host"));
+        if (forwardedHost != null) {
+            String scheme = forwardedProto != null ? forwardedProto : request.getScheme();
+            String forwardedPort = firstHeaderValue(request.getHeader("X-Forwarded-Port"));
+            if (forwardedPort != null && !forwardedHost.contains(":")
+                    && !(("http".equalsIgnoreCase(scheme) && "80".equals(forwardedPort))
+                    || ("https".equalsIgnoreCase(scheme) && "443".equals(forwardedPort)))) {
+                return scheme + "://" + forwardedHost + ":" + forwardedPort;
+            }
+            return scheme + "://" + forwardedHost;
+        }
+        return ServletUriComponentsBuilder.fromRequestUri(request)
+                .replacePath(null)
+                .build()
+                .toUriString();
+    }
+
+    private String firstHeaderValue(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        int comma = raw.indexOf(',');
+        String first = comma >= 0 ? raw.substring(0, comma) : raw;
+        return first.trim().isBlank() ? null : first.trim();
     }
 
     @PostMapping("/packages")
@@ -69,6 +94,15 @@ public class AdminOtaController {
         return ResponseEntity.ok(ApiResponse.<FirmwarePackageDto>builder()
                 .code(1000)
                 .result(pkg)
+                .build());
+    }
+
+    @DeleteMapping("/packages/{id}")
+    public ResponseEntity<ApiResponse<Void>> deletePackage(@PathVariable UUID id) {
+        otaCampaignService.deletePackage(id);
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .code(1000)
+                .message("Đã xóa gói Firmware Package thành công")
                 .build());
     }
 

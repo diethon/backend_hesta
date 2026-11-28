@@ -21,6 +21,9 @@ public interface DeviceService {
     void removeDevice(UUID userId, UUID deviceId);
 
     List<com.hesta.backend.dto.response.DeviceStateHistoryResponse> getDeviceHistory(UUID userId, UUID deviceId);
+    default List<com.hesta.backend.dto.response.HomeActivityItemResponse> getHomeRecentActivity(UUID userId, UUID homeId, int limit) {
+        return java.util.Collections.emptyList();
+    }
     byte[] exportDeviceHistoryCsv(UUID userId, UUID deviceId);
     byte[] exportHomeHistoryCsv(UUID userId, UUID homeId);
     byte[] exportDeviceHistoryExcel(UUID userId, UUID deviceId, java.time.OffsetDateTime from, java.time.OffsetDateTime to);

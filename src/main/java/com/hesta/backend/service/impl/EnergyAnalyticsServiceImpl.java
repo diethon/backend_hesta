@@ -1,5 +1,6 @@
 package com.hesta.backend.service.impl;
 
+import com.hesta.backend.cache.HestaCacheService;
 import com.hesta.backend.dto.command.DeviceStateChangedEvent;
 import com.hesta.backend.dto.response.*;
 import com.hesta.backend.energy.EnergyPowerCalculator;
@@ -45,8 +46,15 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     @Autowired(required = false)
     private DeviceEnergyRollupRepository rollupRepository;
 
+    @Autowired(required = false)
+    private HestaCacheService cacheService;
+
     void setRollupRepository(DeviceEnergyRollupRepository rollupRepository) {
         this.rollupRepository = rollupRepository;
+    }
+
+    void setCacheService(HestaCacheService cacheService) {
+        this.cacheService = cacheService;
     }
 
     // EVN 6-tier residential tariff (VNĐ/kWh)
@@ -63,7 +71,10 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
     private static final long PRICE_TIER_5 = 3197;
     private static final long PRICE_TIER_6 = 3302;
 
-    // Fast In-Memory TTL Cache (30 seconds)
+    private static final String HOME_ANALYTICS_NAMESPACE = "energy:home";
+    private static final String DEVICE_ANALYTICS_NAMESPACE = "energy:device";
+
+    // Fast Cache TTL (30 seconds)
     private static final long CACHE_TTL_MILLIS = 30_000L;
 
     private record CacheEntry<T>(T value, long expiresAt) {
@@ -80,14 +91,23 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         if (homeId != null) {
             String homePrefix = homeId.toString() + ":";
             homeAnalyticsCache.keySet().removeIf(k -> k.startsWith(homePrefix));
+            if (cacheService != null) {
+                cacheService.evictByPrefix(HOME_ANALYTICS_NAMESPACE, homePrefix);
+            }
         }
         if (deviceId != null) {
             String devicePrefix = deviceId.toString() + ":";
             deviceAnalyticsCache.keySet().removeIf(k -> k.startsWith(devicePrefix));
+            if (cacheService != null) {
+                cacheService.evictByPrefix(DEVICE_ANALYTICS_NAMESPACE, devicePrefix);
+            }
         }
     }
 
-    @EventListener
+    @org.springframework.transaction.event.TransactionalEventListener(
+            phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT,
+            fallbackExecution = true)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
     public void onDeviceStateChanged(DeviceStateChangedEvent event) {
         if (event == null) return;
         UUID homeId = event.homeId();
@@ -108,9 +128,19 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 : ("USER:" + (userId != null ? userId.toString() : "anon"));
         String cacheKey = (homeId != null ? homeId.toString() : "null") + ":" + normPeriod + ":" + scopeKey;
 
-        CacheEntry<EnergyAnalyticsResponse> cached = homeAnalyticsCache.get(cacheKey);
-        if (cached != null && !cached.isExpired()) {
-            return cached.value();
+        if (cacheService != null) {
+            if (cacheService.isReadThroughCacheEnabled()) {
+                Optional<EnergyAnalyticsResponse> cachedOpt =
+                        cacheService.get(HOME_ANALYTICS_NAMESPACE, cacheKey, EnergyAnalyticsResponse.class);
+                if (cachedOpt.isPresent()) {
+                    return cachedOpt.get();
+                }
+            }
+        } else {
+            CacheEntry<EnergyAnalyticsResponse> cached = homeAnalyticsCache.get(cacheKey);
+            if (cached != null && !cached.isExpired()) {
+                return cached.value();
+            }
         }
 
         OffsetDateTime now = EnergyPowerCalculator.nowVn();
@@ -133,7 +163,13 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                     .timeSeries(Collections.emptyList())
                     .breakdown(Collections.emptyList())
                     .build();
-            homeAnalyticsCache.put(cacheKey, new CacheEntry<>(emptyResponse, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+            if (cacheService != null) {
+                if (cacheService.isReadThroughCacheEnabled()) {
+                    cacheService.put(HOME_ANALYTICS_NAMESPACE, cacheKey, emptyResponse, Duration.ofMillis(CACHE_TTL_MILLIS));
+                }
+            } else {
+                homeAnalyticsCache.put(cacheKey, new CacheEntry<>(emptyResponse, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+            }
             return emptyResponse;
         }
 
@@ -151,6 +187,19 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         Map<UUID, List<DeviceStateHistory>> historyByDevice = allHistories.stream()
                 .collect(Collectors.groupingBy(h -> h.getDevice().getId()));
 
+        List<UUID> rollupDeviceIds = new ArrayList<>();
+        List<UUID> rawDeviceIds = new ArrayList<>();
+        for (Device device : devices) {
+            List<DeviceEnergyRollup> devRollups = rollupsByDevice.getOrDefault(device.getId(), Collections.emptyList());
+            if (!devRollups.isEmpty() && from.isBefore(currentHourStart)) {
+                rollupDeviceIds.add(device.getId());
+            } else {
+                rawDeviceIds.add(device.getId());
+            }
+        }
+        Map<UUID, DeviceStateHistory> rawLastBefore = loadLatestBeforeMap(rawDeviceIds, from);
+        Map<UUID, DeviceStateHistory> tailLastBefore = loadLatestBeforeMap(rollupDeviceIds, liveTailFrom);
+
         double totalHomeKwh = 0.0;
         double currentHourHomeKwh = 0.0;
         int activeDeviceCount = 0;
@@ -165,11 +214,11 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             DeviceEnergyResult devResult;
             double liveHourKwh = 0.0;
             if (!devRollups.isEmpty() && from.isBefore(currentHourStart)) {
-                DeviceEnergyResult tailResult = calculateDeviceEnergy(device, deviceHistories, liveTailFrom, now);
+                DeviceEnergyResult tailResult = calculateDeviceEnergy(device, deviceHistories, liveTailFrom, now, tailLastBefore);
                 liveHourKwh = tailResult.kwh;
                 devResult = mergeRollupsAndLiveTail(device, devRollups, tailResult);
             } else {
-                devResult = calculateDeviceEnergy(device, deviceHistories, from, now);
+                devResult = calculateDeviceEnergy(device, deviceHistories, from, now, rawLastBefore);
                 for (ActiveEnergySegment seg : devResult.segments) {
                     OffsetDateTime s = seg.start().isAfter(liveTailFrom) ? seg.start() : liveTailFrom;
                     OffsetDateTime e = seg.end().isBefore(now) ? seg.end() : now;
@@ -235,9 +284,18 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         Map<UUID, List<DeviceEnergyRollup>> prevRollupsByDevice = prevRollups.stream()
                 .collect(Collectors.groupingBy(DeviceEnergyRollup::getDeviceId));
 
-        List<DeviceStateHistory> prevHistories = historyRepository.findByDeviceIdsAndChangedAtBetween(deviceIds, prevFrom, from);
-        Map<UUID, List<DeviceStateHistory>> prevHistoryByDevice = prevHistories.stream()
-                .collect(Collectors.groupingBy(h -> h.getDevice().getId()));
+        List<UUID> prevFallbackDeviceIds = devices.stream()
+                .map(Device::getId)
+                .filter(id -> prevRollupsByDevice.getOrDefault(id, Collections.emptyList()).isEmpty())
+                .toList();
+        Map<UUID, List<DeviceStateHistory>> prevHistoryByDevice = Collections.emptyMap();
+        Map<UUID, DeviceStateHistory> prevLastBefore = Collections.emptyMap();
+        if (!prevFallbackDeviceIds.isEmpty()) {
+            prevHistoryByDevice = historyRepository.findByDeviceIdsAndChangedAtBetween(prevFallbackDeviceIds, prevFrom, from)
+                    .stream()
+                    .collect(Collectors.groupingBy(h -> h.getDevice().getId()));
+            prevLastBefore = loadLatestBeforeMap(prevFallbackDeviceIds, prevFrom);
+        }
         double prevTotalHomeKwh = 0.0;
         for (Device device : devices) {
             List<DeviceEnergyRollup> devPrevRollups = prevRollupsByDevice.getOrDefault(device.getId(), Collections.emptyList());
@@ -249,7 +307,7 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 }
             } else {
                 List<DeviceStateHistory> devHistories = prevHistoryByDevice.getOrDefault(device.getId(), Collections.emptyList());
-                prevTotalHomeKwh += calculateDeviceEnergy(device, devHistories, prevFrom, from).kwh;
+                prevTotalHomeKwh += calculateDeviceEnergy(device, devHistories, prevFrom, from, prevLastBefore).kwh;
             }
         }
         double compPercent = (prevTotalHomeKwh > 0.001)
@@ -276,7 +334,13 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 .breakdown(breakdownList)
                 .build();
 
-        homeAnalyticsCache.put(cacheKey, new CacheEntry<>(response, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        if (cacheService != null) {
+            if (cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(HOME_ANALYTICS_NAMESPACE, cacheKey, response, Duration.ofMillis(CACHE_TTL_MILLIS));
+            }
+        } else {
+            homeAnalyticsCache.put(cacheKey, new CacheEntry<>(response, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        }
         return response;
     }
 
@@ -297,9 +361,19 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         String normPeriod = period == null ? "30D" : period.trim().toUpperCase();
         String cacheKey = (deviceId != null ? deviceId.toString() : "null") + ":" + normPeriod;
 
-        CacheEntry<DeviceEnergyBreakdown> cached = deviceAnalyticsCache.get(cacheKey);
-        if (cached != null && !cached.isExpired()) {
-            return cached.value();
+        if (cacheService != null) {
+            if (cacheService.isReadThroughCacheEnabled()) {
+                Optional<DeviceEnergyBreakdown> cachedOpt =
+                        cacheService.get(DEVICE_ANALYTICS_NAMESPACE, cacheKey, DeviceEnergyBreakdown.class);
+                if (cachedOpt.isPresent()) {
+                    return cachedOpt.get();
+                }
+            }
+        } else {
+            CacheEntry<DeviceEnergyBreakdown> cached = deviceAnalyticsCache.get(cacheKey);
+            if (cached != null && !cached.isExpired()) {
+                return cached.value();
+            }
         }
 
         OffsetDateTime now = EnergyPowerCalculator.nowVn();
@@ -334,7 +408,13 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
                 .wattage(result.baseWattage)
                 .build();
 
-        deviceAnalyticsCache.put(cacheKey, new CacheEntry<>(breakdown, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        if (cacheService != null) {
+            if (cacheService.isReadThroughCacheEnabled()) {
+                cacheService.put(DEVICE_ANALYTICS_NAMESPACE, cacheKey, breakdown, Duration.ofMillis(CACHE_TTL_MILLIS));
+            }
+        } else {
+            deviceAnalyticsCache.put(cacheKey, new CacheEntry<>(breakdown, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+        }
         return breakdown;
     }
 
@@ -439,11 +519,35 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
         return new DeviceEnergyResult(totalKwh, totalOnHours, tailResult.isOnNow, tailResult.baseWattage, segments);
     }
 
+    private Map<UUID, DeviceStateHistory> loadLatestBeforeMap(List<UUID> deviceIds, OffsetDateTime beforeTime) {
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<DeviceStateHistory> list = historyRepository.findLatestBeforeByDeviceIds(deviceIds, beforeTime);
+        if (list == null || list.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<UUID, DeviceStateHistory> result = new HashMap<>();
+        for (DeviceStateHistory h : list) {
+            if (h.getDevice() != null && h.getDevice().getId() != null) {
+                result.merge(h.getDevice().getId(), h, (a, b) ->
+                        (a.getChangedAt() != null && b.getChangedAt() != null && b.getChangedAt().isAfter(a.getChangedAt())) ? b : a);
+            }
+        }
+        return result;
+    }
+
     /**
      * Thuật toán Tích Phân Số (Riemann Sum Integration) trên Timeline lịch sử trạng thái
      */
     private DeviceEnergyResult calculateDeviceEnergy(Device device, List<DeviceStateHistory> histories,
                                                      OffsetDateTime startTime, OffsetDateTime endTime) {
+        return calculateDeviceEnergy(device, histories, startTime, endTime, null);
+    }
+
+    private DeviceEnergyResult calculateDeviceEnergy(Device device, List<DeviceStateHistory> histories,
+                                                     OffsetDateTime startTime, OffsetDateTime endTime,
+                                                     Map<UUID, DeviceStateHistory> preloadedLastBefore) {
         int baseWattage = EnergyPowerCalculator.resolveBaseWattage(device);
         boolean isOffline = device.getStatus() == DeviceStatus.OFFLINE
                 || device.getStatus() == DeviceStatus.UNKNOWN;
@@ -463,8 +567,9 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
 
         if (histories.isEmpty()) {
             if (isCurrentlyOn) {
-                Optional<DeviceStateHistory> lastBefore = historyRepository
-                        .findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(device.getId(), startTime);
+                Optional<DeviceStateHistory> lastBefore = preloadedLastBefore != null
+                        ? Optional.ofNullable(preloadedLastBefore.get(device.getId()))
+                        : historyRepository.findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(device.getId(), startTime);
 
                 OffsetDateTime onSince = startTime;
                 Map<String, Object> stateMap = device.getCurrentState();
@@ -508,8 +613,9 @@ public class EnergyAnalyticsServiceImpl implements EnergyAnalyticsService {
             currentActiveState = histories.get(0).getPreviousState();
             currentStateIsOn = EnergyPowerCalculator.isStateOn(device, currentActiveState);
         } else {
-            Optional<DeviceStateHistory> lastBefore = historyRepository
-                    .findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(device.getId(), startTime);
+            Optional<DeviceStateHistory> lastBefore = preloadedLastBefore != null
+                    ? Optional.ofNullable(preloadedLastBefore.get(device.getId()))
+                    : historyRepository.findFirstByDeviceIdAndChangedAtLessThanOrderByChangedAtDesc(device.getId(), startTime);
             if (lastBefore.isPresent() && lastBefore.get().getNewState() != null) {
                 currentActiveState = lastBefore.get().getNewState();
                 currentStateIsOn = EnergyPowerCalculator.isStateOn(device, currentActiveState);

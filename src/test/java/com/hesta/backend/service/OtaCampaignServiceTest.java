@@ -138,10 +138,13 @@ class OtaCampaignServiceTest {
         assertEquals("RUNNING_CANARY_10", campaign.getStatus());
         assertEquals(2, campaign.getTotalNodes());
 
-        // Wave 1 should dispatch only 1 node (10% ceil(2*0.1)=1 -> node-01)
+        // Wave 1 should dispatch only 1 node (10% ceil(2*0.1)=1 -> node-01) across dual topics (nodeCode + nodeId)
         ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
-        verify(mqttGateway, times(1)).sendToMqtt(topicCaptor.capture(), eq(1), anyString());
-        assertEquals("hesta/nodes/node-01/ota/notify", topicCaptor.getValue());
+        verify(mqttGateway, times(2)).sendToMqtt(topicCaptor.capture(), eq(1), anyString());
+        assertTrue(topicCaptor.getAllValues().containsAll(List.of(
+                "hesta/nodes/node-01/ota/notify",
+                "hesta/nodes/" + node1.getId() + "/ota/notify"
+        )));
 
         // Simulate Wave 1 success from node-01 -> must advance to Wave 2 (node-02) and send MQTT notify to node-02!
         OtaCampaignEntity entity = OtaCampaignEntity.builder()
@@ -165,5 +168,31 @@ class OtaCampaignServiceTest {
 
         assertEquals("v2.1.0", node1.getFirmwareVersion());
         verify(mqttGateway, times(1)).sendToMqtt(eq("hesta/nodes/node-02/ota/notify"), eq(1), anyString());
+        verify(mqttGateway, times(1)).sendToMqtt(eq("hesta/nodes/" + node2.getId() + "/ota/notify"), eq(1), anyString());
+    }
+
+    @Test
+    @DisplayName("Should target only explicitly selected ONLINE nodes when targetNodeIds is provided")
+    void testTargetedOtaCampaignSelection() {
+        EdgeNode extraNode = EdgeNode.builder().id(UUID.randomUUID()).nodeCode("node-03").deviceType("LIGHT").status(EdgeNodeStatus.ONLINE).build();
+        when(packageRepository.findById(savedPackage.getId())).thenReturn(Optional.of(savedPackage));
+        when(campaignRepository.existsActiveCampaignForDeviceType("ESP32_RELAY")).thenReturn(false);
+        when(edgeNodeRepository.findAll()).thenReturn(List.of(node1, node2, extraNode));
+        when(campaignRepository.save(any(OtaCampaignEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(campaignNodeRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CreateOtaCampaignRequest req = CreateOtaCampaignRequest.builder()
+                .name("Targeted Single Node")
+                .firmwarePackageId(savedPackage.getId())
+                .rolloutStrategy("IMMEDIATE")
+                .targetNodeIds(List.of(node2.getId()))
+                .build();
+
+        OtaCampaignDto campaign = otaCampaignService.createAndStartCampaign(req);
+        assertEquals(1, campaign.getTotalNodes());
+        verify(mqttGateway, times(1)).sendToMqtt(eq("hesta/nodes/node-02/ota/notify"), eq(1), anyString());
+        verify(mqttGateway, times(1)).sendToMqtt(eq("hesta/nodes/" + node2.getId() + "/ota/notify"), eq(1), anyString());
+        verify(mqttGateway, never()).sendToMqtt(eq("hesta/nodes/node-01/ota/notify"), eq(1), anyString());
+        verify(mqttGateway, never()).sendToMqtt(eq("hesta/nodes/" + node1.getId() + "/ota/notify"), eq(1), anyString());
     }
 }
